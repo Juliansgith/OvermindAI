@@ -246,7 +246,7 @@ local function FallbackRole(kind, plan, eco)
             local bomber = rolePlan.AirBomber or {}
             if (emerg.EnemyIndirectHeavy or emerg.EnemyT2Push)
                 and readyAirFactories >= 1
-                and (fighter.CurrentUnits or 0) >= 2
+                and (fighter.CurrentUnits or 0) >= 1
                 and ((bomber.UnitGap or 0) > 0 or (bomber.CurrentUnits or 0) < math.max(2, math.min(4, bomber.DesiredUnits or 0))) then
                 return 'AirBomber'
             end
@@ -322,17 +322,17 @@ local function ComputeRoleUtility(roleName, entry, plan, eco, kind)
         utility = utility - ((emerg.BomberPanic or emerg.ExposedMexAirRaid) and 24 or 0)
         utility = utility - (emerg.VisionPanic and 18 or 0)
         utility = utility - (((confidence.Global or 0) < 0.5) and 10 or 0)
-        utility = utility + (bomberCounterWindow and 24 or 0)
-        utility = utility + (emerg.EnemyIndirectHeavy and 12 or 0)
-        utility = utility + (emerg.EnemyT2Push and 12 or 0)
-        utility = utility + (((readyAirFactories >= 1) and bomberCounterWindow) and 12 or 0)
-        if bomberCounterWindow and (fighterEntry.CurrentUnits or 0) < math.max(2, math.min(4, entry.DesiredUnits or 0)) then
-            utility = utility - 8
+        utility = utility + (bomberCounterWindow and 28 or 0)
+        utility = utility + (emerg.EnemyIndirectHeavy and 16 or 0)
+        utility = utility + (emerg.EnemyT2Push and 16 or 0)
+        utility = utility + (((readyAirFactories >= 1) and bomberCounterWindow) and 16 or 0)
+        if bomberCounterWindow and (fighterEntry.CurrentUnits or 0) < math.max(1, math.min(3, entry.DesiredUnits or 0)) then
+            utility = utility - 4
         end
     elseif roleName == 'AirScout' then
         utility = utility + (emerg.VisionPanic and 16 or 0)
-        utility = utility - (emerg.CounterAirWindow and 8 or 0)
-        utility = utility - (((emerg.EnemyLowAirThreat and (emerg.EnemyIndirectHeavy or emerg.EnemyT2Push)) and not emerg.CounterAirWindow) and 6 or 0)
+        utility = utility - (emerg.CounterAirWindow and 10 or 0)
+        utility = utility - (((emerg.EnemyLowAirThreat and (emerg.EnemyIndirectHeavy or emerg.EnemyT2Push)) and not emerg.CounterAirWindow) and 10 or 0)
     elseif roleName == 'SeaAA' then
         utility = utility + (emerg.AirPanic and 8 or 0)
     end

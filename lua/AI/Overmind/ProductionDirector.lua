@@ -1057,6 +1057,17 @@ local function DecideRolePlan(runtime, current, constraints, demand, budget, con
             8)
         bomberDesired = math.max(bomberDesired, math.min(strikeBomberFloor, math.max(2, math.floor(math.max(airTotal, 4) * 0.55))))
     end
+    if airEnabled
+        and current.Factories.Air.Ready >= 1
+        and constraints.EnemyLowAirThreat
+        and (constraints.EnemyIndirectHeavy or constraints.EnemyT2Push)
+        and (constraints.ApproachReal or constraints.BasePressure >= 0.12 or constraints.FrontPressure >= 0.18)
+        and not constraints.AirPanic
+        and not constraints.BomberPanic
+        and not constraints.ExposedMexAirRaid then
+        local earlyBomberFloor = Clamp(2 + math.min(2, current.Factories.Air.Ready - 1), 2, 4)
+        bomberDesired = math.max(bomberDesired, earlyBomberFloor)
+    end
     bomberDesired = Clamp(bomberDesired, 0, 8)
     local fighterDesired = airEnabled and Clamp(airTotal - airScoutDesired - bomberDesired, 1, 28) or 0
     if constraints.BomberWatch then
@@ -1180,6 +1191,9 @@ local function DecideCapacityPlan(runtime, current, constraints, rolePlan)
         and engineerUnits >= 4
         and not constraints.EcoCrash
         and not constraints.CriticalFactory
+    local lowAirCounterWindow = constraints.EnemyLowAirThreat
+        and (constraints.EnemyIndirectHeavy or constraints.EnemyT2Push)
+        and (constraints.ApproachReal or constraints.BasePressure >= 0.12 or constraints.FrontPressure >= 0.18)
     local counterAirFactory = constraints.CounterAirWindow
         and current.Factories.Air.Total <= 0
         and current.Factories.Land.Ready >= 2
@@ -1311,6 +1325,9 @@ local function DecideCapacityPlan(runtime, current, constraints, rolePlan)
     if liveCombatWindow and current.Factories.Land.Total >= 2 then
         landTarget = math.max(landTarget, 2)
     end
+    if liveCombatWindow and current.Factories.Land.Ready >= 3 then
+        landTarget = math.max(landTarget, 3)
+    end
     if secondLandEcoReady and not emergencyAirFactory then
         landTarget = math.max(landTarget, 2)
     end
@@ -1325,6 +1342,30 @@ local function DecideCapacityPlan(runtime, current, constraints, rolePlan)
     end
     if counterAirFactory then
         airTarget = math.max(airTarget, 1)
+    end
+    if current.Factories.Air.Total > 0
+        and current.Factories.Land.Ready < 4
+        and not constraints.AirPanic
+        and not emergencyAirFactory
+        and not constraints.BomberPanic
+        and not constraints.ExposedMexAirRaid then
+        airTarget = math.min(airTarget, 1)
+    end
+    if current.Factories.Land.Ready < 3
+        and current.Factories.Air.Total <= 0
+        and not emergencyAirFactory
+        and not threatenedAirUnlock
+        and not counterAirFactory then
+        airTarget = 0
+    end
+    if current.Factories.Land.Ready < 4
+        and not emergencyAirFactory
+        and not constraints.AirPanic
+        and not constraints.BomberPanic
+        and not constraints.ExposedMexAirRaid
+        and not constraints.CounterAirWindow
+        and not lowAirCounterWindow then
+        airTarget = math.min(airTarget, math.min(1, current.Factories.Air.Total))
     end
 
     if constraints.NavyLowValue then

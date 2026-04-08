@@ -386,6 +386,11 @@ function Module.Update(aiBrain, now)
     if acuDist > 8 or localAcuThreat > (homeThreat + 1) or runtime.ACURole == 'push' then
         acuEscortNeed = Clamp(2 + math.floor(acuDist / 12) + ((localAcuThreat > 2) and 2 or 0), 2, 8)
     end
+    if (frontCrisis or assetSiege) and acuDist <= 16 and localAcuThreat <= (homeThreat + 1.4) then
+        acuEscortNeed = math.max(0, acuEscortNeed - 2)
+    elseif (frontCrisis or assetSiege) and acuDist <= 22 and localAcuThreat <= (homeThreat + 2.0) then
+        acuEscortNeed = math.max(0, acuEscortNeed - 1)
+    end
     local raiderNeed = 0
     if raidPos and (intel.BestRaidZoneKey or false) then
         raiderNeed = Clamp(2 + math.floor(staleZones / 2) + math.min(3, table.getn(scouts)), 2, 8)
@@ -441,9 +446,9 @@ function Module.Update(aiBrain, now)
     local minimumMainlineCommit = 0
     if landCombatTotal >= 4 then
         minimumMainlineCommit = Clamp(
-            math.floor(landCombatTotal * ((frontCrisis or assetSiege) and 0.52 or ((approachClose or contestedZones >= 2) and 0.4 or 0.3)))
-                + (frontCrisis and 2 or 0)
-                + (assetSiege and 2 or 0)
+            math.floor(landCombatTotal * ((frontCrisis or assetSiege) and 0.64 or ((approachClose or contestedZones >= 2) and 0.5 or 0.34)))
+                + (frontCrisis and 3 or 0)
+                + (assetSiege and 3 or 0)
                 + (approachClose and 1 or 0),
             3,
             math.max(3, landCombatTotal - 1))
@@ -456,12 +461,12 @@ function Module.Update(aiBrain, now)
         local currentGuardNeed = baseGuardDirectNeed + baseGuardAANeed
         if currentGuardNeed > maxGuardTotal then
             local overflow = currentGuardNeed - maxGuardTotal
-            local reducibleDirect = math.max(0, baseGuardDirectNeed - 2)
+            local reducibleDirect = math.max(0, baseGuardDirectNeed - ((frontCrisis or assetSiege) and 1 or 2))
             local directCut = math.min(reducibleDirect, overflow)
             baseGuardDirectNeed = baseGuardDirectNeed - directCut
             overflow = overflow - directCut
             if overflow > 0 then
-                local reducibleAA = math.max(0, baseGuardAANeed - 1)
+                local reducibleAA = math.max(0, baseGuardAANeed - ((frontCrisis or assetSiege) and 0 or 1))
                 local aaCut = math.min(reducibleAA, overflow)
                 baseGuardAANeed = baseGuardAANeed - aaCut
             end

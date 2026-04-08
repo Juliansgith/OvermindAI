@@ -1014,12 +1014,27 @@ function EnforceCommanderSafety(aiBrain, now)
         and localThreat <= (homeThreat + 3.2)
         and not lowHealth
         and not catastrophicOverextend
+    local heavilyEscortedNearHome = distance <= math.max(16, maxDistance + 4)
+        and escortCount >= 8
+        and healthRatio >= 0.84
+        and localThreat <= (homeThreat + 4.0)
+        and enemyRaiders <= 2
+        and not lowHealth
+        and not catastrophicOverextend
     if stableEscortedPerimeter and not enemyContactUnsafe and not noMansLand then
         shouldRecall = false
         idleFar = false
         stuckFar = false
         earlyHardLeash = false
         raidRecall = false
+    end
+    if heavilyEscortedNearHome and not enemyContactUnsafe and not noMansLand then
+        shouldRecall = false
+        idleFar = false
+        stuckFar = false
+        earlyHardLeash = false
+        raidRecall = false
+        enemyContactUnsafe = false
     end
 
     local canInterruptConstruction = catastrophicOverextend
@@ -1059,6 +1074,10 @@ function EnforceCommanderSafety(aiBrain, now)
             return
         end
         if stableEscortedPerimeter and not recallEscalated and sinceRecall < 24 then
+            runtime.LastAcuDistanceFromBase = distance
+            return
+        end
+        if heavilyEscortedNearHome and not recallEscalated and sinceRecall < 30 then
             runtime.LastAcuDistanceFromBase = distance
             return
         end
