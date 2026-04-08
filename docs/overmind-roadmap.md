@@ -520,6 +520,89 @@ These are the highest-value next actions from the current state:
   Current state: `ForceDirector` now owns persistent tasks, preserves task membership across updates, and `Combat` now issues orders against those tasks directly. Further refinement now belongs to Workstream C rather than the immediate-priority list.
 - [x] begin extracting production policy out of `T1Director` into a broader production director
 
+## Near-Term Stabilization Plan
+
+This section is the current execution plan for the next practical improvement window. It is narrower than the full roadmap and is meant to address the live replay failures that still dominate performance.
+
+Observed failure pattern:
+
+- factory target overshoots too fast once early eco comes online
+- unfinished factory shells are not staffed hard enough once opened
+- ACU safety still over-triggers and burns time in recall loops
+- mainline commitment remains too soft once home/front pressure arrives
+- extractor staging now exists, but must remain validated before more tech-policy changes are piled on top
+
+Recommended rollout:
+
+1. `v97`: stabilize factory growth and factory completion
+2. `v98`: reduce ACU safety churn with stronger hysteresis
+3. `v99`: tighten force commitment and mainline allocation under pressure
+
+### v97: Factory Ramp And Completion
+
+Goals:
+
+- stop `2 -> 5/6 land` bursts that the economy cannot finish
+- make unfinished factories complete before new shells are opened
+
+Changes:
+
+- split factory target from factory open permission
+- allow quick `1 -> 2 -> 3` land scaling
+- require stronger conditions for `3 -> 4+`
+- block new factory shells while unfinished factory staffing is inadequate
+- treat mid/high-fraction unfinished factories as critical build-power sinks
+
+Success criteria:
+
+- by `6-8` minutes, the AI has `2-3` ready land factories instead of `1`, but is not sitting at `5/6` total with only `2` ready
+- unfinished factory tasks show assigned builders instead of repeated `asn=0/2`
+
+### v98: ACU Safety Hysteresis
+
+Goals:
+
+- stop repeated recall spam when the ACU is already near home and escorted
+
+Changes:
+
+- add per-reason cooldowns to recall triggers
+- require stronger worsening threat before repeating the same recall
+- separate `hold position` from `hard recall`
+- reduce sensitivity when the ACU is inside defended space with escorts nearby
+
+Success criteria:
+
+- substantially fewer `panic_leash_recall`, `opening_recall`, `raid_cover_recall`, and `enemy_contact_recall` loops in the `4-10` minute window
+- ACU remains responsive to real danger, but stops wasting time on repeated soft retreats
+
+### v99: Mainline Commitment
+
+Goals:
+
+- stop over-parking land in guard/holding states while the front is live
+
+Changes:
+
+- raise minimum `main` share under confirmed home/front pressure
+- lower guard cap when cluster confidence is high
+- pull parked or holding land into a single response group more aggressively
+
+Success criteria:
+
+- `FORCE` shows a meaningful `main` group under pressure instead of mostly `guard`
+- base-edge attacks pull a coherent local response instead of scattered unit trickle
+
+### Extractor Validation Constraint
+
+Before further tech-policy work:
+
+- keep validating that `T1 -> T2` upgrades happen before `T2 -> T3`
+- keep validating that remote upgrades do not outrun local/core upgrades
+- keep validating that `T2 -> T3` stays blocked during mass/energy stress or factory recovery
+
+This avoids mixing tech regressions with the current factory/ACU/force stabilization work.
+
 ## Recent Progress
 
 Recent architecture-first work completed or materially advanced the following:
