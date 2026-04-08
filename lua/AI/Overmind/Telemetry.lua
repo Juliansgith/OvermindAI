@@ -371,6 +371,7 @@ function Tune(aiBrain, now)
     if now - (runtime.LastMetricsLogTime or -999) >= 60 then
         runtime.LastMetricsLogTime = now
         local recovery = runtime.Recovery or {}
+        local planner = runtime.StrategicPlanner or {}
         LOG(string.format('*OVERMIND METRICS A%d goal=%s strat=%s/%s/%s:%.2f posture=%s pivot=%s conf=%.2f prod=%s float=%.2f estall=%.2f mstall=%.2f aggr=%.2f stagn=%.1f rf=%d rs=%d',
             aiBrain:GetArmyIndex(),
             runtime.StrategyGoal or 'hold',
