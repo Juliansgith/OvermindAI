@@ -1,0 +1,41 @@
+# Windows / OS noise
+Thumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+
+# General editor noise
+.idea/
+.vscode/
+*.code-workspace
+*.swp
+*.swo
+*~
+
+# Visual Studio / Windows tooling noise
+*.suo
+*.user
+*.userossc
+*.sln.docstates
+
+# Python caches and virtualenvs used by local tooling
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Common local caches
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Temporary / patch artifacts
+*.tmp
+*.temp
+*.bak
+*.orig
+*.rej
+
+# Local logs and ad-hoc exports
+*.log
+*.zip
+*.7z
