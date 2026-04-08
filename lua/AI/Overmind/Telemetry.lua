@@ -113,6 +113,11 @@ function Capture(aiBrain, now)
         Time = now,
         Goal = runtime.StrategyGoal or 'hold',
         Posture = opp.Posture or 'unknown',
+        Pivot = opp.LikelyPivot or 'balanced',
+        OppConfidence = (opp.Confidence and opp.Confidence.Global) or 0,
+        OppFrontConfidence = (opp.Confidence and opp.Confidence.Front) or 0,
+        OppFrontPressure = (opp.Theaters and opp.Theaters.Front and opp.Theaters.Front.PressureEMA) or 0,
+        OppHomePressure = (opp.Theaters and opp.Theaters.Home and opp.Theaters.Home.PressureEMA) or 0,
         Aggression = runtime.Aggression or 1,
         MassStored = eco.MassStored or 0,
         EnergyStored = eco.EnergyStored or 0,
@@ -355,10 +360,12 @@ function Tune(aiBrain, now)
     if now - (runtime.LastMetricsLogTime or -999) >= 60 then
         runtime.LastMetricsLogTime = now
         local recovery = runtime.Recovery or {}
-        LOG(string.format('*OVERMIND METRICS A%d goal=%s posture=%s prod=%s float=%.2f estall=%.2f mstall=%.2f aggr=%.2f stagn=%.1f rf=%d rs=%d',
+        LOG(string.format('*OVERMIND METRICS A%d goal=%s posture=%s pivot=%s conf=%.2f prod=%s float=%.2f estall=%.2f mstall=%.2f aggr=%.2f stagn=%.1f rf=%d rs=%d',
             aiBrain:GetArmyIndex(),
             runtime.StrategyGoal or 'hold',
             (runtime.OpponentModel and runtime.OpponentModel.Posture) or 'unknown',
+            (runtime.OpponentModel and runtime.OpponentModel.LikelyPivot) or 'balanced',
+            ((runtime.OpponentModel and runtime.OpponentModel.Confidence and runtime.OpponentModel.Confidence.Global) or 0),
             ((runtime.ProductionDirector and runtime.ProductionDirector.Mode) or 'none'),
             floatRate,
             energyStallRate,

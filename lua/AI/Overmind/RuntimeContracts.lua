@@ -41,7 +41,14 @@ local DeclaredStateInitializers = {
         }
     end,
     OpponentModel = function()
-        return {}
+        return {
+            Theaters = {},
+            Trends = {},
+            Confidence = {},
+            Confirmed = {},
+            Inferred = {},
+            LastLogTime = -999,
+        }
     end,
     ForceDirector = function()
         return {
