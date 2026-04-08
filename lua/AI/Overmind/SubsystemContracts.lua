@@ -2,6 +2,7 @@ local OvermindMemory = import('/mods/OvermindAI/lua/AI/Overmind/Memory.lua')
 local OvermindEconomy = import('/mods/OvermindAI/lua/AI/Overmind/Economy.lua')
 local OvermindRuntimeContracts = import('/mods/OvermindAI/lua/AI/Overmind/RuntimeContracts.lua')
 local OvermindCombat = import('/mods/OvermindAI/lua/AI/Overmind/Combat.lua')
+local OvermindCombatExecution = import('/mods/OvermindAI/lua/AI/Overmind/CombatExecution.lua')
 local OvermindBudget = import('/mods/OvermindAI/lua/AI/Overmind/Budget.lua')
 local OvermindZoneGraph = import('/mods/OvermindAI/lua/AI/Overmind/ZoneGraph.lua')
 local OvermindZoneModel = import('/mods/OvermindAI/lua/AI/Overmind/ZoneModel.lua')
@@ -109,7 +110,7 @@ local ActionGroups = {
     },
     tactical = {
         BuildAction({ Name = 'Tactical', Label = 'tactical', Group = 'tactical', ModuleRef = OvermindTactical, Outputs = { 'LastTacticalUpdate' } }),
-        BuildAction({ Name = 'CombatPressure', Label = 'combat-pressure', Group = 'tactical', Method = 'RunPressureCycle', ModuleRef = OvermindCombat, Inputs = { 'ForceDirector', 'StrategyGoal', 'ZoneGraph', 'IntelModel', 'EnemyClusterTracker' }, Outputs = { 'CombatPressureState' } }),
+        BuildAction({ Name = 'CombatPressure', Label = 'combat-pressure', Group = 'tactical', Method = 'RunPressureCycle', ModuleRef = OvermindCombatExecution, Inputs = { 'ForceDirector', 'StrategyGoal', 'ZoneGraph', 'IntelModel', 'EnemyClusterTracker' }, Outputs = { 'CombatPressureState' } }),
         BuildAction({ Name = 'CommanderSafety', Label = 'acu-safety', Group = 'tactical', Method = 'EnforceCommanderSafety', ModuleRef = OvermindCombat, Inputs = { 'ACUState', 'RaidDefense', 'IntelModel' }, Outputs = { 'ACUState', 'LastAcuDistanceFromBase' } }),
     },
     ['macro-control'] = {
