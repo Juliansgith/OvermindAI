@@ -2476,6 +2476,7 @@ function ShouldBuildT1FactoryType(aiBrain, factoryType, locationType)
     end
 
     local kind = string.lower(factoryType or '')
+    local director = GetProductionDirector(aiBrain)
     local now = GetGameTimeSeconds()
     local landFactories = GetExistingUnitCount(aiBrain, categories.FACTORY * categories.LAND * categories.STRUCTURE)
     local airFactories = GetExistingUnitCount(aiBrain, categories.FACTORY * categories.AIR * categories.STRUCTURE)
