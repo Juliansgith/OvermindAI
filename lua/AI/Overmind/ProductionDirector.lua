@@ -1197,10 +1197,18 @@ local function DecideCapacityPlan(runtime, current, constraints, rolePlan)
     local airRoleGap = SumRoleField(rolePlan, { 'AirFighter', 'AirBomber', 'AirScout' }, 'StrengthGap')
     local seaRoleGap = SumRoleField(rolePlan, { 'SeaSurface', 'SeaSub', 'SeaAA' }, 'StrengthGap')
     local engineerUnits = (current.RoleUnits and current.RoleUnits.Engineer) or 0
+    local factoryTask = current.FactoryTask or {}
     local engineerGap = (rolePlan.Engineer and rolePlan.Engineer.UnitGap) or 0
     local mexReady = (((current.Eco or {}).Mex or {}).Ready) or 0
     local powerReady = (((current.Eco or {}).Power or {}).Ready) or 0
     local radarReady = (current.Structures and current.Structures.Radar) or 0
+    local factoryTaskDeficit = math.max(0, (factoryTask.RequiredBuilders or 0) - (factoryTask.AssignedBuilders or 0))
+    local unfinishedLandFactory = factoryTask.Active and factoryTask.Domain == 'Land'
+    local unfinishedLandUnderstaffed = unfinishedLandFactory and factoryTaskDeficit > 0
+    local unfinishedLandProgressed = unfinishedLandFactory and (factoryTask.Fraction or 1) >= 0.3
+    local readyLandFactories = current.Factories.Land.Ready or 0
+    local totalLandFactories = current.Factories.Land.Total or 0
+    local pendingLandFactories = current.Factories.Land.Pending or 0
     local powerBufferLow = constraints.PowerBufferLow == true
     local emergencyAirFactory = (constraints.BomberPanic or constraints.ExposedMexAirRaid)
         and powerReady > 0
@@ -1272,8 +1280,8 @@ local function DecideCapacityPlan(runtime, current, constraints, rolePlan)
     local secondLandLatched = state.SecondLandFloorLatched == true
     local tempoRecoveryWindow = now >= 300
         and secondLandLatched
-        and current.Factories.Land.Total >= 2
-        and current.Factories.Land.Ready >= 2
+        and totalLandFactories >= 2
+        and readyLandFactories >= 2
         and mexReady >= math.max(7, constraints.StarterMexFloor or 5)
         and powerReady >= math.max(5, constraints.StarterPowerFloor or 2)
         and engineerUnits >= math.max(8, constraints.StarterEngineerFloor or 6)
@@ -1281,9 +1289,12 @@ local function DecideCapacityPlan(runtime, current, constraints, rolePlan)
         and not powerBufferLow
         and not constraints.EcoCrash
         and not constraints.CriticalFactory
+        and not unfinishedLandUnderstaffed
         and not constraints.UnitCapPressure
     local sustainedTempoWindow = tempoRecoveryWindow
         and now >= 450
+        and readyLandFactories >= 3
+        and pendingLandFactories <= 0
         and mexReady >= math.max(8, constraints.StarterMexFloor or 5)
         and powerReady >= math.max(7, constraints.StarterPowerFloor or 2)
         and engineerUnits >= math.max(10, constraints.StarterEngineerFloor or 6)
@@ -1372,10 +1383,10 @@ local function DecideCapacityPlan(runtime, current, constraints, rolePlan)
     if planner.ForceAirAnswer and landCoreOnline and not constraints.EcoCrash and powerReady >= 2 then
         airTarget = math.max(airTarget, 1)
     end
-    if tempoRecoveryWindow then
+    if tempoRecoveryWindow and readyLandFactories >= 2 then
         landTarget = math.max(landTarget, 3)
     end
-    if sustainedTempoWindow and current.Factories.Land.Total >= 3 then
+    if sustainedTempoWindow and totalLandFactories >= 3 then
         landTarget = math.max(landTarget, 4)
     end
     if liveCombatWindow and current.Factories.Land.Total >= 2 then
@@ -1477,6 +1488,11 @@ local function DecideCapacityPlan(runtime, current, constraints, rolePlan)
             pauseGrowth = true
         end
     end
+    if unfinishedLandUnderstaffed and unfinishedLandProgressed then
+        pauseGrowth = true
+        airTarget = math.min(airTarget, current.Factories.Air.Total)
+        seaTarget = math.min(seaTarget, current.Factories.Navy.Total)
+    end
     if liveCombatWindow and current.Factories.Air.Total > 0 and not powerBufferLow then
         airTarget = math.max(airTarget, 1)
     end
@@ -1485,10 +1501,20 @@ local function DecideCapacityPlan(runtime, current, constraints, rolePlan)
         airTarget = 0
     end
 
+    -- Smooth the post-bootstrap ramp: new shells only open when ready/staffed capacity supports them.
+    local allowAnotherLandShell = not pauseGrowth and not unfinishedLandUnderstaffed and pendingLandFactories <= 0
+    if readyLandFactories < 3 then
+        landTarget = math.min(landTarget, math.max(totalLandFactories, readyLandFactories + (allowAnotherLandShell and 1 or 0)))
+    elseif not sustainedTempoWindow then
+        landTarget = math.min(landTarget, math.max(totalLandFactories, readyLandFactories + (allowAnotherLandShell and 1 or 0)))
+    elseif pendingLandFactories > 0 then
+        landTarget = math.min(landTarget, math.max(totalLandFactories, readyLandFactories + 1))
+    end
+
     -- Prevent delayed overcorrection: only open one new factory at a time.
     local unfinishedAllowance = totalUnfinished
-    if landTarget > current.Factories.Land.Total then
-        landTarget = math.min(landTarget, current.Factories.Land.Total + math.max(0, 1 - unfinishedAllowance))
+    if landTarget > totalLandFactories then
+        landTarget = math.min(landTarget, totalLandFactories + math.max(0, 1 - unfinishedAllowance))
     end
     if airTarget > current.Factories.Air.Total then
         airTarget = math.min(airTarget, current.Factories.Air.Total + math.max(0, 1 - unfinishedAllowance))
@@ -1506,8 +1532,8 @@ local function DecideCapacityPlan(runtime, current, constraints, rolePlan)
             seaTarget = math.max(seaTarget, current.Factories.Navy.Total)
         end
     end
-    if liveCombatWindow and current.Factories.Land.Ready >= 2 then
-        landTarget = math.max(landTarget, math.min(2, current.Factories.Land.Ready))
+    if liveCombatWindow and readyLandFactories >= 2 then
+        landTarget = math.max(landTarget, math.min(2, readyLandFactories))
     end
     if liveCombatWindow and current.Factories.Air.Ready >= 1 and current.Factories.Air.Total > 0 and not powerBufferLow then
         airTarget = math.max(airTarget, 1)

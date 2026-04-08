@@ -540,6 +540,10 @@ Recommended rollout:
 
 ### v97: Factory Ramp And Completion
 
+Status:
+
+- implemented in `v97-factory-ramp-completion`
+
 Goals:
 
 - stop `2 -> 5/6 land` bursts that the economy cannot finish
@@ -552,6 +556,8 @@ Changes:
 - require stronger conditions for `3 -> 4+`
 - block new factory shells while unfinished factory staffing is inadequate
 - treat mid/high-fraction unfinished factories as critical build-power sinks
+- keep unfinished factory targets sticky once builders are on them or progress is meaningful
+- recall idle/far engineers back to factory completion before opening more shells
 
 Success criteria:
 

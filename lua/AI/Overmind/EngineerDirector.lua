@@ -775,6 +775,54 @@ local function FindBestUnfinishedFactory(aiBrain, runtime, mainPos)
     return best, bestPos, bestFraction, bestDomain, bestReady
 end
 
+local function FindTrackedUnfinishedFactory(aiBrain, task)
+    if not aiBrain or not task or (not task.TargetId and not task.TargetPos) then
+        return false
+    end
+
+    local factories = aiBrain:GetListOfUnits(FactoryCategory, false, true) or {}
+    local fallback = false
+    local fallbackPos = false
+    local fallbackFraction = 1
+    local fallbackDomain = 'none'
+    local fallbackReady = 0
+
+    for _, factory in factories do
+        if factory and not factory.Dead and not factory:IsUnitState('Upgrading') then
+            local fraction = GetFraction(factory)
+            if fraction < 0.95 then
+                local pos = factory.GetPosition and factory:GetPosition() or false
+                if pos then
+                    local entityId = GetEntityId(factory)
+                    local domain = GetFactoryDomain(factory)
+                    local readyInDomain = 0
+                    if domain == 'Land' then
+                        readyInDomain = CountReadyFactories(aiBrain, categories.FACTORY * categories.LAND * categories.STRUCTURE)
+                    elseif domain == 'Air' then
+                        readyInDomain = CountReadyFactories(aiBrain, categories.FACTORY * categories.AIR * categories.STRUCTURE)
+                    elseif domain == 'Navy' then
+                        readyInDomain = CountReadyFactories(aiBrain, categories.FACTORY * categories.NAVAL * categories.STRUCTURE)
+                    end
+
+                    if task.TargetId and entityId == task.TargetId then
+                        return factory, pos, fraction, domain, readyInDomain
+                    end
+
+                    if task.TargetPos and not fallback and Distance2D(pos, task.TargetPos) <= 8 then
+                        fallback = factory
+                        fallbackPos = pos
+                        fallbackFraction = fraction
+                        fallbackDomain = domain
+                        fallbackReady = readyInDomain
+                    end
+                end
+            end
+        end
+    end
+
+    return fallback, fallbackPos, fallbackFraction, fallbackDomain, fallbackReady
+end
+
 local function ResetFactoryTask(task)
     task.Active = false
     task.TargetId = false
@@ -789,6 +837,7 @@ local function ResetFactoryTask(task)
     task.LastProgressTime = false
     task.UsedCommander = false
     task.CandidateDebug = false
+    task.StickyUntil = -999
 end
 
 local function ResetStructureTask(task)
@@ -816,6 +865,12 @@ local function ComputeFactoryTaskRequirements(domain, fraction, stallTime, ready
     if fraction >= 0.4 then
         required = required + 1
     end
+    if domain == 'Land' and fraction >= 0.65 then
+        required = required + 1
+    end
+    if domain == 'Land' and stallTime >= 8 then
+        required = required + 1
+    end
     if stallTime >= 16 then
         required = required + 1
     end
@@ -823,6 +878,58 @@ local function ComputeFactoryTaskRequirements(domain, fraction, stallTime, ready
         required = required - 1
     end
     return Clamp(required, 1, 4)
+end
+
+local function ShouldKeepTrackedFactoryTask(now, task, trackedTargetId, trackedDomain, trackedFraction, trackedReadyFactories, bestTargetId, bestDomain, bestFraction, bestReadyFactories)
+    if not trackedTargetId then
+        return false
+    end
+
+    if not bestTargetId or trackedTargetId == bestTargetId then
+        return true
+    end
+
+    local assigned = task.AssignedBuilders or 0
+    local stickyUntil = task.StickyUntil or -999
+    local keep = false
+
+    if now < stickyUntil then
+        keep = true
+    end
+    if assigned > 0 and trackedFraction >= 0.3 then
+        keep = true
+    end
+    if trackedDomain == 'Land' and trackedFraction >= 0.35 then
+        keep = true
+    end
+    if trackedFraction >= 0.7 then
+        keep = true
+    end
+    if trackedReadyFactories <= 0 then
+        keep = true
+    end
+
+    local trackedPriority = (trackedFraction * 100) + ((trackedDomain == 'Land') and 20 or 0) + ((trackedReadyFactories <= 0) and 25 or 0)
+    local bestPriority = (bestFraction * 100) + ((bestDomain == 'Land') and 20 or 0) + ((bestReadyFactories <= 0) and 25 or 0)
+    local preemptMargin = 36
+    if trackedDomain == 'Land' and trackedFraction >= 0.35 then
+        preemptMargin = preemptMargin + 28
+    end
+    if trackedFraction >= 0.7 then
+        preemptMargin = preemptMargin + 42
+    end
+    if trackedReadyFactories <= 0 then
+        preemptMargin = preemptMargin + 34
+    end
+    if bestDomain ~= trackedDomain and trackedDomain == 'Land' then
+        preemptMargin = preemptMargin + 18
+    end
+
+    if bestPriority > (trackedPriority + preemptMargin) then
+        keep = false
+    end
+
+    return keep
 end
 
 local function ComputeStructureTaskRequirements(kind, fraction, stallTime, eco)
@@ -1430,7 +1537,29 @@ function Update(aiBrain, now)
     local bomberPanic = ((raid.BomberPanicUntil or -999) > now) or ((raid.LastBomberEnemyCount or 0) >= 1 and raid.UnderAirHarass)
     local radarReservedBuilderIds = GetRadarReservedBuilderIds(runtime, now)
 
+    local trackedFactory, trackedFactoryPos, trackedFactoryFraction, trackedFactoryDomain, trackedFactoryReady = FindTrackedUnfinishedFactory(aiBrain, factoryTask)
     local target, targetPos, fraction, domain, readyFactories = FindBestUnfinishedFactory(aiBrain, runtime, mainPos)
+    if trackedFactory and trackedFactoryPos then
+        local trackedTargetId = GetEntityId(trackedFactory)
+        local bestTargetId = target and GetEntityId(target) or false
+        if ShouldKeepTrackedFactoryTask(
+            now,
+            factoryTask,
+            trackedTargetId,
+            trackedFactoryDomain,
+            trackedFactoryFraction,
+            trackedFactoryReady,
+            bestTargetId,
+            domain,
+            fraction,
+            readyFactories) then
+            target = trackedFactory
+            targetPos = trackedFactoryPos
+            fraction = trackedFactoryFraction
+            domain = trackedFactoryDomain
+            readyFactories = trackedFactoryReady
+        end
+    end
     if target and targetPos then
         local targetId = GetEntityId(target)
         if factoryTask.TargetId ~= targetId or fraction > ((factoryTask.TargetFraction or 0) + 0.01) then
@@ -1461,6 +1590,24 @@ function Update(aiBrain, now)
         factoryTask.BuilderIds = claimedBuilders
         factoryTask.UsedCommander = usedCommander and true or false
         factoryTask.CandidateDebug = debug
+        local stickyDuration = 10
+        if domain == 'Land' then
+            stickyDuration = 16
+        elseif domain == 'Air' then
+            stickyDuration = 12
+        end
+        if fraction >= 0.35 then
+            stickyDuration = stickyDuration + 8
+        end
+        if fraction >= 0.7 then
+            stickyDuration = stickyDuration + 12
+        end
+        if readyFactories <= 0 then
+            stickyDuration = stickyDuration + 10
+        end
+        if assignedBuilders > 0 or fraction >= 0.35 then
+            factoryTask.StickyUntil = math.max(factoryTask.StickyUntil or -999, now + stickyDuration)
+        end
         if assignedBuilders > 0 then
             forcedFactoryRecover = assignedBuilders
         end
@@ -1650,6 +1797,16 @@ function Update(aiBrain, now)
                         if RecallEngineer(runtime, eng, mainPos, now, 'base_floor') then
                             recoverCount = recoverCount + 1
                             needBase = needBase - 1
+                        end
+                    elseif (not acted)
+                        and not constructing
+                        and factoryTask.Active
+                        and (factoryTask.AssignedBuilders or 0) < (factoryTask.RequiredBuilders or 0)
+                        and dist > 125
+                        and localThreat < 1.7
+                        and forcedFactoryRecover < math.max(2, (factoryTask.RequiredBuilders or 0) - (factoryTask.AssignedBuilders or 0)) then
+                        if RecallEngineer(runtime, eng, mainPos, now, 'factory_task') then
+                            forcedFactoryRecover = forcedFactoryRecover + 1
                         end
                     elseif (not acted) and not constructing and severeFactoryStarve and dist > 140 and localThreat < 1.6 and forcedFactoryRecover < 2 then
                         if RecallEngineer(runtime, eng, mainPos, now, 'factory_starve') then
