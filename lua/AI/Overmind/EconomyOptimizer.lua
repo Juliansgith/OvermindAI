@@ -40,7 +40,10 @@ local function DetermineMacroPhase(aiBrain, runtime, eco, opp, recovery, now)
     local energyRatio = eco.EnergyStorageRatio or 0
     local massTrend = eco.MassTrend or 0
     local energyTrend = eco.EnergyTrend or 0
-    local mapControl = runtime.ZoneModel and runtime.ZoneModel.MapControl or 0
+    local mapControl = (runtime.IntelModel and runtime.IntelModel.MapControl)
+        or (runtime.ZoneGraph and runtime.ZoneGraph.MapControl)
+        or (runtime.ZoneModel and runtime.ZoneModel.MapControl)
+        or 0
     local relativePower = opp.RelativePower or 1
     local stagnation = recovery.StagnationTime or 0
 

@@ -518,7 +518,9 @@ function RefreshStrategicState(aiBrain, now)
     runtime.OwnMainPos = ownPos
     local intel = runtime.IntelModel or {}
     runtime.PrimaryEnemyPos = intel.EnemyMainPos or GetNearestEnemyBasePosition(aiBrain, ownPos)
-    if intel.BestRaidPos and runtime.StrategyGoal == 'raid' then
+    if runtime.StrategyFocusPos then
+        runtime.PrimaryEnemyPos = runtime.StrategyFocusPos
+    elseif intel.BestRaidPos and runtime.StrategyGoal == 'raid' then
         runtime.PrimaryEnemyPos = intel.BestRaidPos
     elseif intel.BestExpansionPos and runtime.StrategyGoal == 'expand' then
         runtime.PrimaryEnemyPos = intel.BestExpansionPos

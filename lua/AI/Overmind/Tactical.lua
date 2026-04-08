@@ -86,6 +86,9 @@ local function FindGoalTarget(runtime)
     local graph = runtime.ZoneGraph or {}
     local goal = runtime.StrategyGoal or 'hold'
     local zone = runtime.ZoneModel or {}
+    if runtime.StrategyFocusPos then
+        return runtime.StrategyFocusPos
+    end
 
     if goal == 'raid' and graph.BestRaidPos then
         return graph.BestRaidPos
