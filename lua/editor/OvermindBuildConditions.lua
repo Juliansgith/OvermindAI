@@ -573,6 +573,85 @@ local function GetFactoryCounts(aiBrain)
     return land, air
 end
 
+local function HasAuthoritativeCapacityPlan(director)
+    local capacity = director and director.CapacityPlan or false
+    if type(capacity) ~= 'table' then
+        return false
+    end
+
+    return capacity.AddLandFactory ~= nil
+        or capacity.AddAirFactory ~= nil
+        or capacity.AddSeaFactory ~= nil
+        or capacity.PauseFactoryGrowth ~= nil
+        or capacity.LandTarget ~= nil
+        or capacity.AirTarget ~= nil
+        or capacity.SeaTarget ~= nil
+        or capacity.QueueDiscipline ~= nil
+end
+
+local function GetAuthoritativeCapacityPlan(aiBrain)
+    local director = GetProductionDirector(aiBrain)
+    if HasAuthoritativeCapacityPlan(director) then
+        return director.CapacityPlan
+    end
+    return false
+end
+
+local function IsFactoryControllerHealthy(aiBrain)
+    if not IsOvermindBrain(aiBrain) then
+        return false
+    end
+
+    local director = GetProductionDirector(aiBrain)
+    if not HasAuthoritativeCapacityPlan(director) then
+        return false
+    end
+
+    local runtime = aiBrain.OvermindRuntime or {}
+    local ctrl = runtime.FactoryController or {}
+    local recovery = GetRecovery(aiBrain) or {}
+    local now = GetGameTimeSeconds()
+
+    if (ctrl.LastUpdate or -999) < (now - 18) then
+        return false
+    end
+    if recovery.FactoryQueueInvariantBroken or recovery.ForceFactoryDeadlock then
+        return false
+    end
+
+    return true
+end
+
+function ShouldUseLegacyFactoryProduction(aiBrain, mode)
+    if not IsOvermindBrain(aiBrain) then
+        return false
+    end
+
+    local recovery = GetRecovery(aiBrain) or {}
+    if not IsFactoryControllerHealthy(aiBrain) then
+        return true
+    end
+
+    local lowerMode = string.lower(mode or 'production')
+    if lowerMode == 'deadlock' then
+        return recovery.ForceFactoryDeadlock
+            or (((recovery.FactoryAnyQueueStarvationTime or 0) >= 25) and ((recovery.FactoryQueueDeficit or 0) >= 1))
+    elseif lowerMode == 'recovery' then
+        return recovery.ForceFactoryRecovery
+            or recovery.ForceScoutRecovery
+            or recovery.FactoryQueueInvariantBroken
+            or (((recovery.FactoryQueueDeficitRatio or 0) >= 0.25) and ((recovery.FactoryQueueStarvationTime or 0) >= 12))
+    elseif lowerMode == 'emergency' then
+        return recovery.ForceFactoryRecovery
+            or recovery.ForceFactoryLand
+            or recovery.ForceFactoryAir
+            or recovery.ForceFactoryDeadlock
+            or recovery.FactoryQueueInvariantBroken
+    end
+
+    return false
+end
+
 local function IsFactoryExpansionEcoBlocked(aiBrain, landFactories, airFactories, seaFactories)
     local econ = GetEcon(aiBrain)
     local recovery = GetRecovery(aiBrain) or {}
@@ -1146,6 +1225,9 @@ function CanRunFactoryProduction(aiBrain, domain)
     if not IsOvermindBrain(aiBrain) then
         return false
     end
+    if not ShouldUseLegacyFactoryProduction(aiBrain, 'production') then
+        return false
+    end
 
     local econ = GetEcon(aiBrain)
     local recovery = GetRecovery(aiBrain) or {}
@@ -1405,8 +1487,7 @@ function ShouldAddFactory(aiBrain, locationType, minMassIncome, minEnergyIncome,
 
     local econ = GetEcon(aiBrain)
     local policy = GetPolicy(aiBrain)
-    local director = GetProductionDirector(aiBrain)
-    local capacity = director and director.CapacityPlan or false
+    local capacity = GetAuthoritativeCapacityPlan(aiBrain)
     local now = GetGameTimeSeconds()
     local massIncome = minMassIncome or (policy and policy.FactoryMassIncome) or 5
     local energyIncome = minEnergyIncome or (policy and policy.FactoryEnergyIncome) or 70
@@ -1531,8 +1612,7 @@ function ShouldAddLandFactory(aiBrain, locationType, minMassIncome, minEnergyInc
     if HasCriticalFactoryTask(aiBrain, 'land') then
         return false
     end
-    local director = GetProductionDirector(aiBrain)
-    local capacity = director and director.CapacityPlan or false
+    local capacity = GetAuthoritativeCapacityPlan(aiBrain)
     if capacity then
         local recovery = GetRecovery(aiBrain) or {}
         local now = GetGameTimeSeconds()
@@ -1595,8 +1675,7 @@ function ShouldAddAirFactory(aiBrain, locationType, minMassIncome, minEnergyInco
     if HasCriticalFactoryTask(aiBrain, 'air') then
         return false
     end
-    local director = GetProductionDirector(aiBrain)
-    local capacity = director and director.CapacityPlan or false
+    local capacity = GetAuthoritativeCapacityPlan(aiBrain)
     if capacity then
         local recovery = GetRecovery(aiBrain) or {}
         local now = GetGameTimeSeconds()
@@ -1659,8 +1738,7 @@ function ShouldForceFactoryRecovery(aiBrain)
     if not IsOvermindBrain(aiBrain) then
         return false
     end
-    local director = GetProductionDirector(aiBrain)
-    local capacity = director and director.CapacityPlan or {}
+    local capacity = GetAuthoritativeCapacityPlan(aiBrain) or {}
     return HasRecoveryFlag(aiBrain, 'ForceFactoryRecovery') or capacity.CriticalFactoryRecovery == true
 end
 
@@ -1668,8 +1746,7 @@ function ShouldForceLandFactoryRecovery(aiBrain)
     if not IsOvermindBrain(aiBrain) then
         return false
     end
-    local director = GetProductionDirector(aiBrain)
-    local capacity = director and director.CapacityPlan or {}
+    local capacity = GetAuthoritativeCapacityPlan(aiBrain) or {}
     return HasRecoveryFlag(aiBrain, 'ForceFactoryLand')
         or (capacity.CriticalFactoryRecovery == true and string.lower(capacity.CriticalFactoryDomain or 'none') == 'land')
 end
@@ -1678,8 +1755,7 @@ function ShouldForceAirFactoryRecovery(aiBrain)
     if not IsOvermindBrain(aiBrain) then
         return false
     end
-    local director = GetProductionDirector(aiBrain)
-    local capacity = director and director.CapacityPlan or {}
+    local capacity = GetAuthoritativeCapacityPlan(aiBrain) or {}
     return HasRecoveryFlag(aiBrain, 'ForceFactoryAir')
         or (capacity.CriticalFactoryRecovery == true and string.lower(capacity.CriticalFactoryDomain or 'none') == 'air')
 end
@@ -2405,8 +2481,7 @@ function ShouldBuildT1FactoryType(aiBrain, factoryType, locationType)
     local airFactories = GetExistingUnitCount(aiBrain, categories.FACTORY * categories.AIR * categories.STRUCTURE)
     local seaFactories = GetExistingUnitCount(aiBrain, categories.FACTORY * categories.NAVAL * categories.STRUCTURE)
     local totalFactories = landFactories + airFactories + seaFactories
-    local director = GetProductionDirector(aiBrain)
-    local capacity = director and director.CapacityPlan or false
+    local capacity = GetAuthoritativeCapacityPlan(aiBrain)
     local recovery = GetRecovery(aiBrain) or {}
     local isPrimary = IsPrimaryLocation(aiBrain, locationType, 44)
     if HasCriticalFactoryTask(aiBrain, kind) then

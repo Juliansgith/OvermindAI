@@ -924,6 +924,7 @@ BuilderGroup {
             { OMBC, 'IsOvermindBrain', {} },
             { UCBC, 'HaveLessThanUnitsWithCategory', { 3, categories.SCOUT * categories.LAND } },
             { UCBC, 'LocationFactoriesBuildingLess', { 'LocationType', 2, categories.SCOUT * categories.LAND } },
+            { OMBC, 'CanRunFactoryProduction', { 'land' } },
             { IBC, 'BrainNotLowPowerMode', {} },
         },
         BuilderType = 'Land',
@@ -970,6 +971,7 @@ BuilderGroup {
         Priority = 1128,
         BuilderConditions = {
             { OMBC, 'IsOvermindBrain', {} },
+            { OMBC, 'ShouldUseLegacyFactoryProduction', { 'deadlock' } },
             { OMBC, 'ShouldFactoryDeadlockBreak', { 25 } },
             { UCBC, 'LocationFactoriesBuildingLess', { 'LocationType', 2, categories.ENGINEER * categories.MOBILE } },
         },
@@ -981,6 +983,7 @@ BuilderGroup {
         Priority = 1124,
         BuilderConditions = {
             { OMBC, 'IsOvermindBrain', {} },
+            { OMBC, 'ShouldUseLegacyFactoryProduction', { 'deadlock' } },
             { OMBC, 'ShouldFactoryDeadlockBreak', { 25 } },
             { UCBC, 'LocationFactoriesBuildingLess', { 'LocationType', 2, categories.MOBILE * categories.LAND * categories.DIRECTFIRE * categories.TECH1 } },
         },
@@ -992,6 +995,7 @@ BuilderGroup {
         Priority = 1122,
         BuilderConditions = {
             { OMBC, 'IsOvermindBrain', {} },
+            { OMBC, 'ShouldUseLegacyFactoryProduction', { 'deadlock' } },
             { OMBC, 'ShouldFactoryDeadlockBreak', { 25 } },
             { UCBC, 'LocationFactoriesBuildingLess', { 'LocationType', 1, categories.MOBILE * categories.LAND * categories.SCOUT * categories.TECH1 } },
         },
@@ -1003,6 +1007,7 @@ BuilderGroup {
         Priority = 1132,
         BuilderConditions = {
             { OMBC, 'IsOvermindBrain', {} },
+            { OMBC, 'ShouldUseLegacyFactoryProduction', { 'recovery' } },
             { OMBC, 'IsBomberPanic', {} },
             { UCBC, 'LocationFactoriesBuildingLess', { 'LocationType', 4, categories.MOBILE * categories.LAND * categories.ANTIAIR * categories.TECH1 } },
         },
@@ -1014,6 +1019,7 @@ BuilderGroup {
         Priority = 946,
         BuilderConditions = {
             { OMBC, 'IsOvermindBrain', {} },
+            { OMBC, 'ShouldUseLegacyFactoryProduction', { 'recovery' } },
             { UCBC, 'HaveGreaterThanUnitsWithCategory', { 10, categories.MOBILE * categories.LAND - categories.ENGINEER - categories.SCOUT - categories.COMMAND } },
             { UCBC, 'HaveLessThanUnitsWithCategory', { 3, categories.MOBILE * categories.LAND * categories.ANTIAIR } },
             { UCBC, 'LocationFactoriesBuildingLess', { 'LocationType', 1, categories.MOBILE * categories.LAND * categories.ANTIAIR } },
@@ -1027,6 +1033,7 @@ BuilderGroup {
         Priority = 944,
         BuilderConditions = {
             { OMBC, 'IsOvermindBrain', {} },
+            { OMBC, 'ShouldUseLegacyFactoryProduction', { 'recovery' } },
             { UCBC, 'FactoryGreaterAtLocation', { 'LocationType', 0, 'AIR' } },
             { UCBC, 'HaveLessThanUnitsWithCategory', { 4, categories.MOBILE * categories.AIR * categories.ANTIAIR } },
             { UCBC, 'LocationFactoriesBuildingLess', { 'LocationType', 1, categories.MOBILE * categories.AIR * categories.ANTIAIR } },
@@ -1040,6 +1047,7 @@ BuilderGroup {
         Priority = 1036,
         BuilderConditions = {
             { OMBC, 'IsOvermindBrain', {} },
+            { OMBC, 'ShouldUseLegacyFactoryProduction', { 'recovery' } },
             { OMBC, 'IsUnderAirHarass', { 1 } },
             { UCBC, 'LocationFactoriesBuildingLess', { 'LocationType', 3, categories.MOBILE * categories.LAND * categories.ANTIAIR } },
             { EBC, 'GreaterThanEconEfficiencyOverTime', { 0.32, 0.42 } },
@@ -1052,6 +1060,7 @@ BuilderGroup {
         Priority = 1018,
         BuilderConditions = {
             { OMBC, 'IsOvermindBrain', {} },
+            { OMBC, 'ShouldUseLegacyFactoryProduction', { 'recovery' } },
             { OMBC, 'IsUnderLandHarass', { 1 } },
             { UCBC, 'LocationFactoriesBuildingLess', { 'LocationType', 3, categories.MOBILE * categories.LAND - categories.ENGINEER - categories.SCOUT - categories.COMMAND } },
             { EBC, 'GreaterThanEconEfficiencyOverTime', { 0.52, 0.62 } },
@@ -1064,6 +1073,7 @@ BuilderGroup {
         Priority = 1042,
         BuilderConditions = {
             { OMBC, 'IsOvermindBrain', {} },
+            { OMBC, 'ShouldUseLegacyFactoryProduction', { 'recovery' } },
             { OMBC, 'IsUnderAirHarass', { 1 } },
             { UCBC, 'LocationFactoriesBuildingLess', { 'LocationType', 3, categories.MOBILE * categories.AIR * categories.ANTIAIR } },
             { EBC, 'GreaterThanEconEfficiencyOverTime', { 0.34, 0.44 } },
@@ -1076,6 +1086,7 @@ BuilderGroup {
         Priority = 1048,
         BuilderConditions = {
             { OMBC, 'IsOvermindBrain', {} },
+            { OMBC, 'ShouldUseLegacyFactoryProduction', { 'recovery' } },
             { OMBC, 'IsUnderBomberHarass', { 1 } },
             { UCBC, 'LocationFactoriesBuildingLess', { 'LocationType', 4, categories.MOBILE * categories.AIR * categories.ANTIAIR } },
             { EBC, 'GreaterThanEconEfficiencyOverTime', { 0.28, 0.38 } },
@@ -1088,6 +1099,7 @@ BuilderGroup {
         Priority = 940,
         BuilderConditions = {
             { OMBC, 'IsOvermindBrain', {} },
+            { OMBC, 'ShouldUseLegacyFactoryProduction', { 'recovery' } },
             { OMBC, 'ShouldBuildFactoryEngineer', { 'LocationType', 1.2, 6 } },
             { UCBC, 'LocationFactoriesBuildingLess', { 'LocationType', 1, categories.ENGINEER * categories.MOBILE } },
             { EBC, 'GreaterThanEconEfficiencyOverTime', { 0.65, 0.8 } },
@@ -1100,6 +1112,7 @@ BuilderGroup {
         Priority = 955,
         BuilderConditions = {
             { OMBC, 'IsOvermindBrain', {} },
+            { OMBC, 'ShouldUseLegacyFactoryProduction', { 'recovery' } },
             { OMBC, 'NeedFactoryHeartbeatProduction', { 0.25, 1, 40 } },
             { UCBC, 'LocationFactoriesBuildingLess', { 'LocationType', 1, categories.ENGINEER * categories.MOBILE } },
             { EBC, 'GreaterThanEconEfficiencyOverTime', { 0.55, 0.7 } },
@@ -1112,6 +1125,7 @@ BuilderGroup {
         Priority = 935,
         BuilderConditions = {
             { OMBC, 'IsOvermindBrain', {} },
+            { OMBC, 'ShouldUseLegacyFactoryProduction', { 'recovery' } },
             { OMBC, 'ShouldBuildLandDoctrine', { 'tank' } },
             { UCBC, 'LocationFactoriesBuildingLess', { 'LocationType', 1, categories.MOBILE * categories.LAND - categories.ENGINEER - categories.SCOUT - categories.COMMAND } },
             { EBC, 'GreaterThanEconEfficiencyOverTime', { 0.65, 0.8 } },
@@ -1124,6 +1138,7 @@ BuilderGroup {
         Priority = 938,
         BuilderConditions = {
             { OMBC, 'IsOvermindBrain', {} },
+            { OMBC, 'ShouldUseLegacyFactoryProduction', { 'recovery' } },
             { OMBC, 'ShouldBuildLandDoctrine', { 'aa' } },
             { UCBC, 'LocationFactoriesBuildingLess', { 'LocationType', 1, categories.MOBILE * categories.LAND * categories.ANTIAIR } },
             { EBC, 'GreaterThanEconEfficiencyOverTime', { 0.62, 0.78 } },
@@ -1136,6 +1151,7 @@ BuilderGroup {
         Priority = 932,
         BuilderConditions = {
             { OMBC, 'IsOvermindBrain', {} },
+            { OMBC, 'ShouldUseLegacyFactoryProduction', { 'recovery' } },
             { OMBC, 'ShouldBuildLandDoctrine', { 'indirect' } },
             { UCBC, 'LocationFactoriesBuildingLess', { 'LocationType', 1, categories.MOBILE * categories.LAND * categories.INDIRECTFIRE } },
             { EBC, 'GreaterThanEconEfficiencyOverTime', { 0.68, 0.85 } },
@@ -1148,6 +1164,7 @@ BuilderGroup {
         Priority = 934,
         BuilderConditions = {
             { OMBC, 'IsOvermindBrain', {} },
+            { OMBC, 'ShouldUseLegacyFactoryProduction', { 'recovery' } },
             { OMBC, 'ShouldBuildAirDoctrine', { 'fighter' } },
             { UCBC, 'LocationFactoriesBuildingLess', { 'LocationType', 1, categories.MOBILE * categories.AIR * categories.ANTIAIR } },
             { EBC, 'GreaterThanEconEfficiencyOverTime', { 0.62, 0.8 } },
@@ -1160,6 +1177,7 @@ BuilderGroup {
         Priority = 930,
         BuilderConditions = {
             { OMBC, 'IsOvermindBrain', {} },
+            { OMBC, 'ShouldUseLegacyFactoryProduction', { 'recovery' } },
             { OMBC, 'ShouldBuildAirDoctrine', { 'bomber' } },
             { UCBC, 'LocationFactoriesBuildingLess', { 'LocationType', 1, categories.MOBILE * categories.AIR * categories.BOMBER } },
             { EBC, 'GreaterThanEconEfficiencyOverTime', { 0.65, 0.84 } },

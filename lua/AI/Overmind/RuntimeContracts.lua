@@ -87,7 +87,7 @@ local DeclaredStateInitializers = {
                 Tech = 0.08,
             },
             RolePlan = {},
-            CapacityPlan = {},
+            CapacityPlan = false,
             TechPlan = {},
             StructurePlan = {},
             EmergencyOverrides = {},

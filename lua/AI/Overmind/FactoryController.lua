@@ -439,6 +439,7 @@ function Module.Update(aiBrain, now)
     }
     runtime.FactoryController = ctrl
     ctrl.PerFactory = ctrl.PerFactory or {}
+    ctrl.LastUpdate = now
 
     local allFactories = aiBrain:GetListOfUnits(categories.FACTORY * categories.STRUCTURE, false, true)
     if not allFactories or table.getn(allFactories) <= 0 then
