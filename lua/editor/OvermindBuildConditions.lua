@@ -2502,7 +2502,7 @@ function ShouldBuildT1FactoryType(aiBrain, factoryType, locationType)
         elseif kind == 'air' then
             return capacity.AddAirFactory == true
         elseif kind == 'sea' or kind == 'naval' then
-            return director.NavalActive == true and capacity.AddSeaFactory == true
+            return director and director.NavalActive == true and capacity.AddSeaFactory == true
         end
         return false
     end
