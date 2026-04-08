@@ -30,6 +30,7 @@ local function GetStrategicSignals(aiBrain, now)
     local clusters = runtime.EnemyClusterTracker or {}
     local force = runtime.ForceDirector or runtime.ForceManager or {}
     local opp = runtime.OpponentModel or {}
+    local planner = runtime.StrategicPlanner or {}
     local eco = runtime.EcoState or {}
     local recovery = runtime.Recovery or {}
     local policy = runtime.EcoPolicy or {}
@@ -140,11 +141,14 @@ local function GetStrategicSignals(aiBrain, now)
         BomberUnits = bombers,
         EscortUnits = escortUnits,
         GraphReady = graphReady,
+        Planner = planner,
     }
 end
 
 local function GetGoalUtilities(signals)
     local util = {}
+    local planner = signals.Planner or {}
+    local goalBiases = planner.GoalBiases or {}
 
     util.hold =
         (signals.FrontThreat * 0.36)
@@ -271,6 +275,12 @@ local function GetGoalUtilities(signals)
         util.tech = util.tech + 0.6
     end
 
+    util.hold = util.hold + (goalBiases.hold or 0)
+    util.expand = util.expand + (goalBiases.expand or 0)
+    util.raid = util.raid + (goalBiases.raid or 0)
+    util.tech = util.tech + (goalBiases.tech or 0)
+    util.all_in = util.all_in + (goalBiases.all_in or 0)
+
     return util
 end
 
@@ -291,7 +301,12 @@ local function DetermineGoalFocus(signals, goal)
     local graph = runtime.ZoneGraph or {}
     local intel = runtime.IntelModel or {}
     local zone = runtime.ZoneModel or {}
+    local planner = runtime.StrategicPlanner or {}
     local approach = signals.Approach or {}
+
+    if planner.FocusPos then
+        return planner.FocusPos, planner.FocusZoneKey, planner.FocusReason or 'strategic_plan'
+    end
 
     if goal == 'hold' then
         if signals.ApproachReal then
@@ -344,6 +359,10 @@ function Update(aiBrain, now)
         ApproachThreat = signals.ApproachThreat,
         ApproachDistance = signals.ApproachDistance,
         ApproachReal = signals.ApproachReal,
+        PlannerDirective = (signals.Planner and signals.Planner.Directive) or 'stabilize',
+        PlannerTheater = (signals.Planner and signals.Planner.PrimaryTheater) or 'Front',
+        PlannerRaidDirective = (signals.Planner and signals.Planner.RaidDirective) or 'opportunistic',
+        PlannerRaidCentrality = (signals.Planner and signals.Planner.RaidCentrality) or 0,
     }
 
     local aggressionShift = 0
@@ -365,6 +384,7 @@ function Update(aiBrain, now)
     if signals.ApproachReal and signals.ApproachDistance < 190 and goal ~= 'hold' then
         aggressionShift = aggressionShift - 0.06
     end
+    aggressionShift = aggressionShift + (((signals.Planner and signals.Planner.AggressionBias) or 0))
 
     runtime.GoalAggressionModifier = Clamp(aggressionShift, -0.3, 0.3)
     runtime.GoalConfidence = goalValue - (util.hold or 0)

@@ -569,6 +569,9 @@ local function ScoreModes(now, runtime, current, constraints, trends, confidence
     local opp = runtime.OpponentModel or {}
     local recovery = runtime.Recovery or {}
     local raid = runtime.RaidDefense or {}
+    local planner = runtime.StrategicPlanner or {}
+    local directive = planner.Directive or 'stabilize'
+    local primaryTheater = planner.PrimaryTheater or 'Front'
 
     local stabilize = 0
     stabilize = stabilize + ((now < 220) and 2.2 or 0)
@@ -672,6 +675,49 @@ local function ScoreModes(now, runtime, current, constraints, trends, confidence
     techWindow = techWindow - (constraints.CriticalStructure and 1.8 or 0)
     techWindow = techWindow - (constraints.EconBootstrap and 3.0 or 0)
     techWindow = techWindow - (constraints.StarterPhase and 3.4 or 0)
+
+    if directive == 'stabilize' then
+        stabilize = stabilize + 1.9
+        defend = defend + 0.9
+        pressure = pressure - 0.8
+        expand = expand - 0.8
+        techWindow = techWindow - 0.4
+    elseif directive == 'expand' then
+        expand = expand + 1.6
+        pressure = pressure + 0.3
+    elseif directive == 'punish_greed' then
+        pressure = pressure + 1.4
+        techWindow = techWindow - 0.6
+    elseif directive == 'force_air_answer' then
+        airControl = airControl + 1.6
+        pressure = pressure + 0.4
+        techWindow = techWindow - 0.6
+    elseif directive == 'trade_map_for_tech' then
+        techWindow = techWindow + 1.6
+        pressure = pressure - 0.4
+    elseif directive == 'trade_tech_for_tempo' then
+        pressure = pressure + 1.5
+        techWindow = techWindow - 1.2
+    end
+
+    if planner.ForceAirAnswer then
+        airControl = airControl + 0.9
+    end
+    if planner.PunishGreed then
+        pressure = pressure + 0.8
+    end
+    if primaryTheater == 'Home' then
+        defend = defend + 0.7
+        stabilize = stabilize + 0.5
+    elseif primaryTheater == 'Front' then
+        pressure = pressure + 0.6
+        defend = defend + 0.25
+    elseif primaryTheater == 'Enemy' then
+        pressure = pressure + 0.8
+        expand = expand + 0.2
+    elseif primaryTheater == 'Navy' then
+        techWindow = techWindow + 0.2
+    end
 
     return {
         stabilize = stabilize,
@@ -1138,6 +1184,7 @@ end
 
 local function DecideCapacityPlan(runtime, current, constraints, rolePlan)
     local state = runtime.ProductionDirector or {}
+    local planner = runtime.StrategicPlanner or {}
     local now = GetGameTimeSeconds()
     local totalUnfinished = current.Factories.Pending or 0
     local landRoleLoad = SumRoleField(rolePlan, { 'Engineer', 'LandDirect', 'LandAA', 'LandIndirect', 'LandScout' }, 'DesiredStrength')
@@ -1316,6 +1363,15 @@ local function DecideCapacityPlan(runtime, current, constraints, rolePlan)
     if secondLandLatched and not constraints.StarterPhase and not constraints.EconBootstrap then
         landTarget = math.max(landTarget, 2)
     end
+    if (planner.TradeTechForTempo or planner.PunishGreed) and secondLandLatched and current.Factories.Land.Ready >= 2 then
+        landTarget = math.max(landTarget, 3)
+    end
+    if planner.TradeMapForTech and not constraints.LandPanic and not constraints.AirPanic then
+        airTarget = math.min(airTarget, math.max(1, current.Factories.Air.Total))
+    end
+    if planner.ForceAirAnswer and landCoreOnline and not constraints.EcoCrash and powerReady >= 2 then
+        airTarget = math.max(airTarget, 1)
+    end
     if tempoRecoveryWindow then
         landTarget = math.max(landTarget, 3)
     end
@@ -1465,6 +1521,7 @@ end
 local function DecideTechPlan(runtime, current, constraints, confidence, mode)
     local opp = runtime.OpponentModel or {}
     local eco = runtime.EcoState or {}
+    local planner = runtime.StrategicPlanner or {}
     local frontCovered = constraints.FrontPressure <= 0.18 and constraints.BasePressure <= 0.14 and constraints.AirGuardPressure <= 0.16
     local scoutClean = constraints.StaleZones <= 2 and constraints.ScoutPressure <= 0.25 and confidence.Global >= 0.55
     local eligible = constraints.DurableSurplus and frontCovered and scoutClean and (not constraints.TechBlocked)
@@ -1490,6 +1547,20 @@ local function DecideTechPlan(runtime, current, constraints, confidence, mode)
         landBias = landBias + (constraints.LandPanic and 0.06 or 0)
         airBias = airBias + (constraints.AirPanic and 0.06 or 0)
         ecoBias = ecoBias - 0.08
+    end
+
+    if planner.TradeMapForTech then
+        eligible = eligible or (constraints.DurableSurplus and not constraints.VisionPanic and not constraints.QueueStarved)
+        ecoBias = ecoBias + 0.18
+        landBias = landBias - 0.04
+        airBias = airBias - 0.02
+    elseif planner.TradeTechForTempo or planner.PunishGreed then
+        ecoBias = ecoBias - 0.14
+        landBias = landBias + 0.08
+    end
+    if planner.ForceAirAnswer then
+        ecoBias = ecoBias - 0.08
+        airBias = airBias + 0.12
     end
 
     local overflowWindow = (eco.MassStorageRatio or 0) >= 0.78

@@ -334,6 +334,14 @@ function Module.Update(aiBrain, now)
     local intel = runtime.IntelModel or {}
     local raid = runtime.RaidDefense or {}
     local opp = runtime.OpponentModel or {}
+    local planner = runtime.StrategicPlanner or {}
+    local primaryTheater = planner.PrimaryTheater or 'Front'
+    local directive = planner.Directive or 'stabilize'
+    local raidCentrality = planner.RaidCentrality or 0
+    local forceAirAnswer = planner.ForceAirAnswer == true
+    local punishGreed = planner.PunishGreed == true
+    local tradeMapForTech = planner.TradeMapForTech == true
+    local tradeTechForTempo = planner.TradeTechForTempo == true
     local ownPos = GetMainPos(aiBrain, runtime)
     local frontPos = intel.FrontLinePos or runtime.PrimaryEnemyPos or ownPos
     local raidPos = intel.BestRaidPos or runtime.PrimaryEnemyPos or frontPos
@@ -415,6 +423,36 @@ function Module.Update(aiBrain, now)
     if assetSiege then
         mainlineNeed = Clamp(mainlineNeed + 6, 10, 42)
         raiderNeed = 0
+    end
+    if primaryTheater == 'Home' or directive == 'stabilize' then
+        baseGuardDirectNeed = Clamp(baseGuardDirectNeed + 2, 4, 16)
+        baseGuardAANeed = Clamp(baseGuardAANeed + (forceAirAnswer and 1 or 0), 1, 7)
+        raiderNeed = math.max(0, raiderNeed - 2)
+    elseif primaryTheater == 'Front' or tradeTechForTempo then
+        mainlineNeed = Clamp(mainlineNeed + 3, 8, 42)
+        if raidCentrality < 0.45 then
+            raiderNeed = math.max(0, raiderNeed - 1)
+        end
+    elseif primaryTheater == 'Enemy' then
+        raiderNeed = Clamp(raiderNeed + 1 + math.floor(raidCentrality * 3), 0, 10)
+        if punishGreed or tradeTechForTempo then
+            mainlineNeed = Clamp(mainlineNeed + 2, 8, 42)
+        end
+    elseif primaryTheater == 'Navy' and not frontCrisis then
+        raiderNeed = math.max(0, raiderNeed - 1)
+    end
+    if tradeMapForTech then
+        raiderNeed = math.max(0, raiderNeed - 1)
+        mainlineNeed = math.max(8, mainlineNeed - 1)
+    end
+    if forceAirAnswer then
+        airGuardNeed = Clamp(airGuardNeed + 1, 2, 12)
+    end
+    if raidCentrality < 0.32 and not punishGreed and not tradeTechForTempo then
+        raiderNeed = math.floor(raiderNeed * 0.5)
+    end
+    if raidCentrality >= 0.62 and not (frontCrisis or assetSiege) then
+        raiderNeed = Clamp(raiderNeed + 2, 0, 10)
     end
     local interceptDirectNeed = 0
     local interceptAANeed = 0
@@ -691,12 +729,18 @@ function Module.Update(aiBrain, now)
     if (opp.CounterAirWindow == true) and (approachThreat >= 5 or contestedZones >= 2) then
         bomberStrikeNeed = math.max(bomberStrikeNeed, math.min(4, 2 + math.floor((approachThreat or 0) * 0.18)))
     end
+    if forceAirAnswer then
+        bomberStrikeNeed = math.max(bomberStrikeNeed, 2 + math.floor(math.max(0, raidCentrality * 2)))
+    end
+    if primaryTheater == 'Enemy' and raidCentrality >= 0.6 then
+        bomberStrikeNeed = math.max(bomberStrikeNeed, 3)
+    end
     local bomberStrikeDesiredStrength = Round(bomberStrikeNeed * bomberStrength, 2)
     local scoutScreenDesiredStrength = Round(math.max(1, math.min(4, 1 + math.floor((intel.StaleZones or 0) / 2))) * airScoutStrength, 2)
 
     UpdateTask(state, 'base_guard', {
         Role = 'base_guard',
-        Priority = 80 + math.floor(homeThreat * 4),
+        Priority = 80 + math.floor(homeThreat * 4) + ((primaryTheater == 'Home') and 10 or 0),
         AnchorPos = ownPos,
         TargetPos = ownPos,
         StagingPos = ownPos,
@@ -730,7 +774,7 @@ function Module.Update(aiBrain, now)
     }, now)
     UpdateTask(state, 'intercept_cluster', {
         Role = 'intercept_cluster',
-        Priority = approachClose and (84 + math.floor(approachThreat * 2)) or 18,
+        Priority = approachClose and (84 + math.floor(approachThreat * 2)) or (forceAirAnswer and 28 or 18),
         AnchorPos = ownPos,
         TargetPos = approachCluster.Pos or interceptPos,
         StagingPos = interceptPos,
@@ -747,7 +791,7 @@ function Module.Update(aiBrain, now)
     }, now)
     UpdateTask(state, 'raid', {
         Role = 'raid',
-        Priority = 50 + math.floor((intel.StaleZones or 0) * 4) + ((intel.BestRaidZoneKey and 1 or 0) * 10),
+        Priority = 50 + math.floor((intel.StaleZones or 0) * 4) + ((intel.BestRaidZoneKey and 1 or 0) * 10) + math.floor(raidCentrality * 14) + ((primaryTheater == 'Enemy') and 6 or 0),
         AnchorPos = ownPos,
         TargetPos = raidPos,
         StagingPos = intel.RaidStagePos or frontPos or ownPos,
@@ -781,7 +825,7 @@ function Module.Update(aiBrain, now)
     }, now)
     UpdateTask(state, 'front_hold', {
         Role = 'front_hold',
-        Priority = 72 + (contestedZones * 6),
+        Priority = 72 + (contestedZones * 6) + ((primaryTheater == 'Front') and 8 or 0) + ((tradeTechForTempo or punishGreed) and 4 or 0),
         AnchorPos = frontPos,
         TargetPos = frontPos,
         StagingPos = intel.FrontStagePos or frontPos or ownPos,
@@ -815,7 +859,7 @@ function Module.Update(aiBrain, now)
     }, now)
     UpdateTask(state, 'bomber_strike', {
         Role = 'bomber_strike',
-        Priority = 42 + ((raidPos and 1 or 0) * 10),
+        Priority = 42 + ((raidPos and 1 or 0) * 10) + (forceAirAnswer and 10 or 0) + math.floor(raidCentrality * 8),
         AnchorPos = ownPos,
         TargetPos = raidPos,
         StagingPos = ownPos,

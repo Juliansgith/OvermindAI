@@ -50,6 +50,19 @@ local DeclaredStateInitializers = {
             LastLogTime = -999,
         }
     end,
+    StrategicPlanner = function()
+        return {
+            Directive = 'stabilize',
+            PrimaryTheater = 'Front',
+            GoalBiases = {},
+            TheaterScores = {},
+            DirectiveScores = {},
+            Signals = {},
+            LastDirectiveSwitch = -999,
+            LastTheaterSwitch = -999,
+            LastLogTime = -999,
+        }
+    end,
     ForceDirector = function()
         return {
             Assignments = {},
@@ -276,6 +289,7 @@ function Update(aiBrain, now)
     EnsureStateSlice(runtime, 'IntelModel')
     EnsureStateSlice(runtime, 'EnemyClusterTracker')
     EnsureStateSlice(runtime, 'OpponentModel')
+    EnsureStateSlice(runtime, 'StrategicPlanner')
     EnsureStateSlice(runtime, 'ForceDirector')
     EnsureStateSlice(runtime, 'ProductionDirector')
     EnsureStateSlice(runtime, 'Recovery')

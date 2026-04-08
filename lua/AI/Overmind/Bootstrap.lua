@@ -3,7 +3,7 @@ local OvermindScheduler = import('/mods/OvermindAI/lua/AI/Overmind/Scheduler.lua
 local OvermindMemory = import('/mods/OvermindAI/lua/AI/Overmind/Memory.lua')
 
 local ActiveBrains = {}
-local BuildFingerprint = 'v90-intel-grounded-opponent-model'
+local BuildFingerprint = 'v91-strategic-planner-layer'
 
 local NavUtils = false
 do
@@ -105,6 +105,7 @@ function PostCreate(aiBrain, planName)
         WeightedRoleSupply = true,
         RuntimeModuleUpdateFix = true,
         EngineerFactoryTasks = true,
+        StrategicPlanner = true,
     }
 
     if aiBrain.OvermindCheat and not aiBrain.CheatEnabled then
@@ -122,8 +123,8 @@ function PostCreate(aiBrain, planName)
     LOG(string.format('*OVERMIND BUILD A%d version=%s groups=%s',
         aiBrain:GetArmyIndex(),
         BuildFingerprint,
-        'ProductionDirector,ForceDirector,TaskDrivenCombat,EngineerFactoryTasks,FactoryResume,SubsystemContracts,FactoryController,RadarFallback,QueueExpansionGuard,BomberHarass,MexDefense,EngineerExpansion,CohortAttack,RuntimeContracts,IntelModel,ZoneGraph,ConfirmedScoutFreshness,ProductionPolicyCutover,WeightedRoleSupply,RuntimeModuleUpdateFix'))
-    LOG(string.format('*OVERMIND SELFTEST A%d fingerprint=%s strictLeash=1 queueInvariant=1 radarDeadline=1 secondBaseGate=1 contracts=1 subsystem=1 intel=1 force=1 prod=1 taskcombat=1 engfactasks=1 facresume=1 zgraph=1 scoutconfirm=1 prodcutover=1 weighted=1 runtimefix=1',
+        'ProductionDirector,ForceDirector,StrategicPlanner,TaskDrivenCombat,EngineerFactoryTasks,FactoryResume,SubsystemContracts,FactoryController,RadarFallback,QueueExpansionGuard,BomberHarass,MexDefense,EngineerExpansion,CohortAttack,RuntimeContracts,IntelModel,ZoneGraph,ConfirmedScoutFreshness,ProductionPolicyCutover,WeightedRoleSupply,RuntimeModuleUpdateFix'))
+    LOG(string.format('*OVERMIND SELFTEST A%d fingerprint=%s strictLeash=1 queueInvariant=1 radarDeadline=1 secondBaseGate=1 contracts=1 subsystem=1 intel=1 force=1 prod=1 strat=1 taskcombat=1 engfactasks=1 facresume=1 zgraph=1 scoutconfirm=1 prodcutover=1 weighted=1 runtimefix=1',
         aiBrain:GetArmyIndex(),
         BuildFingerprint))
     ForkThread(OvermindScheduler.Run, aiBrain)

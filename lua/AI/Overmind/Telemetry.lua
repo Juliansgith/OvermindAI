@@ -70,6 +70,7 @@ function Capture(aiBrain, now)
     local tele = runtime.Telemetry
     local eco = runtime.EcoState or {}
     local opp = runtime.OpponentModel or {}
+    local planner = runtime.StrategicPlanner or {}
     local mem = aiBrain.OvermindMemory or {}
     local recovery = runtime.Recovery or {}
     local raid = runtime.RaidDefense or {}
@@ -112,6 +113,12 @@ function Capture(aiBrain, now)
     local sample = {
         Time = now,
         Goal = runtime.StrategyGoal or 'hold',
+        StrategyDirective = planner.Directive or 'stabilize',
+        StrategyTheater = planner.PrimaryTheater or 'Front',
+        StrategyRaidDirective = planner.RaidDirective or 'opportunistic',
+        StrategyRaidCentrality = planner.RaidCentrality or 0,
+        StrategyTempo = planner.TempoMode or 'balanced',
+        StrategyTempoBias = planner.TempoBias or 0,
         Posture = opp.Posture or 'unknown',
         Pivot = opp.LikelyPivot or 'balanced',
         OppConfidence = (opp.Confidence and opp.Confidence.Global) or 0,
@@ -135,7 +142,7 @@ function Capture(aiBrain, now)
         DefenseCount = defenseCount,
         ACUDistance = acuDist,
         ACUEscort = acuEscort,
-        MapControl = (runtime.ZoneModel and runtime.ZoneModel.MapControl) or 0,
+        MapControl = (runtime.IntelModel and runtime.IntelModel.MapControl) or (runtime.ZoneGraph and runtime.ZoneGraph.MapControl) or (runtime.ZoneModel and runtime.ZoneModel.MapControl) or 0,
         ProductionStagnation = recovery.StagnationTime or 0,
         RecoveryFactory = recovery.ForceFactoryRecovery and 1 or 0,
         RecoveryScout = recovery.ForceScoutRecovery and 1 or 0,
@@ -224,7 +231,7 @@ function Capture(aiBrain, now)
     for _, checkpoint in checkpoints do
         if now >= checkpoint and not tele.Checkpoints[checkpoint] then
             tele.Checkpoints[checkpoint] = true
-            LOG(string.format('*OVERMIND CHECKPOINT A%d t=%ds fac=%d idleFac=%d qdef=%d qratio=%.2f harL=%d(%d) harA=%d(%d) raid=%d/%d/%d(%d) eng=%d baseEng=%d def=%d acuDist=%.1f acuEsc=%d risk=%d map=%.2f stagn=%.1f rf=%d rs=%d re=%d rd=%d phase=%s graph=%s/%d/%d intel=%d/%d cluster=%d:%.1f/%.0f force=%d/%d/%d tasks=%d[%s/%s/%s] goal=%s prod=%s fac=%d/%d/%d->%d/%d/%d pause=%d q=%s ft=%d:%s:%d/%d:%.1f st=%d:%s:%d/%d:%.1f str=%.1f/%.1f/%.1f->%.1f/%.1f/%.1f gap=%.1f/%.1f/%.1f engp=%.1f/%.1f(%d/%d) mex=%d:%s:%.2f struct=%d/%d/%d tech=%d:%s',
+            LOG(string.format('*OVERMIND CHECKPOINT A%d t=%ds fac=%d idleFac=%d qdef=%d qratio=%.2f harL=%d(%d) harA=%d(%d) raid=%d/%d/%d(%d) eng=%d baseEng=%d def=%d acuDist=%.1f acuEsc=%d risk=%d map=%.2f stagn=%.1f rf=%d rs=%d re=%d rd=%d phase=%s strat=%s/%s/%s:%.2f graph=%s/%d/%d intel=%d/%d cluster=%d:%.1f/%.0f force=%d/%d/%d tasks=%d[%s/%s/%s] goal=%s prod=%s fac=%d/%d/%d->%d/%d/%d pause=%d q=%s ft=%d:%s:%d/%d:%.1f st=%d:%s:%d/%d:%.1f str=%.1f/%.1f/%.1f->%.1f/%.1f/%.1f gap=%.1f/%.1f/%.1f engp=%.1f/%.1f(%d/%d) mex=%d:%s:%.2f struct=%d/%d/%d tech=%d:%s',
                 aiBrain:GetArmyIndex(),
                 checkpoint,
                 sample.FactoryCount or 0,
@@ -252,6 +259,10 @@ function Capture(aiBrain, now)
                 sample.RecoveryBaseEng or 0,
                 sample.RecoveryDefense or 0,
                 sample.MacroPhase or 'unknown',
+                sample.StrategyDirective or 'stabilize',
+                sample.StrategyTheater or 'Front',
+                sample.StrategyRaidDirective or 'opportunistic',
+                sample.StrategyRaidCentrality or 0,
                 sample.GraphSource or 'none',
                 sample.GraphNodes or 0,
                 sample.GraphContested or 0,
@@ -360,9 +371,13 @@ function Tune(aiBrain, now)
     if now - (runtime.LastMetricsLogTime or -999) >= 60 then
         runtime.LastMetricsLogTime = now
         local recovery = runtime.Recovery or {}
-        LOG(string.format('*OVERMIND METRICS A%d goal=%s posture=%s pivot=%s conf=%.2f prod=%s float=%.2f estall=%.2f mstall=%.2f aggr=%.2f stagn=%.1f rf=%d rs=%d',
+        LOG(string.format('*OVERMIND METRICS A%d goal=%s strat=%s/%s/%s:%.2f posture=%s pivot=%s conf=%.2f prod=%s float=%.2f estall=%.2f mstall=%.2f aggr=%.2f stagn=%.1f rf=%d rs=%d',
             aiBrain:GetArmyIndex(),
             runtime.StrategyGoal or 'hold',
+            (planner.Directive or 'stabilize'),
+            (planner.PrimaryTheater or 'Front'),
+            (planner.RaidDirective or 'opportunistic'),
+            (planner.RaidCentrality or 0),
             (runtime.OpponentModel and runtime.OpponentModel.Posture) or 'unknown',
             (runtime.OpponentModel and runtime.OpponentModel.LikelyPivot) or 'balanced',
             ((runtime.OpponentModel and runtime.OpponentModel.Confidence and runtime.OpponentModel.Confidence.Global) or 0),

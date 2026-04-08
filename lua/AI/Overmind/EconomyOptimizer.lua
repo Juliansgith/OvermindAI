@@ -90,6 +90,7 @@ function UpdatePolicy(aiBrain, now)
 
     local eco = runtime.EcoState or {}
     local opp = runtime.OpponentModel or {}
+    local planner = runtime.StrategicPlanner or {}
     local recovery = runtime.Recovery or {}
     local goal = runtime.StrategyGoal or 'hold'
     local aggression = (runtime.Aggression or 1) + (runtime.GoalAggressionModifier or 0)
@@ -344,6 +345,39 @@ function UpdatePolicy(aiBrain, now)
         policy.EngineerReserveMin = math.max(policy.EngineerReserveMin, 5)
         policy.FarExpandMinTime = math.max(policy.FarExpandMinTime, 520)
         policy.SafeExpandDistance = math.min(policy.SafeExpandDistance, 560)
+    end
+
+    if planner.TradeMapForTech then
+        policy.UpgradeMassIncome = math.max(2.8, policy.UpgradeMassIncome - 0.8)
+        policy.UpgradeEnergyIncome = math.max(18, policy.UpgradeEnergyIncome - 10)
+        policy.T2MexMinTime = math.max(150, policy.T2MexMinTime - 35)
+        policy.PrimaryFactorySoftCap = math.max(2, policy.PrimaryFactorySoftCap - 1)
+        policy.FactoryMassIncome = policy.FactoryMassIncome + 0.2
+    elseif planner.TradeTechForTempo or planner.PunishGreed then
+        policy.FactoryMassIncome = math.max(3.0, policy.FactoryMassIncome - 0.6)
+        policy.FactoryEnergyIncome = math.max(50, policy.FactoryEnergyIncome - 10)
+        policy.FactoryMassPerFactory = math.max(0.95, policy.FactoryMassPerFactory - 0.08)
+        policy.UpgradeMassIncome = policy.UpgradeMassIncome + 0.9
+        policy.UpgradeEnergyIncome = policy.UpgradeEnergyIncome + 10
+        policy.T2MexMinTime = policy.T2MexMinTime + 40
+        policy.PrimaryFactorySoftCap = policy.PrimaryFactorySoftCap + 1
+    end
+
+    if planner.Directive == 'expand' or planner.PrimaryTheater == 'Enemy' then
+        policy.SafeExpandDistance = policy.SafeExpandDistance + 70
+        policy.SafeExpandThreatCap = policy.SafeExpandThreatCap + 0.08
+        policy.SafeExpandEnemyBuffer = math.max(45, policy.SafeExpandEnemyBuffer - 10)
+    elseif planner.Directive == 'stabilize' or planner.PrimaryTheater == 'Home' then
+        policy.SafeExpandDistance = math.min(policy.SafeExpandDistance, 560)
+        policy.SafeExpandThreatCap = math.min(policy.SafeExpandThreatCap, 0.82)
+        policy.SafeExpandEnemyBuffer = math.max(policy.SafeExpandEnemyBuffer, 88)
+    end
+
+    if planner.ForceAirAnswer then
+        policy.AirFactoryMinTime = math.max(180, policy.AirFactoryMinTime - 60)
+        policy.AirFactoryMinEnergyIncome = math.max(18, policy.AirFactoryMinEnergyIncome - 6)
+        policy.RadarDesiredCap = policy.RadarDesiredCap + 1
+        policy.MaxAirBomberShare = policy.MaxAirBomberShare + 0.06
     end
 
     policy.FactoryMassRatio = Clamp(policy.FactoryMassRatio, 0.18, 0.5)
