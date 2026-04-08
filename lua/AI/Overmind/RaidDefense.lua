@@ -357,16 +357,28 @@ function Update(aiBrain, now)
     end
 
     local mainPos = GetMainPos(aiBrain, runtime)
+    local baseEdgeSiege = mainPos
+        and threatPos
+        and (state.LastThreatLabel == 'acu' or state.LastThreatLabel == 'main' or state.LastThreatLabel == 'asset')
+        and enemyLand >= 6
+        and Distance2D(mainPos, threatPos) <= 120
 
     if state.UnderLandHarass then
         local needLand = math.min(16, math.max(4, enemyLand + math.floor(enemyAir * 0.5) + 2))
         local smallMexSabotage = (state.LastThreatLabel == 'mex' or state.LastThreatLabel == 'asset') and enemyLand >= 1 and enemyLand <= 2
+        local largeBaseAttack = baseEdgeSiege or ((state.LastThreatLabel == 'acu' or state.LastThreatLabel == 'main' or state.LastThreatLabel == 'asset') and enemyLand >= 5)
         if smallMexSabotage then
             needLand = math.min(8, math.max(needLand, enemyLand + 4))
+        end
+        if largeBaseAttack then
+            needLand = math.min(22, math.max(needLand, enemyLand + 6 + math.floor(enemyAir * 0.5)))
         end
         local defenders = SelectResponseUnits(aiBrain, LandCombatCategory, needLand, threatPos, true)
         if smallMexSabotage and table.getn(defenders) < needLand then
             defenders = AppendUniqueUnits(defenders, SelectResponseUnits(aiBrain, LandCombatCategory, needLand + 2, threatPos, true), needLand + 2)
+        end
+        if largeBaseAttack and table.getn(defenders) < needLand then
+            defenders = AppendUniqueUnits(defenders, SelectResponseUnits(aiBrain, LandCombatCategory, math.min(24, needLand + 4), threatPos, true), math.min(24, needLand + 4))
         end
         if table.getn(defenders) > 0 then
             if IssueMove then
@@ -382,7 +394,21 @@ function Update(aiBrain, now)
             recovery.ForceBaseEngineerRecovery = true
         end
 
-        if (state.LastThreatLabel == 'acu' or state.LastThreatLabel == 'main' or state.LastThreatLabel == 'asset') and enemyLand >= 4 then
+        if largeBaseAttack then
+            recovery.ForceDefenseRecovery = true
+            recovery.ForceFactoryRecovery = true
+            recovery.ForceFactoryLand = true
+            local reserves = SelectResponseUnits(aiBrain, LandCombatCategory, math.min(24, enemyLand + 10), threatPos, true)
+            if table.getn(reserves) > 0 then
+                if IssueMove then
+                    IssueMove(reserves, threatPos)
+                end
+                if IssueAggressiveMove then
+                    IssueAggressiveMove(reserves, threatPos)
+                end
+                state.LastLandResponse = math.max(state.LastLandResponse or 0, table.getn(reserves))
+            end
+        elseif (state.LastThreatLabel == 'acu' or state.LastThreatLabel == 'main' or state.LastThreatLabel == 'asset') and enemyLand >= 4 then
             recovery.ForceDefenseRecovery = true
             recovery.ForceFactoryRecovery = true
             recovery.ForceFactoryLand = true

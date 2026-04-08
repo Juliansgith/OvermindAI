@@ -987,6 +987,10 @@ local function DecideRolePlan(runtime, current, constraints, demand, budget, con
     if (constraints.BomberWatch or constraints.BomberPanic or constraints.ExposedMexAirRaid) and powerReady > 0 and current.Factories.Land.Ready >= 1 then
         airEnabled = true
     end
+    local clusterStrikeWindow = airEnabled
+        and constraints.EnemyLowAirThreat
+        and (constraints.EnemyIndirectHeavy or constraints.EnemyT2Push)
+        and (constraints.BasePressure >= 0.12 or constraints.FrontPressure >= 0.14 or constraints.ApproachThreat >= 5.5 or constraints.ApproachReal)
     local airTotal = 0
     if airEnabled then
         airTotal = 2 + math.floor((budget.Air * 22) + (constraints.AirGuardPressure * 7) + (demand.IntelNeed * 0.25))
@@ -1040,6 +1044,19 @@ local function DecideRolePlan(runtime, current, constraints, demand, budget, con
             7)
         bomberDesired = math.max(bomberDesired, math.min(counterBomberFloor, math.max(2, math.floor(math.max(airTotal, 4) * 0.48))))
     end
+    if clusterStrikeWindow
+        and current.Factories.Air.Ready >= 1
+        and not constraints.AirPanic
+        and not constraints.BomberPanic
+        and not constraints.ExposedMexAirRaid then
+        local strikeBomberFloor = Clamp(
+            2
+                + current.Factories.Air.Ready
+                + (((constraints.BasePressure >= 0.16) or (constraints.ApproachThreat >= 6.5)) and 1 or 0),
+            2,
+            8)
+        bomberDesired = math.max(bomberDesired, math.min(strikeBomberFloor, math.max(2, math.floor(math.max(airTotal, 4) * 0.55))))
+    end
     bomberDesired = Clamp(bomberDesired, 0, 8)
     local fighterDesired = airEnabled and Clamp(airTotal - airScoutDesired - bomberDesired, 1, 28) or 0
     if constraints.BomberWatch then
@@ -1050,6 +1067,9 @@ local function DecideRolePlan(runtime, current, constraints, demand, budget, con
     end
     if constraints.CounterAirWindow and airEnabled and not constraints.AirPanic then
         fighterDesired = math.max(fighterDesired, math.min(6, math.max(2, bomberDesired)))
+    end
+    if clusterStrikeWindow and bomberDesired > 0 and airEnabled then
+        fighterDesired = math.max(fighterDesired, math.min(5, math.max(2, bomberDesired - 1)))
     end
     if bomberDesired > 0 and airEnabled then
         fighterDesired = math.max(fighterDesired, math.min(6, math.max(2, bomberDesired - 1)))
@@ -1097,7 +1117,7 @@ local function DecideRolePlan(runtime, current, constraints, demand, budget, con
         LandIndirect = BuildRoleEntry('LandIndirect', current.Roles.LandIndirect, current.RoleUnits.LandIndirect, landIndirectDesired, Clamp(0.24 + (constraints.ContestedZones * 0.05) + ((mode == 'pressure') and 0.08 or 0), 0.08, 0.9), SelectReason((mode == 'pressure') and 'front_support' or 'contested_lane', (constraints.ContestedZones >= 2) and 'front_hold' or nil, nil)),
         LandScout = BuildRoleEntry('LandScout', current.Roles.LandScout, current.RoleUnits.LandScout, scoutDesired, Clamp(0.22 + (demand.IntelNeed * 0.03), 0.08, 0.86), SelectReason((constraints.StaleZones > 0) and 'scouting_debt' or 'screen', (constraints.RaidPressure > 0.1) and 'raid_lane' or nil, nil)),
         AirFighter = BuildRoleEntry('AirFighter', current.Roles.AirFighter, current.RoleUnits.AirFighter, fighterDesired, Clamp(0.3 + (constraints.AirGuardPressure * 0.24) + (constraints.AirPanic and 0.2 or 0) + (constraints.CounterAirWindow and 0.08 or 0), 0.1, 0.98), SelectReason((constraints.BomberPanic or constraints.ExposedMexAirRaid) and 'bomber_intercept' or (constraints.CounterAirWindow and 'strike_cover' or (constraints.BomberWatch and 'bomber_watch' or ((constraints.AirPanic or demand.AirRisk > 22) and 'enemy_air_risk' or 'air_guard'))), (constraints.VisionPanic and 'intel_cover' or nil), nil)),
-        AirBomber = BuildRoleEntry('AirBomber', current.Roles.AirBomber, current.RoleUnits.AirBomber, bomberDesired, Clamp(0.12 + (demand.RaidWindow * 0.38 * bomberConfidence) + ((demand.CounterStrike or 0) * 0.28), 0.04, 0.9), SelectReason((constraints.CounterAirWindow and bomberDesired > 0) and 't2_counter' or ((bomberDesired > 0) and 'raid_window' or 'suppressed'), (bomberConfidence < 0.55) and 'low_confidence' or nil, nil)),
+        AirBomber = BuildRoleEntry('AirBomber', current.Roles.AirBomber, current.RoleUnits.AirBomber, bomberDesired, Clamp(0.12 + (demand.RaidWindow * 0.38 * bomberConfidence) + ((demand.CounterStrike or 0) * 0.28), 0.04, 0.9), SelectReason(((constraints.CounterAirWindow or clusterStrikeWindow) and bomberDesired > 0) and 't2_counter' or ((bomberDesired > 0) and 'raid_window' or 'suppressed'), (bomberConfidence < 0.55) and 'low_confidence' or nil, nil)),
         AirScout = BuildRoleEntry('AirScout', current.Roles.AirScout, current.RoleUnits.AirScout, airScoutDesired, Clamp(0.22 + (demand.IntelNeed * 0.04), 0.08, 0.9), SelectReason((constraints.VisionPanic or constraints.StaleZones > 0) and 'scouting_debt' or 'screen', (bomberDesired > 0) and 'strike_support' or nil, nil)),
         SeaSurface = BuildRoleEntry('SeaSurface', current.Roles.SeaSurface, current.RoleUnits.SeaSurface, seaSurfaceDesired, Clamp(0.18 + (demand.NavyRisk * 0.004), 0.05, 0.92), SelectReason(seaEnabled and 'naval_presence' or 'suppressed', (trends.Navy > 0) and 'enemy_navy_trend' or nil, nil)),
         SeaSub = BuildRoleEntry('SeaSub', current.Roles.SeaSub, current.RoleUnits.SeaSub, seaSubDesired, Clamp(0.14 + (demand.NavyRisk * 0.003), 0.04, 0.82), SelectReason(seaEnabled and 'naval_contest' or 'suppressed', nil, nil)),
@@ -1107,6 +1127,7 @@ end
 
 local function DecideCapacityPlan(runtime, current, constraints, rolePlan)
     local state = runtime.ProductionDirector or {}
+    local now = GetGameTimeSeconds()
     local totalUnfinished = current.Factories.Pending or 0
     local landRoleLoad = SumRoleField(rolePlan, { 'Engineer', 'LandDirect', 'LandAA', 'LandIndirect', 'LandScout' }, 'DesiredStrength')
     local airRoleLoad = SumRoleField(rolePlan, { 'AirFighter', 'AirBomber', 'AirScout' }, 'DesiredStrength')
@@ -1188,6 +1209,23 @@ local function DecideCapacityPlan(runtime, current, constraints, rolePlan)
         state.SecondLandFloorLatched = true
     end
     local secondLandLatched = state.SecondLandFloorLatched == true
+    local tempoRecoveryWindow = now >= 300
+        and secondLandLatched
+        and current.Factories.Land.Total >= 2
+        and current.Factories.Land.Ready >= 2
+        and mexReady >= math.max(7, constraints.StarterMexFloor or 5)
+        and powerReady >= math.max(5, constraints.StarterPowerFloor or 2)
+        and engineerUnits >= math.max(8, constraints.StarterEngineerFloor or 6)
+        and not constraints.EcoWeak
+        and not powerBufferLow
+        and not constraints.EcoCrash
+        and not constraints.CriticalFactory
+        and not constraints.UnitCapPressure
+    local sustainedTempoWindow = tempoRecoveryWindow
+        and now >= 450
+        and mexReady >= math.max(8, constraints.StarterMexFloor or 5)
+        and powerReady >= math.max(7, constraints.StarterPowerFloor or 2)
+        and engineerUnits >= math.max(10, constraints.StarterEngineerFloor or 6)
 
     local landTarget = Clamp(math.max(1, math.ceil(landRoleLoad / 9.5), math.ceil(landRoleUnits / 12)), 1, 6)
     local airTarget = Clamp((((airRoleLoad > 0 or airRoleUnits > 0) and math.max(1, math.ceil(airRoleLoad / 8.5), math.ceil(airRoleUnits / 8))) or 0), 0, 4)
@@ -1264,6 +1302,12 @@ local function DecideCapacityPlan(runtime, current, constraints, rolePlan)
     if secondLandLatched and not constraints.StarterPhase and not constraints.EconBootstrap then
         landTarget = math.max(landTarget, 2)
     end
+    if tempoRecoveryWindow then
+        landTarget = math.max(landTarget, 3)
+    end
+    if sustainedTempoWindow and current.Factories.Land.Total >= 3 then
+        landTarget = math.max(landTarget, 4)
+    end
     if liveCombatWindow and current.Factories.Land.Total >= 2 then
         landTarget = math.max(landTarget, 2)
     end
@@ -1294,13 +1338,19 @@ local function DecideCapacityPlan(runtime, current, constraints, rolePlan)
     if constraints.StarterPhase then
         pauseGrowth = true
     end
-    if totalUnfinished >= 1 then
+    if totalUnfinished >= 1 and not tempoRecoveryWindow then
+        pauseGrowth = true
+    end
+    if totalUnfinished >= 2 then
         pauseGrowth = true
     end
     if emergencyAirFactory and totalUnfinished <= 0 and not constraints.QueueStarved and not constraints.CriticalStructure then
         pauseGrowth = false
     end
     if threatenedAirUnlock and totalUnfinished <= 0 and not constraints.QueueStarved and not constraints.CriticalStructure then
+        pauseGrowth = false
+    end
+    if tempoRecoveryWindow and totalUnfinished <= 0 and not constraints.CriticalStructure and not powerBufferLow then
         pauseGrowth = false
     end
     if powerBufferLow and not emergencyAirFactory and not threatenedAirUnlock then
@@ -1620,6 +1670,7 @@ function Module.Update(aiBrain, now)
         ExposedMexAirRaid = constraints.ExposedMexAirRaid,
         EnemyIndirectHeavy = constraints.EnemyIndirectHeavy,
         EnemyT2Push = constraints.EnemyT2Push,
+        EnemyLowAirThreat = constraints.EnemyLowAirThreat,
         CounterAirWindow = constraints.CounterAirWindow,
         LandPanic = constraints.LandPanic,
         QueueStarved = constraints.QueueStarved,

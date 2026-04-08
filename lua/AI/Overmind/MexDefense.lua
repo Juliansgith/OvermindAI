@@ -21,6 +21,14 @@ local function Distance2D(a, b)
     return math.sqrt((dx * dx) + (dz * dz))
 end
 
+local function Normalize2D(dx, dz)
+    local mag = math.sqrt((dx * dx) + (dz * dz))
+    if mag <= 0.01 then
+        return 1, 0
+    end
+    return dx / mag, dz / mag
+end
+
 local function GetMainPos(aiBrain, runtime)
     if runtime and runtime.OwnMainPos then
         return runtime.OwnMainPos
@@ -95,14 +103,66 @@ local function PickBuilder(aiBrain, targetPos, bp)
     return false, false
 end
 
-local function FindBuildPos(aiBrain, mexPos, category)
-    for _, offset in BuildOffsets do
-        local pos = { (mexPos[1] or 0) + offset[1], 0, (mexPos[3] or 0) + offset[2] }
-        local nearby = aiBrain:GetNumUnitsAroundPoint(category, pos, 7, 'Ally') or 0
-        local mexHere = aiBrain:GetNumUnitsAroundPoint(categories.STRUCTURE * categories.MASSEXTRACTION, pos, 5, 'Ally') or 0
-        if nearby <= 0 and mexHere <= 0 then
-            return pos
+local function BuildPerimeterOffsets(anchorPos, facingPos)
+    if not anchorPos or not facingPos then
+        return false
+    end
+
+    local dirX, dirZ = Normalize2D((facingPos[1] or 0) - (anchorPos[1] or 0), (facingPos[3] or 0) - (anchorPos[3] or 0))
+    local perpX, perpZ = -dirZ, dirX
+    local offsets = {}
+
+    for _, distance in { 30, 36, 42 } do
+        for _, lateral in { 0, 10, -10, 18, -18 } do
+            table.insert(offsets, { (dirX * distance) + (perpX * lateral), (dirZ * distance) + (perpZ * lateral) })
         end
+    end
+
+    return offsets
+end
+
+local function ResolveBaseFacingPos(runtime, raid, mainPos)
+    if raid and raid.LastThreatMexPos and (raid.UnderLandHarass or raid.UnderAirHarass) then
+        return raid.LastThreatMexPos
+    end
+    if raid and raid.ExposedMexThreatPos then
+        return raid.ExposedMexThreatPos
+    end
+
+    local cluster = runtime and runtime.EnemyClusterTracker or {}
+    local approach = cluster and cluster.ApproachCluster or {}
+    if approach and approach.Pos and (((approach.ConfirmedUnits or 0) > 0) or ((approach.TotalThreat or 0) >= 4.5)) then
+        return approach.Pos
+    end
+
+    if runtime and runtime.PrimaryEnemyPos then
+        return runtime.PrimaryEnemyPos
+    end
+
+    return mainPos and { (mainPos[1] or 0) + 36, 0, (mainPos[3] or 0) } or false
+end
+
+local function FindBuildPos(aiBrain, mexPos, category, facingPos)
+    local offsetSets = {}
+    local perimeterOffsets = BuildPerimeterOffsets(mexPos, facingPos)
+    if perimeterOffsets then
+        table.insert(offsetSets, perimeterOffsets)
+    end
+    table.insert(offsetSets, BuildOffsets)
+
+    for _, offsets in offsetSets do
+        for _, offset in offsets do
+            local pos = { (mexPos[1] or 0) + offset[1], 0, (mexPos[3] or 0) + offset[2] }
+            local nearby = aiBrain:GetNumUnitsAroundPoint(category, pos, 7, 'Ally') or 0
+            local mexHere = aiBrain:GetNumUnitsAroundPoint(categories.STRUCTURE * categories.MASSEXTRACTION, pos, 5, 'Ally') or 0
+            if nearby <= 0 and mexHere <= 0 then
+                return pos
+            end
+        end
+    end
+
+    if perimeterOffsets and perimeterOffsets[1] then
+        return { (mexPos[1] or 0) + perimeterOffsets[1][1], 0, (mexPos[3] or 0) + perimeterOffsets[1][2] }
     end
     return { (mexPos[1] or 0) + 10, 0, (mexPos[3] or 0) }
 end
@@ -255,7 +315,8 @@ function Module.Update(aiBrain, now)
     end
 
     local category = chooseAA and T1AAStructureCategory or T1PDStructureCategory
-    local buildPos = FindBuildPos(aiBrain, buildPosBase, category)
+    local facingPos = targetIsBase and ResolveBaseFacingPos(runtime, raid, mainPos) or false
+    local buildPos = FindBuildPos(aiBrain, buildPosBase, category, facingPos)
 
     if busy and IssueClearCommands then
         IssueClearCommands({ builder })

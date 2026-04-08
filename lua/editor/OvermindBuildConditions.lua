@@ -309,6 +309,24 @@ local function HasLocalExtractorUpgradeCandidate(aiBrain, targetTech, radius)
     return GetCompletedUnitCount(aiBrain, candidateCategory, mainPos, radius or 240) > 0
 end
 
+local function CountLocalExtractorUpgradeCandidates(aiBrain, targetTech, radius)
+    local mainPos = GetMainPos(aiBrain, 'MAIN')
+    if not mainPos then
+        return 0
+    end
+    local candidateCategory = GetExtractorUpgradeCandidateCategory(targetTech)
+    return GetCompletedUnitCount(aiBrain, candidateCategory, mainPos, radius or 240)
+end
+
+local function CountLocalUpgradedExtractors(aiBrain, targetTech, radius)
+    local mainPos = GetMainPos(aiBrain, 'MAIN')
+    if not mainPos then
+        return 0
+    end
+    local upgradedCategory = categories.MASSEXTRACTION * (((targetTech == 'tech3') or (targetTech == 3)) and categories.TECH3 or categories.TECH2)
+    return GetCompletedUnitCount(aiBrain, upgradedCategory, mainPos, radius or 320)
+end
+
 local function CountSafeRemoteExtractorUpgradeCandidates(aiBrain, targetTech, minRadius)
     local mainPos = GetMainPos(aiBrain, 'MAIN')
     if not mainPos then
@@ -1292,21 +1310,33 @@ function ShouldUpgradeRemoteExtractors(aiBrain, targetTech, minRadius)
     local structures = current.Structures or {}
     local confidence = director and director.Confidence or {}
     local mapControl = (aiBrain.OvermindRuntime and aiBrain.OvermindRuntime.ZoneModel and aiBrain.OvermindRuntime.ZoneModel.MapControl) or 0
-    local localRadius = minRadius or 240
+    local liveEcon = GetEcon(aiBrain)
+    local localRadius = math.max(minRadius or 240, ((targetTech == 'tech3') or (targetTech == 3)) and 340 or 320)
+    local upgradedLocal = CountLocalUpgradedExtractors(aiBrain, targetTech, localRadius + 60)
+    local requiredLocalUpgrades = (((targetTech == 'tech3') or (targetTech == 3)) and 1 or 2)
 
-    if HasLocalExtractorUpgradeCandidate(aiBrain, targetTech, localRadius) then
+    if CountLocalExtractorUpgradeCandidates(aiBrain, targetTech, localRadius) > 0 then
+        return false
+    end
+    if upgradedLocal < requiredLocalUpgrades then
         return false
     end
     if (structures.Radar or 0) <= 0 then
         return false
     end
-    if ((factories.Land or {}).Ready or 0) < 2 then
+    if ((factories.Land or {}).Ready or 0) < 3 then
         return false
     end
-    if (((eco.Power or {}).Ready) or 0) < 3 then
+    if (((eco.Power or {}).Ready) or 0) < 4 then
         return false
     end
-    if (confidence.Global or 0) < 0.45 or mapControl < 0.25 then
+    if (confidence.Global or 0) < 0.52 or mapControl < 0.32 then
+        return false
+    end
+    if (liveEcon.MassStorageRatio or 0) < 0.22 or (liveEcon.EnergyStorageRatio or 0) < 0.32 then
+        return false
+    end
+    if (liveEcon.MassTrend or 0) < 0.02 or (liveEcon.EnergyTrend or 0) < 6 then
         return false
     end
 
