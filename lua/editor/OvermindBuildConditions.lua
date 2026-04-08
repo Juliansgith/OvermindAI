@@ -327,6 +327,73 @@ local function CountLocalUpgradedExtractors(aiBrain, targetTech, radius)
     return GetCompletedUnitCount(aiBrain, upgradedCategory, mainPos, radius or 320)
 end
 
+local function CountLocalUnfinishedUpgradedExtractors(aiBrain, targetTech, radius)
+    local mainPos = GetMainPos(aiBrain, 'MAIN')
+    if not mainPos then
+        return 0
+    end
+    local upgradedCategory = categories.MASSEXTRACTION * (((targetTech == 'tech3') or (targetTech == 3)) and categories.TECH3 or categories.TECH2)
+    return GetUnfinishedUnitCount(aiBrain, upgradedCategory, mainPos, radius or 320)
+end
+
+local function HasRemainingLocalTech2UpgradeWork(aiBrain, radius)
+    local localRadius = radius or 360
+    return CountLocalExtractorUpgradeCandidates(aiBrain, 'tech2', localRadius) > 0
+        or CountLocalUnfinishedUpgradedExtractors(aiBrain, 'tech2', localRadius + 40) > 0
+end
+
+local function CanUpgradeToTech3Extractors(aiBrain, radius)
+    if not IsOvermindBrain(aiBrain) then
+        return false
+    end
+
+    if HasCriticalFactoryTask(aiBrain) or HasCriticalStructureTask(aiBrain) then
+        return false
+    end
+    if IsUnderLandHarass(aiBrain, 1) or IsUnderAirHarass(aiBrain, 1) or IsBomberWatch(aiBrain) or IsBomberPanic(aiBrain) or IsExposedMexAirRaid(aiBrain) then
+        return false
+    end
+
+    local liveEcon = GetEcon(aiBrain)
+    local director = GetProductionDirector(aiBrain)
+    local current = director and director.Current or {}
+    local factories = current.Factories or {}
+    local structures = current.Structures or {}
+    local confidence = director and director.Confidence or {}
+    local recovery = GetRecovery(aiBrain) or {}
+    local localRadius = radius or 360
+
+    if recovery.ForceFactoryRecovery or recovery.FactoryQueueExpansionBlocked then
+        return false
+    end
+    if HasRemainingLocalTech2UpgradeWork(aiBrain, localRadius) then
+        return false
+    end
+    if (structures.Radar or 0) <= 0 then
+        return false
+    end
+    if ((factories.Land or {}).Ready or 0) < 3 then
+        return false
+    end
+    if (((current.Eco or {}).Power or {}).Ready or 0) < 4 then
+        return false
+    end
+    if (confidence.Global or 0) < 0.56 then
+        return false
+    end
+    if (liveEcon.MassStorageRatio or 0) < 0.28 or (liveEcon.EnergyStorageRatio or 0) < 0.36 then
+        return false
+    end
+    if (liveEcon.MassTrend or 0) < 0.01 or (liveEcon.EnergyTrend or 0) < 4 then
+        return false
+    end
+    if (liveEcon.MassIncome or 0) < 5.5 or (liveEcon.EnergyIncome or 0) < 55 then
+        return false
+    end
+
+    return true
+end
+
 local function CountSafeRemoteExtractorUpgradeCandidates(aiBrain, targetTech, minRadius)
     local mainPos = GetMainPos(aiBrain, 'MAIN')
     if not mainPos then
@@ -1384,6 +1451,11 @@ function ShouldUpgradeLocalExtractors(aiBrain, targetTech, radius)
     if not IsOvermindBrain(aiBrain) then
         return false
     end
+    if (targetTech == 'tech3') or (targetTech == 3) then
+        if not CanUpgradeToTech3Extractors(aiBrain, math.max(radius or 240, 360)) then
+            return false
+        end
+    end
     return HasLocalExtractorUpgradeCandidate(aiBrain, targetTech, radius or 240)
 end
 
@@ -1408,6 +1480,15 @@ function ShouldUpgradeRemoteExtractors(aiBrain, targetTech, minRadius)
     local mapControl = (aiBrain.OvermindRuntime and aiBrain.OvermindRuntime.ZoneModel and aiBrain.OvermindRuntime.ZoneModel.MapControl) or 0
     local liveEcon = GetEcon(aiBrain)
     local localRadius = math.max(minRadius or 240, ((targetTech == 'tech3') or (targetTech == 3)) and 340 or 320)
+
+    if (targetTech == 'tech3') or (targetTech == 3) then
+        if not CanUpgradeToTech3Extractors(aiBrain, localRadius) then
+            return false
+        end
+    elseif CountLocalExtractorUpgradeCandidates(aiBrain, 'tech2', math.max(320, localRadius - 40)) > 0 then
+        return false
+    end
+
     local upgradedLocal = CountLocalUpgradedExtractors(aiBrain, targetTech, localRadius + 60)
     local requiredLocalUpgrades = (((targetTech == 'tech3') or (targetTech == 3)) and 1 or 2)
 

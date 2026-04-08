@@ -1804,7 +1804,7 @@ BuilderGroup {
         BuilderName = 'Overmind T1 Mex Upgrade Local',
         PlatoonTemplate = 'T1MassExtractorUpgrade',
         InstanceCount = 1,
-        Priority = 360,
+        Priority = 390,
         BuilderConditions = {
             { OMBC, 'IsOvermindBrain', {} },
             { IBC, 'BrainNotLowPowerMode', {} },
@@ -1819,7 +1819,7 @@ BuilderGroup {
         BuilderName = 'Overmind T1 Mex Upgrade Safe Remote',
         PlatoonTemplate = 'T1MassExtractorUpgrade',
         InstanceCount = 1,
-        Priority = 280,
+        Priority = 305,
         BuilderConditions = {
             { OMBC, 'IsOvermindBrain', {} },
             { OMBC, 'ShouldUpgradeExtractors', {} },
@@ -1833,7 +1833,7 @@ BuilderGroup {
         BuilderName = 'Overmind T2 Mex Upgrade Local',
         PlatoonTemplate = 'T2MassExtractorUpgrade',
         InstanceCount = 1,
-        Priority = 370,
+        Priority = 330,
         BuilderConditions = {
             { OMBC, 'IsOvermindBrain', {} },
             { IBC, 'BrainNotLowPowerMode', {} },
@@ -1848,7 +1848,7 @@ BuilderGroup {
         BuilderName = 'Overmind T2 Mex Upgrade Safe Remote',
         PlatoonTemplate = 'T2MassExtractorUpgrade',
         InstanceCount = 1,
-        Priority = 290,
+        Priority = 255,
         BuilderConditions = {
             { OMBC, 'IsOvermindBrain', {} },
             { OMBC, 'ShouldUpgradeExtractors', {} },
