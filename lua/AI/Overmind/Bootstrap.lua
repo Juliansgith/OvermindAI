@@ -3,7 +3,7 @@ local OvermindScheduler = import('/mods/OvermindAI/lua/AI/Overmind/Scheduler.lua
 local OvermindMemory = import('/mods/OvermindAI/lua/AI/Overmind/Memory.lua')
 
 local ActiveBrains = {}
-local BuildFingerprint = 'v94-telemetry-planner-scope-fix'
+local BuildFingerprint = 'v95-sticky-structures-macro-unlock'
 
 local NavUtils = false
 do

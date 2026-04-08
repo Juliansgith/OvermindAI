@@ -922,6 +922,8 @@ local function ShouldKeepTrackedStructureTask(now, task, trackedTargetId, tracke
     local assigned = task.AssignedBuilders or 0
     local stickyUntil = task.StickyUntil or -999
     local keep = false
+    local trackedLower = string.lower(trackedKind or 'none')
+    local bestLower = string.lower(bestKind or 'none')
 
     if now < stickyUntil then
         keep = true
@@ -937,13 +939,20 @@ local function ShouldKeepTrackedStructureTask(now, task, trackedTargetId, tracke
         keep = true
     elseif trackedKind == 'Radar' and trackedFraction >= 0.35 then
         keep = true
+    elseif (trackedLower == 'aa' or trackedLower == 'defense') and trackedFraction >= 0.2 then
+        keep = true
+    elseif trackedLower == 'structure' and trackedFraction >= 0.5 then
+        keep = true
     end
     if trackedKind == 'Power' and trackedFraction >= 0.8 then
         keep = true
     end
+    if assigned <= 0 and trackedFraction >= 0.72 then
+        keep = true
+    end
 
     local preemptMargin = 85
-    if bestKind == 'Radar' and radarCritical then
+    if bestLower == 'radar' and radarCritical then
         preemptMargin = 140
     end
     if trackedKind == 'Mex' and trackedFraction >= 0.55 then
@@ -952,9 +961,16 @@ local function ShouldKeepTrackedStructureTask(now, task, trackedTargetId, tracke
         preemptMargin = preemptMargin + 100
     elseif trackedKind == 'Radar' and trackedFraction >= 0.35 then
         preemptMargin = preemptMargin + 80
+    elseif (trackedLower == 'aa' or trackedLower == 'defense') and trackedFraction >= 0.2 then
+        preemptMargin = preemptMargin + 115
+    elseif trackedLower == 'structure' and trackedFraction >= 0.5 then
+        preemptMargin = preemptMargin + 140
     end
     if trackedKind == 'Power' and trackedFraction >= 0.8 then
         preemptMargin = preemptMargin + 180
+    end
+    if assigned <= 0 and trackedFraction >= 0.72 then
+        preemptMargin = preemptMargin + 120
     end
 
     if bestPriority > (trackedPriority + preemptMargin) then
@@ -1190,6 +1206,7 @@ local function AssignBuildersToUnfinishedStructure(aiBrain, runtime, now, target
     local airThreatened = bomberWatch or bomberPanic or raid.UnderAirHarass or exposedMexAirRaid
     local targetFraction = GetFraction(target)
     local requiredBuilders = ComputeStructureTaskRequirements(kind, targetFraction, stallTime, eco)
+    local kindLower = string.lower(kind or 'none')
     local forceFinishPower = kind == 'Power'
         and targetFraction >= 0.8
         and (
@@ -1200,6 +1217,13 @@ local function AssignBuildersToUnfinishedStructure(aiBrain, runtime, now, target
         )
     local forceInterrupt = stallTime >= 8 or kind == 'Mex' or kind == 'Power' or (kind == 'Radar' and radarCritical)
     if forceFinishPower then
+        requiredBuilders = math.max(2, requiredBuilders)
+        forceInterrupt = true
+    end
+    if (kindLower == 'aa' or kindLower == 'defense') and (targetFraction >= 0.15 or stallTime >= 4) then
+        requiredBuilders = math.max(2, requiredBuilders)
+        forceInterrupt = true
+    elseif kindLower == 'structure' and (targetFraction >= 0.45 or stallTime >= 6) then
         requiredBuilders = math.max(2, requiredBuilders)
         forceInterrupt = true
     end
@@ -1221,6 +1245,11 @@ local function AssignBuildersToUnfinishedStructure(aiBrain, runtime, now, target
     if forceFinishPower then
         dispatchRadius = dispatchRadius + 120
     end
+    if kindLower == 'aa' or kindLower == 'defense' then
+        dispatchRadius = dispatchRadius + 100
+    elseif kindLower == 'structure' and targetFraction >= 0.45 then
+        dispatchRadius = dispatchRadius + 120
+    end
     if kind == 'Radar' and radarCritical then
         dispatchRadius = dispatchRadius + 180
     elseif kind == 'Radar' and airThreatened then
@@ -1240,6 +1269,9 @@ local function AssignBuildersToUnfinishedStructure(aiBrain, runtime, now, target
         interruptQCap = math.max(interruptQCap, 4)
     end
     if forceFinishPower then
+        interruptQCap = math.max(interruptQCap, 4)
+    end
+    if kindLower == 'aa' or kindLower == 'defense' or (kindLower == 'structure' and targetFraction >= 0.45) then
         interruptQCap = math.max(interruptQCap, 4)
     end
     if kind == 'Radar' and radarCritical then
@@ -1539,11 +1571,24 @@ function Update(aiBrain, now)
                 stickyDuration = 16
             elseif structureKind == 'Radar' then
                 stickyDuration = 14
+            elseif structureKind == 'AA' or structureKind == 'Defense' then
+                stickyDuration = 18
+            elseif string.lower(structureKind or 'none') == 'structure' then
+                stickyDuration = 16
             end
             if structureFraction >= 0.45 then
                 stickyDuration = stickyDuration + 6
             end
-            if assignedBuilders > 0 or structureFraction >= 0.35 then
+            if structureFraction >= 0.72 then
+                stickyDuration = stickyDuration + 10
+            end
+            local earlyStickyFraction = 0.35
+            if structureKind == 'AA' or structureKind == 'Defense' then
+                earlyStickyFraction = 0.18
+            elseif string.lower(structureKind or 'none') == 'structure' then
+                earlyStickyFraction = 0.5
+            end
+            if assignedBuilders > 0 or structureFraction >= earlyStickyFraction then
                 structureTask.StickyUntil = math.max(structureTask.StickyUntil or -999, now + stickyDuration)
             end
             if structureKind == 'Power' and structureFraction >= 0.8 then

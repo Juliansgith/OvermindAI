@@ -416,11 +416,11 @@ local function BuildConstraints(runtime, current, confidence, scoutingDebt, nava
             or raid.UnderAirHarass
             or ((intel.StaleZones or 0) >= 3 and now >= 180)
         )
-    local starterPhase = now < 780 and (
+    local starterPhase = now < 720 and (
         engineerUnits < starterEngineerFloor
         or mexReady < starterMexFloor
         or powerReady < starterPowerFloor
-        or powerBufferLow
+        or ((now < 360 or current.Factories.Total <= 1) and powerBufferLow)
         or (starterRadarRequired and radarReady < 1)
         or criticalFactory
         or (criticalStructure and ((structureTask.Kind == 'Power') or (structureTask.Kind == 'Radar') or (structureTask.Kind == 'Mex')))
@@ -1428,11 +1428,22 @@ local function DecideCapacityPlan(runtime, current, constraints, rolePlan)
         seaTarget = 0
     end
 
+    local starterGrowthLock = constraints.StarterPhase
+        and (
+            current.Factories.Total <= 1
+            or constraints.RadarCritical
+            or constraints.CriticalFactory
+            or (constraints.CriticalStructure and (
+                constraints.CriticalStructureKind == 'Power'
+                or constraints.CriticalStructureKind == 'Radar'
+                or constraints.CriticalStructureKind == 'Mex'
+            ))
+        )
     local pauseGrowth = constraints.EcoCrash or constraints.QueueStarved or constraints.UnitCapPressure or constraints.CriticalFactory or structurePausesGrowth
     if constraints.EconBootstrap then
         pauseGrowth = true
     end
-    if constraints.StarterPhase then
+    if starterGrowthLock then
         pauseGrowth = true
     end
     if totalUnfinished >= 1 and not tempoRecoveryWindow then
@@ -1448,6 +1459,16 @@ local function DecideCapacityPlan(runtime, current, constraints, rolePlan)
         pauseGrowth = false
     end
     if tempoRecoveryWindow and totalUnfinished <= 0 and not constraints.CriticalStructure and not powerBufferLow then
+        pauseGrowth = false
+    end
+    if secondLandEcoReady
+        and current.Factories.Land.Total <= 1
+        and totalUnfinished <= 0
+        and not constraints.EcoCrash
+        and not constraints.QueueStarved
+        and not constraints.CriticalFactory
+        and not structurePausesGrowth then
+        landTarget = math.max(landTarget, 2)
         pauseGrowth = false
     end
     if powerBufferLow and not emergencyAirFactory and not threatenedAirUnlock then

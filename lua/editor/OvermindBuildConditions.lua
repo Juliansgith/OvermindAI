@@ -1116,6 +1116,7 @@ function ShouldBuildPower(aiBrain, maxEnergyRatio, maxEnergyTrend, maxMassRatioF
     local mexCount = GetUnitCount(aiBrain, categories.MASSEXTRACTION * categories.STRUCTURE)
     local pgenCount = GetUnitCount(aiBrain, categories.ENERGYPRODUCTION * categories.STRUCTURE)
     local pgenReady = GetCompletedUnitCount(aiBrain, categories.ENERGYPRODUCTION * categories.STRUCTURE)
+    local pendingPgens = math.max(0, pgenCount - pgenReady)
     local factoryCount = GetExistingUnitCount(aiBrain, categories.FACTORY * categories.STRUCTURE)
     local now = GetGameTimeSeconds()
     local maxPgenPerMex = (policy and policy.PgenPerMexCap) or 1.85
@@ -1147,6 +1148,19 @@ function ShouldBuildPower(aiBrain, maxEnergyRatio, maxEnergyTrend, maxMassRatioF
     end
 
     local severeEnergyCrisis = econ.EnergyStorageRatio <= 0.1 or econ.EnergyTrend <= -20
+    local bootstrapLike = IsEconomyBootstrapState(aiBrain) or IsStarterPhaseState(aiBrain)
+    if not severeEnergyCrisis then
+        local pendingCap = bootstrapLike and 2 or 3
+        if pendingPgens >= pendingCap then
+            return false
+        end
+        if pendingPgens >= 2
+            and mexCount <= math.max(2, pgenReady + 1)
+            and econ.EnergyStorageRatio >= 0.08
+            and econ.EnergyTrend >= -14 then
+            return false
+        end
+    end
     if now < 780 and not severeEnergyCrisis then
         local extraAllowance = 3
         if factoryCount >= 3 then
