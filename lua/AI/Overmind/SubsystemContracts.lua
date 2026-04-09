@@ -29,54 +29,6 @@ local OvermindBomberHarass = import('/mods/OvermindAI/lua/AI/Overmind/BomberHara
 local OvermindMexDefense = import('/mods/OvermindAI/lua/AI/Overmind/MexDefense.lua')
 local OvermindForceDirector = import('/mods/OvermindAI/lua/AI/Overmind/ForceDirector.lua')
 
-local function TryResolveField(tbl, key)
-    if type(tbl) ~= 'table' or not key then
-        return false
-    end
-    local direct = rawget(tbl, key)
-    if direct ~= nil then
-        return direct
-    end
-    local ok, value = pcall(function()
-        return tbl[key]
-    end)
-    if ok then
-        return value
-    end
-    return false
-end
-
-local function ResolveUpgradeDirectorUpdate()
-    local moduleRef = OvermindUpgradeDirector
-    if type(moduleRef) ~= 'table' then
-        moduleRef = import('/mods/OvermindAI/lua/AI/Overmind/UpgradeDirector.lua')
-    end
-    if type(moduleRef) == 'table' then
-        local direct = TryResolveField(moduleRef, 'Update')
-        if type(direct) == 'function' then
-            return direct
-        end
-        local nested = TryResolveField(moduleRef, 'Module')
-        if type(nested) == 'table' then
-            local nestedUpdate = TryResolveField(nested, 'Update')
-            if type(nestedUpdate) == 'function' then
-                return nestedUpdate
-            end
-        end
-    end
-    return false
-end
-
-local OvermindUpgradeDirectorAdapter = {
-    Update = function(aiBrain, now)
-        local fn = ResolveUpgradeDirectorUpdate()
-        if type(fn) ~= 'function' then
-            error('upgrade-director-update-missing')
-        end
-        return fn(aiBrain, now)
-    end,
-}
-
 local function ResolveModuleFn(moduleRef, fieldName)
     if type(moduleRef) ~= 'table' then
         return false, 'module-not-table'
@@ -167,7 +119,7 @@ local ActionGroups = {
         BuildAction({ Name = 'FactoryHeartbeat', Label = 'factory-heartbeat', Group = 'macro-control', ModuleRef = OvermindFactoryHeartbeat, Outputs = { 'FactoryState' } }),
         BuildAction({ Name = 'FactoryResume', Label = 'factory-resume', Group = 'macro-control', StateSlice = 'FactoryResume', ModuleRef = OvermindFactoryResume, Inputs = { 'Recovery', 'ZoneModel', 'EngineerState' }, Outputs = { 'FactoryResume' } }),
         BuildAction({ Name = 'RaidDefense', Label = 'raid-defense', Group = 'macro-control', StateSlice = 'RaidDefense', ModuleRef = OvermindRaidDefense, Inputs = { 'IntelModel', 'ZoneModel' }, Outputs = { 'RaidDefense' } }),
-        BuildAction({ Name = 'UpgradeDirector', Label = 'upgrade-director', Group = 'macro-control', StateSlice = 'UpgradeDirector', ModuleRef = OvermindUpgradeDirectorAdapter, Inputs = { 'ProductionDirector', 'StrategicPlanner', 'ZoneGraph', 'ZoneModel', 'IntelModel', 'Recovery', 'EngineerState' }, Outputs = { 'UpgradeDirector' } }),
+        BuildAction({ Name = 'UpgradeDirector', Label = 'upgrade-director', Group = 'macro-control', StateSlice = 'UpgradeDirector', ModuleRef = OvermindUpgradeDirector, Inputs = { 'ProductionDirector', 'StrategicPlanner', 'ZoneGraph', 'ZoneModel', 'IntelModel', 'Recovery', 'EngineerState' }, Outputs = { 'UpgradeDirector' } }),
         BuildAction({ Name = 'EngineerDirector', Label = 'engineer-director', Group = 'macro-control', StateSlice = 'EngineerState', ModuleRef = OvermindEngineerDirector, Inputs = { 'ZoneGraph', 'IntelModel', 'Recovery' }, Outputs = { 'EngineerState' } }),
         BuildAction({ Name = 'ScoutDirector', Label = 'scout-director', Group = 'macro-control', StateSlice = 'ReconState', ModuleRef = OvermindScoutManager, Inputs = { 'ZoneGraph', 'IntelModel', 'Recovery' }, Outputs = { 'ReconState' } }),
         BuildAction({ Name = 'ACURole', Label = 'acu-role', Group = 'macro-control', StateSlice = 'ACUState', ModuleRef = OvermindACURole, Inputs = { 'IntelModel', 'ForceDirector', 'ZoneGraph' }, Outputs = { 'ACUState', 'ACURole' } }),

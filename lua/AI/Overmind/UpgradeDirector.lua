@@ -437,4 +437,8 @@ end
 
 Module.Update = Update
 
+function Update(aiBrain, now)
+    return Module.Update(aiBrain, now)
+end
+
 return Module
