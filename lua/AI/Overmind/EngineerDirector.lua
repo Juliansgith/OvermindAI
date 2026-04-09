@@ -155,9 +155,17 @@ local function TryReclaimEnemyMex(aiBrain, runtime, eng, now)
         IssueClearCommands({ eng })
     end
     if IssueReclaim then
-        IssueReclaim({ eng }, reclaimTargets)
-        runtime.EngineerEnemyMexReclaimCooldown[entityId] = now
-        return true
+        local issued = false
+        for _, target in reclaimTargets do
+            if target and not target.Dead then
+                IssueReclaim({ eng }, target)
+                issued = true
+            end
+        end
+        if issued then
+            runtime.EngineerEnemyMexReclaimCooldown[entityId] = now
+            return true
+        end
     end
 
     return false

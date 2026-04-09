@@ -342,6 +342,71 @@ local function HasRemainingLocalTech2UpgradeWork(aiBrain, radius)
         or CountLocalUnfinishedUpgradedExtractors(aiBrain, 'tech2', localRadius + 40) > 0
 end
 
+local function CanConsolidateLocalTech2Extractors(aiBrain, radius)
+    if not IsOvermindBrain(aiBrain) then
+        return false
+    end
+
+    local localRadius = radius or 320
+    if CountLocalExtractorUpgradeCandidates(aiBrain, 'tech2', localRadius) <= 0 then
+        return false
+    end
+
+    if HasCriticalFactoryTask(aiBrain) or HasCriticalStructureTask(aiBrain) then
+        return false
+    end
+    if IsUnderLandHarass(aiBrain, 1) or IsUnderAirHarass(aiBrain, 1) or IsBomberPanic(aiBrain) or IsExposedMexAirRaid(aiBrain) then
+        return false
+    end
+
+    local director = GetProductionDirector(aiBrain)
+    local runtime = aiBrain.OvermindRuntime or {}
+    local current = director and director.Current or {}
+    local factories = current.Factories or {}
+    local eco = current.Eco or {}
+    local structures = current.Structures or {}
+    local confidence = director and director.Confidence or {}
+    local techPlan = director and director.TechPlan or {}
+    local liveEcon = GetEcon(aiBrain)
+    local recovery = GetRecovery(aiBrain) or {}
+    local raid = runtime.RaidDefense or {}
+    local mainPos = GetMainPos(aiBrain, 'MAIN')
+    local localRisk = (mainPos and OvermindMemory.GetExpansionRisk(aiBrain, mainPos, 90)) or 0
+    local remoteSafeTech2 = CountSafeRemoteExtractorUpgradeCandidates(aiBrain, 'tech2', math.max(localRadius + 40, 380))
+    local mapControl = GetZoneMapControl(aiBrain)
+    local localT2 = CountLocalUpgradedExtractors(aiBrain, 'tech2', localRadius + 20)
+    local unfinishedLocalT2 = CountLocalUnfinishedUpgradedExtractors(aiBrain, 'tech2', localRadius + 40)
+    local earlyFactoryFloorMet = ((factories.Land or {}).Ready or 0) >= 2
+        and (((eco.Power or {}).Ready) or 0) >= 4
+        and (structures.Radar or 0) > 0
+    local safeEconomy = (liveEcon.MassIncome or 0) >= 2.8
+        and (liveEcon.EnergyIncome or 0) >= 36
+        and (liveEcon.EnergyStorageRatio or 0) >= 0.16
+        and (liveEcon.EnergyTrend or 0) >= 0
+        and (liveEcon.MassTrend or 0) >= -0.12
+    local expansionStalled = remoteSafeTech2 <= 0
+        or mapControl < 0.4
+        or (techPlan.ExtractorUpgradeReason == 'scouting_debt')
+        or (confidence.Global or 0) < 0.58
+    local localZoneSecure = localRisk <= 2.2
+        and (raid.LastThreatMexPos == nil or (mainPos and Distance2D(mainPos, raid.LastThreatMexPos) > localRadius + 30))
+
+    if not earlyFactoryFloorMet or not safeEconomy then
+        return false
+    end
+    if recovery.ForceFactoryRecovery or recovery.FactoryQueueExpansionBlocked then
+        return false
+    end
+    if unfinishedLocalT2 >= 1 then
+        return true
+    end
+    if localT2 >= 1 and not expansionStalled then
+        return false
+    end
+
+    return expansionStalled and localZoneSecure
+end
+
 local function CanUpgradeToTech3Extractors(aiBrain, radius)
     if not IsOvermindBrain(aiBrain) then
         return false
@@ -1396,7 +1461,13 @@ function ShouldUpgradeExtractors(aiBrain, minMassIncome, minEnergyIncome, minMas
     local factoryCount = GetUnitCount(aiBrain, categories.FACTORY * categories.STRUCTURE)
 
     if techPlan and techPlan.ExtractorUpgradeReason then
-        return techPlan.UpgradeExtractors == true
+        if techPlan.UpgradeExtractors == true then
+            return true
+        end
+        if CanConsolidateLocalTech2Extractors(aiBrain, 320) then
+            return true
+        end
+        return false
     end
 
     if now < minTime and factoryCount < minFactories then
@@ -1455,6 +1526,8 @@ function ShouldUpgradeLocalExtractors(aiBrain, targetTech, radius)
         if not CanUpgradeToTech3Extractors(aiBrain, math.max(radius or 240, 360)) then
             return false
         end
+    elseif not ShouldUpgradeExtractors(aiBrain) and not CanConsolidateLocalTech2Extractors(aiBrain, math.max(radius or 240, 320)) then
+        return false
     end
     return HasLocalExtractorUpgradeCandidate(aiBrain, targetTech, radius or 240)
 end
@@ -1526,13 +1599,20 @@ function UnderExtractorUpgradeCap(aiBrain, targetTech)
     end
 
     local techPlan, cap, inFlight = GetExtractorUpgradePlan(aiBrain)
+    if targetTech == 'tech2' or targetTech == 2 then
+        local consolidationOverride = CanConsolidateLocalTech2Extractors(aiBrain, 320)
+        if (not techPlan or techPlan.UpgradeExtractors ~= true or cap <= 0) and not consolidationOverride then
+            return false
+        end
+        local effectiveCap = consolidationOverride and math.max(1, math.min((cap > 0 and cap or 1), 1)) or cap
+        return GetUnfinishedUnitCount(aiBrain, categories.MASSEXTRACTION * categories.TECH2) < effectiveCap and inFlight < effectiveCap
+    end
+
     if not techPlan or techPlan.UpgradeExtractors ~= true or cap <= 0 then
         return false
     end
 
-    if targetTech == 'tech2' or targetTech == 2 then
-        return GetUnfinishedUnitCount(aiBrain, categories.MASSEXTRACTION * categories.TECH2) < cap and inFlight < cap
-    elseif targetTech == 'tech3' or targetTech == 3 then
+    if targetTech == 'tech3' or targetTech == 3 then
         return GetUnfinishedUnitCount(aiBrain, categories.MASSEXTRACTION * categories.TECH3) < cap and inFlight < cap
     end
 

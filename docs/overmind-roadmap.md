@@ -535,8 +535,9 @@ Observed failure pattern:
 Recommended rollout:
 
 1. `v97`: stabilize factory growth and factory completion
-2. `v98`: reduce ACU safety churn with stronger hysteresis
-3. `v99`: tighten force commitment and mainline allocation under pressure
+2. `v98`: unblock local `T1 -> T2` mex consolidation and fix reclaim crash
+3. `v99`: reduce ACU safety churn with stronger hysteresis
+4. `v100`: tighten force commitment and mainline allocation under pressure
 
 ### v97: Factory Ramp And Completion
 
@@ -564,7 +565,36 @@ Success criteria:
 - by `6-8` minutes, the AI has `2-3` ready land factories instead of `1`, but is not sitting at `5/6` total with only `2` ready
 - unfinished factory tasks show assigned builders instead of repeated `asn=0/2`
 
-### v98: ACU Safety Hysteresis
+### v98: Local Tech2 Consolidation
+
+Status:
+
+- implemented in `v98-local-tech2-consolidation`
+
+Goals:
+
+- stop deadlocking on `T1` mexes when expansion is exhausted or unsafe
+- keep `T2 -> T3` hard-gated while allowing safe core `T1 -> T2`
+- remove the late reclaim runtime error seen in the record `v96` run
+
+Changes:
+
+- fix `EngineerDirector` reclaim issuance so it does not pass a raw Lua table into `IssueReclaim`
+- add a local/core mex consolidation override inspired by M28's safe-zone upgrade behavior
+- allow one local `T1 -> T2` upgrade under scouting debt when:
+  - local/core mex candidates exist
+  - the local zone is secure
+  - the base has radar, power, and at least two ready land factories
+  - remote expansion or remote upgrade options are poor, or scouting debt is blocking the general tech plan
+- keep `T2 -> T3` on the stricter durable-surplus gate
+
+Success criteria:
+
+- no late reclaim runtime error in `EngineerDirector`
+- local/core `T1 -> T2` mex upgrades occur even when `ExtractorUpgradeReason=scouting_debt`
+- no premature `T2 -> T3` upgrades under pressure or weak economy
+
+### v99: ACU Safety Hysteresis
 
 Goals:
 
@@ -582,7 +612,7 @@ Success criteria:
 - substantially fewer `panic_leash_recall`, `opening_recall`, `raid_cover_recall`, and `enemy_contact_recall` loops in the `4-10` minute window
 - ACU remains responsive to real danger, but stops wasting time on repeated soft retreats
 
-### v99: Mainline Commitment
+### v100: Mainline Commitment
 
 Goals:
 
