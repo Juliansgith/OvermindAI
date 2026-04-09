@@ -989,6 +989,12 @@ Phase 1 implemented in `v126`:
 - softened `critical_factory` as a mex-upgrade blocker when the base already has a stable minimum floor
 - improved `UPGDIR` telemetry so early budget-driven waits show as `budget_wait` instead of looking like generic macro idling
 
+Phase 2 implemented in `v127`:
+
+- mex target scoring now anchors on the live ready-factory cluster, not just the start position
+- safe mex upgrades now strongly prefer the defended factory ring before outer local mexes
+- this is intended to stop Overmind from choosing technically local but strategically exposed mex upgrades first
+
 ### v102: Mainline Commitment
 
 Goals:

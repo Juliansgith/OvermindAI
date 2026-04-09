@@ -115,16 +115,47 @@ local function CountActiveLandFactoryUpgrades(aiBrain)
     return count
 end
 
-local function ScoreSafeUpgradeLocation(aiBrain, pos, mainPos, localRadius)
+local function GetFactoryClusterPos(aiBrain, fallbackPos)
+    local factories = aiBrain:GetListOfUnits(categories.FACTORY * categories.STRUCTURE, false, true) or {}
+    local sx = 0
+    local sz = 0
+    local count = 0
+
+    for _, fac in factories do
+        if fac and not fac.Dead and IsReadyStructure(fac) and not fac:IsUnitState('Upgrading') and fac.GetPosition then
+            local pos = fac:GetPosition()
+            if pos then
+                sx = sx + (pos[1] or 0)
+                sz = sz + (pos[3] or 0)
+                count = count + 1
+            end
+        end
+    end
+
+    if count >= 2 then
+        return { sx / count, 0, sz / count }, count
+    end
+
+    return fallbackPos, count
+end
+
+local function ScoreSafeUpgradeLocation(aiBrain, pos, mainPos, anchorPos, localRadius)
     local risk = OvermindMemory.GetExpansionRisk(aiBrain, pos, 90)
     local threat = aiBrain:GetThreatAtPosition(pos, 1, true, 'AntiSurface') or 0
-    local dist = Distance2D(pos, mainPos)
-    local localBias = (dist <= localRadius) and 24 or 0
-    local coreBias = (dist <= 110 and 68)
-        or (dist <= 170 and 34)
-        or (dist <= 240 and 14)
+    local distMain = Distance2D(pos, mainPos)
+    local distAnchor = anchorPos and Distance2D(pos, anchorPos) or distMain
+    local dist = math.min(distMain, distAnchor)
+    local localBias = (distMain <= localRadius) and 24 or 0
+    local coreBias = (distMain <= 110 and 54)
+        or (distMain <= 170 and 24)
+        or (distMain <= 240 and 8)
         or 0
-    return 100 - (risk * 12) - (threat * 20) - (dist * 0.06) + localBias + coreBias, risk, threat, dist
+    local factoryRingBias = (distAnchor <= 85 and 92)
+        or (distAnchor <= 135 and 54)
+        or (distAnchor <= 200 and 22)
+        or 0
+    local score = 100 - (risk * 12) - (threat * 20) - (distMain * 0.03) - (distAnchor * 0.11) + localBias + coreBias + factoryRingBias
+    return score, risk, threat, distMain, distAnchor
 end
 
 local function ComputeDynamicMexCap(eco, readyLand, totalLand, powerReady, mexReady, surplusSpendWindow, strongSurplusWindow)
@@ -198,6 +229,7 @@ local function PickMexTarget(aiBrain, runtime, state)
     local confidence = director.Confidence or {}
     local zone = runtime.ZoneModel or {}
     local mainPos = GetMainPos(aiBrain, runtime)
+    local factoryClusterPos = GetFactoryClusterPos(aiBrain, mainPos)
     local localRadius = 340
     local factories = current.Factories or {}
     local readyLand = ((factories.Land or {}).Ready) or 0
@@ -323,12 +355,20 @@ local function PickMexTarget(aiBrain, runtime, state)
             local pos = mex.GetPosition and mex:GetPosition() or false
             local upgradeBp = GetUpgradeBlueprintId(mex)
             if pos and upgradeBp then
-                local score, risk, threat, dist = ScoreSafeUpgradeLocation(aiBrain, pos, mainPos, localRadius)
-                local isLocal = dist <= localRadius
+                local score, risk, threat, distMain, distAnchor = ScoreSafeUpgradeLocation(aiBrain, pos, mainPos, factoryClusterPos, localRadius)
+                local isLocal = distMain <= localRadius
                 local localRiskCap = (budgetT2Cap >= 1) and 3.8 or 3.2
                 local localThreatCap = (budgetT2Cap >= 1) and 2.2 or 1.8
                 if tech == 1 and allowLocalT2 and isLocal and risk <= localRiskCap and threat <= localThreatCap then
-                    local localScore = score + 90 + (tempoMode and 55 or 20) + (scoutingDebt and 28 or 0) + (surplusSpendWindow and 26 or 0) + (budgetT2Cap >= 1 and 56 or 0) + math.min(30, math.max(0, mexBudget - 7.5) * 3.0)
+                    local localScore = score
+                        + 90
+                        + (tempoMode and 55 or 20)
+                        + (scoutingDebt and 28 or 0)
+                        + (surplusSpendWindow and 26 or 0)
+                        + (budgetT2Cap >= 1 and 56 or 0)
+                        + math.min(30, math.max(0, mexBudget - 7.5) * 3.0)
+                        + (distAnchor <= 85 and 36 or 0)
+                        + (distAnchor <= 135 and 18 or 0)
                     if localScore > bestScore then
                         bestScore = localScore
                         best = mex
@@ -422,6 +462,7 @@ local function PickFactoryTarget(aiBrain, runtime, state)
     local planner = runtime.StrategicPlanner or {}
     local eco = runtime.EcoState or {}
     local mainPos = GetMainPos(aiBrain, runtime)
+    local factoryClusterPos = GetFactoryClusterPos(aiBrain, mainPos)
     local factories = current.Factories or {}
     local landFactories = factories.Land or {}
     local readyLand = landFactories.Ready or 0
@@ -512,7 +553,7 @@ local function PickFactoryTarget(aiBrain, runtime, state)
             local upgradeBp = GetUpgradeBlueprintId(fac)
             local pos = fac.GetPosition and fac:GetPosition() or false
             if upgradeBp and pos and GetCommandQueueLength(fac) <= 0 then
-                local score, risk, threat, dist = ScoreSafeUpgradeLocation(aiBrain, pos, mainPos, 280)
+                local score, risk, threat, dist, _ = ScoreSafeUpgradeLocation(aiBrain, pos, mainPos, factoryClusterPos, 280)
                 if risk <= 3 and threat <= 1.8 then
                     local facScore = score + 80 - (dist * 0.04) + (surplusSpendWindow and 18 or 0) + (strongSurplusWindow and 12 or 0) + (readyLand >= 5 and 20 or 0)
                     if facScore > bestScore then
