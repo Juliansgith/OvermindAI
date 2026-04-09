@@ -645,6 +645,31 @@ Success criteria:
 - it stops collapsing from a recovered `3`-factory state back into `1` effective factory as often
 - `T2 -> T3` remains blocked under stress while local/core `T1 -> T2` still works
 
+### v103: Aggressive Second-Land And Surplus Power
+
+Status:
+
+- implemented in `v103-aggressive-secondland-power`
+
+Goals:
+
+- remove the remaining helper-runtime contamination from the local extractor consolidation path
+- unlock the second land factory earlier once the first stable eco floor is online
+- stop treating early power as a hard floor and keep scaling it when spare mass exists
+
+Changes:
+
+- forward-declare and bind the remaining zone-control helper used by local `T1 -> T2` consolidation
+- lower the mex and engineer thresholds for second-land readiness
+- allow the starter-phase target to hold `2` land once second-land conditions are met
+- add surplus-driven power scaling so spare mass continues converting into pgens while energy storage/trend are still modest
+
+Success criteria:
+
+- no early helper runtime errors from the local mex-consolidation path
+- by `3-6` minutes the AI escapes `1/0/0` more reliably
+- when mass is floating and energy buffer is still modest, power continues to grow past the initial floor
+
 ### v101: ACU Safety Hysteresis
 
 Goals:

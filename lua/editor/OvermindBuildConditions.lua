@@ -7,6 +7,7 @@ local GetCompletedUnitCount
 local GetMainPos
 local CountSafeRemoteExtractorUpgradeCandidates
 local Distance2D
+local GetZoneMapControl
 
 local function GetEcon(aiBrain)
     return AIUtils.AIGetEconomyNumbers(aiBrain)
@@ -677,7 +678,7 @@ local function GetPrimaryEnemyPos(aiBrain)
     return false
 end
 
-local function GetZoneMapControl(aiBrain)
+GetZoneMapControl = function(aiBrain)
     if aiBrain and aiBrain.OvermindRuntime and aiBrain.OvermindRuntime.ZoneModel then
         return aiBrain.OvermindRuntime.ZoneModel.MapControl or 0
     end
@@ -1317,6 +1318,17 @@ function ShouldBuildPower(aiBrain, maxEnergyRatio, maxEnergyTrend, maxMassRatioF
         if (econ.EnergyStorageRatio or 0) < 0.2 or (econ.EnergyTrend or 0) < 4 then
             return true
         end
+    end
+
+    if factoryCount >= 1
+        and mexCount >= 4
+        and pgenCount < (mexCount + 3)
+        and (econ.MassStorageRatio or 0) >= 0.42
+        and (econ.MassTrend or 0) >= 0.02
+        and (econ.EnergyStorageRatio or 0) < 0.62
+        and (econ.EnergyTrend or 0) < 14
+        and not forceFactoryRecovery then
+        return true
     end
 
     if pgenCount > math.max(10, mexCount * maxPgenPerMex) then

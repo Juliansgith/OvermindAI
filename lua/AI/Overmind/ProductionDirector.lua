@@ -1215,8 +1215,8 @@ local function DecideCapacityPlan(runtime, current, constraints, rolePlan)
         and current.Factories.Land.Ready >= 1
         and current.Factories.Air.Total <= 0
         and powerReady >= math.max(3, constraints.StarterPowerFloor or 2)
-        and mexReady >= math.max(5, constraints.StarterMexFloor or 5)
-        and engineerUnits >= math.max(6, constraints.StarterEngineerFloor or 6)
+        and mexReady >= math.max(4, (constraints.StarterMexFloor or 5) - 1)
+        and engineerUnits >= math.max(5, (constraints.StarterEngineerFloor or 6) - 1)
         and not constraints.EcoWeak
         and not powerBufferLow
         and not constraints.EcoCrash
@@ -1357,6 +1357,9 @@ local function DecideCapacityPlan(runtime, current, constraints, rolePlan)
     end
     if constraints.StarterPhase then
         landTarget = 1
+        if secondLandEcoReady or secondLandBootstrap then
+            landTarget = math.max(landTarget, 2)
+        end
         airTarget = 0
         seaTarget = 0
     end
