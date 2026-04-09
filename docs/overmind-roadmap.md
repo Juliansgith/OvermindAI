@@ -674,7 +674,7 @@ Success criteria:
 
 Status:
 
-- planned
+- implemented in `v104`
 
 Goals:
 
@@ -701,6 +701,11 @@ Changes:
   - no critical recovery is active
   - pressure justifies stronger units
 - add explicit repair priority for damaged factories, mexes, radar, and core defenses
+- implementation notes:
+  - free engineers now directly assist unfinished factory shells, active upgrades, and damaged core assets before low-value reclaim
+  - production growth now distinguishes staffed unfinished shells from abandoned ones
+  - first land HQ upgrade is now allowed once a stable `4`-factory midgame exists
+  - local `T1 -> T2` consolidation thresholds were relaxed further while `T2 -> T3` stayed strict
 
 Implementation order:
 

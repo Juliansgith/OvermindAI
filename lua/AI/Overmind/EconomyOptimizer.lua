@@ -76,6 +76,10 @@ local function DetermineMacroPhase(aiBrain, runtime, eco, opp, recovery, now)
         return 'tech', counts
     end
 
+    if stableFactoryFeed and mexCount >= 5 and landFactories >= 2 and totalFactories >= 2 and (relativePower >= 0.9 or mapControl >= 0.24) then
+        return 'pressure', counts
+    end
+
     if stableFactoryFeed and mexCount >= 6 and totalFactories >= 3 and (relativePower >= 0.98 or mapControl >= 0.44) then
         return 'pressure', counts
     end

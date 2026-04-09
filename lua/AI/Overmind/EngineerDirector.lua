@@ -821,7 +821,16 @@ local function ComputeFactoryTaskRequirements(domain, fraction, stallTime, ready
     if domain == 'Land' and readyFactories <= 0 then
         required = required + 1
     end
+    if domain == 'Land' and readyFactories <= 1 and fraction >= 0.18 then
+        required = required + 1
+    end
     if fraction >= 0.4 then
+        required = required + 1
+    end
+    if fraction >= 0.7 and domain == 'Land' then
+        required = required + 1
+    end
+    if stallTime >= 8 then
         required = required + 1
     end
     if stallTime >= 16 then
@@ -830,7 +839,7 @@ local function ComputeFactoryTaskRequirements(domain, fraction, stallTime, ready
     if (eco.MassStorageRatio or 0) <= 0.02 and required > 2 and readyFactories > 0 then
         required = required - 1
     end
-    return Clamp(required, 1, 4)
+    return Clamp(required, 1, 5)
 end
 
 local function ComputeStructureTaskRequirements(kind, fraction, stallTime, eco)
@@ -1390,6 +1399,118 @@ local function AssignBuildersToUnfinishedStructure(aiBrain, runtime, now, target
     return assigned, claimed, usedCommander, debug
 end
 
+local function GetPriorityUpgradeAssistTarget(aiBrain, runtime, mainPos)
+    if not aiBrain or not mainPos then
+        return false, false
+    end
+
+    local best = false
+    local bestScore = -999999
+    local isUpgradeTarget = false
+    local candidates = aiBrain:GetListOfUnits(categories.STRUCTURE + categories.FACTORY, false, true) or {}
+    for _, unit in candidates do
+        if unit and not unit.Dead and unit:IsUnitState('Upgrading') then
+            local pos = unit.GetPosition and unit:GetPosition() or false
+            if pos then
+                local dist = Distance2D(pos, mainPos)
+                if dist <= 360 then
+                    local score = 0
+                    if EntityCategoryContains(categories.MASSEXTRACTION, unit) then
+                        score = score + 260
+                    elseif EntityCategoryContains(categories.FACTORY * categories.LAND, unit) then
+                        score = score + 240
+                    elseif EntityCategoryContains(categories.FACTORY, unit) then
+                        score = score + 180
+                    else
+                        score = score + 120
+                    end
+                    score = score - dist
+                    if score > bestScore then
+                        bestScore = score
+                        best = unit
+                        isUpgradeTarget = true
+                    end
+                end
+            end
+        end
+    end
+
+    return best, isUpgradeTarget
+end
+
+local function GetPriorityRepairTarget(aiBrain, runtime, mainPos)
+    if not aiBrain or not mainPos then
+        return false
+    end
+
+    local best = false
+    local bestScore = -999999
+    local candidates = aiBrain:GetListOfUnits(categories.STRUCTURE + categories.FACTORY, false, true) or {}
+    for _, unit in candidates do
+        if unit and not unit.Dead and not unit:IsUnitState('BeingBuilt') and not unit:IsUnitState('Upgrading') then
+            local health = unit.GetHealth and unit:GetHealth() or 0
+            local maxHealth = unit.GetMaxHealth and unit:GetMaxHealth() or 0
+            if maxHealth > 0 and health > 0 and health < (maxHealth * 0.92) then
+                local pos = unit.GetPosition and unit:GetPosition() or false
+                if pos then
+                    local dist = Distance2D(pos, mainPos)
+                    if dist <= 320 then
+                        local score = ((1 - (health / maxHealth)) * 220)
+                        if EntityCategoryContains(categories.FACTORY, unit) then
+                            score = score + 180
+                        elseif EntityCategoryContains(categories.MASSEXTRACTION, unit) then
+                            score = score + 150
+                        elseif EntityCategoryContains(categories.RADAR, unit) then
+                            score = score + 120
+                        elseif EntityCategoryContains(categories.DEFENSE + categories.ANTIAIR, unit) then
+                            score = score + 100
+                        else
+                            score = score + 60
+                        end
+                        score = score - dist
+                        if score > bestScore then
+                            bestScore = score
+                            best = unit
+                        end
+                    end
+                end
+            end
+        end
+    end
+
+    return best
+end
+
+local function TryAssignAssistOrRepair(aiBrain, runtime, eng, target, isUpgrade, now)
+    if not eng or eng.Dead or not target or target.Dead then
+        return false
+    end
+
+    if IssueClearCommands then
+        IssueClearCommands({ eng })
+    end
+
+    if isUpgrade then
+        if IssueGuard then
+            IssueGuard({ eng }, target)
+            return true
+        elseif IssueRepair then
+            IssueRepair({ eng }, target)
+            return true
+        end
+    else
+        if IssueRepair then
+            IssueRepair({ eng }, target)
+            return true
+        elseif IssueGuard then
+            IssueGuard({ eng }, target)
+            return true
+        end
+    end
+
+    return false
+end
+
 function Update(aiBrain, now)
     local runtime = aiBrain.OvermindRuntime
     if not runtime then
@@ -1439,6 +1560,7 @@ function Update(aiBrain, now)
     local radarReservedBuilderIds = GetRadarReservedBuilderIds(runtime, now)
 
     local target, targetPos, fraction, domain, readyFactories = FindBestUnfinishedFactory(aiBrain, runtime, mainPos)
+    local factoryTargetObject = target
     if target and targetPos then
         local targetId = GetEntityId(target)
         if factoryTask.TargetId ~= targetId or fraction > ((factoryTask.TargetFraction or 0) + 0.01) then
@@ -1486,6 +1608,7 @@ function Update(aiBrain, now)
     for id, value in pairs(factoryTask.BuilderIds or {}) do
         reservedStructureBuilderIds[id] = value
     end
+    local structureTargetObject = false
     if not factoryTaskCritical then
         local trackedStructure, trackedPos, trackedFraction, trackedKind, trackedPriority = FindTrackedUnfinishedStructure(aiBrain, structureTask)
         local structure, structurePos, structureFraction, structureKind, structurePriority = FindBestUnfinishedStructure(aiBrain, runtime, mainPos)
@@ -1513,6 +1636,7 @@ function Update(aiBrain, now)
         end
 
         if structure and structurePos then
+            structureTargetObject = structure
             local targetId = GetEntityId(structure)
             if structureTask.TargetId ~= targetId or structureFraction > ((structureTask.TargetFraction or 0) + 0.01) then
                 structureTask.TargetId = targetId
@@ -1553,6 +1677,7 @@ function Update(aiBrain, now)
                     reservedStructureBuilderIds)
                 if fallbackAssigned > 0 then
                     structure = trackedStructure
+                    structureTargetObject = trackedStructure
                     structurePos = trackedPos
                     structureFraction = trackedFraction
                     structureKind = trackedKind
@@ -1609,6 +1734,13 @@ function Update(aiBrain, now)
         ResetStructureTask(structureTask)
     end
 
+    if structureTask.Active and structureTask.TargetId then
+        local trackedStructure, trackedPos = FindTrackedUnfinishedStructure(aiBrain, structureTask)
+        if trackedStructure and trackedPos then
+            structureTargetObject = trackedStructure
+        end
+    end
+
     for _, eng in engineers do
         if eng and not eng.Dead then
             local entityId = GetEntityId(eng)
@@ -1625,7 +1757,58 @@ function Update(aiBrain, now)
                     local constructing = IsConstructing(eng)
                     local acted = false
 
-                    if isIdle and not constructing and TryReclaimEnemyMex(aiBrain, runtime, eng, now) then
+                    if (not acted)
+                        and isIdle
+                        and not constructing
+                        and factoryTask.Active
+                        and factoryTargetObject
+                        and (factoryTask.AssignedBuilders or 0) < (factoryTask.RequiredBuilders or 0)
+                        and localThreat < 2.2
+                        and dist <= 360
+                        and TryAssignAssistOrRepair(aiBrain, runtime, eng, factoryTargetObject, false, now) then
+                        local entityId = GetEntityId(eng)
+                        if entityId then
+                            factoryTask.BuilderIds = factoryTask.BuilderIds or {}
+                            factoryTask.BuilderIds[entityId] = true
+                        end
+                        factoryTask.AssignedBuilders = math.min((factoryTask.RequiredBuilders or 0), (factoryTask.AssignedBuilders or 0) + 1)
+                        forcedFactoryRecover = forcedFactoryRecover + 1
+                        acted = true
+                    end
+
+                    if (not acted)
+                        and isIdle
+                        and not constructing
+                        and structureTask.Active
+                        and structureTargetObject
+                        and (structureTask.AssignedBuilders or 0) < (structureTask.RequiredBuilders or 0)
+                        and localThreat < 2.2
+                        and dist <= 320
+                        and TryAssignAssistOrRepair(aiBrain, runtime, eng, structureTargetObject, false, now) then
+                        local entityId = GetEntityId(eng)
+                        if entityId then
+                            structureTask.BuilderIds = structureTask.BuilderIds or {}
+                            structureTask.BuilderIds[entityId] = true
+                        end
+                        structureTask.AssignedBuilders = math.min((structureTask.RequiredBuilders or 0), (structureTask.AssignedBuilders or 0) + 1)
+                        acted = true
+                    end
+
+                    if (not acted) and isIdle and not constructing then
+                        local assistTarget, isUpgradeTarget = GetPriorityUpgradeAssistTarget(aiBrain, runtime, mainPos)
+                        if assistTarget and localThreat < 2.2 and dist <= 360 and TryAssignAssistOrRepair(aiBrain, runtime, eng, assistTarget, isUpgradeTarget, now) then
+                            acted = true
+                        end
+                    end
+
+                    if (not acted) and isIdle and not constructing then
+                        local repairTarget = GetPriorityRepairTarget(aiBrain, runtime, mainPos)
+                        if repairTarget and localThreat < 2.2 and dist <= 360 and TryAssignAssistOrRepair(aiBrain, runtime, eng, repairTarget, false, now) then
+                            acted = true
+                        end
+                    end
+
+                    if isIdle and not constructing and (not acted) and TryReclaimEnemyMex(aiBrain, runtime, eng, now) then
                         reclaimEnemyMex = reclaimEnemyMex + 1
                         acted = true
                     end
@@ -1658,6 +1841,10 @@ function Update(aiBrain, now)
                         if RecallEngineer(runtime, eng, mainPos, now, 'base_floor') then
                             recoverCount = recoverCount + 1
                             needBase = needBase - 1
+                        end
+                    elseif (not acted) and not constructing and factoryTask.Active and (factoryTask.AssignedBuilders or 0) < (factoryTask.RequiredBuilders or 0) and dist > 140 and localThreat < 1.6 and forcedFactoryRecover < math.max(2, factoryTask.RequiredBuilders or 0) then
+                        if RecallEngineer(runtime, eng, mainPos, now, 'factory_task') then
+                            forcedFactoryRecover = forcedFactoryRecover + 1
                         end
                     elseif (not acted) and not constructing and severeFactoryStarve and dist > 140 and localThreat < 1.6 and forcedFactoryRecover < 2 then
                         if RecallEngineer(runtime, eng, mainPos, now, 'factory_starve') then

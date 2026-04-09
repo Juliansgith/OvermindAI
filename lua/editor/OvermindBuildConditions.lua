@@ -380,18 +380,17 @@ local function CanConsolidateLocalTech2Extractors(aiBrain, radius)
     local localT2 = CountLocalUpgradedExtractors(aiBrain, 'tech2', localRadius + 20)
     local unfinishedLocalT2 = CountLocalUnfinishedUpgradedExtractors(aiBrain, 'tech2', localRadius + 40)
     local earlyFactoryFloorMet = ((factories.Land or {}).Ready or 0) >= 1
-        and (((eco.Power or {}).Ready) or 0) >= 4
-        and (structures.Radar or 0) > 0
-    local safeEconomy = (liveEcon.MassIncome or 0) >= 2.8
-        and (liveEcon.EnergyIncome or 0) >= 36
-        and (liveEcon.EnergyStorageRatio or 0) >= 0.16
-        and (liveEcon.EnergyTrend or 0) >= 0
-        and (liveEcon.MassTrend or 0) >= -0.12
+        and (((eco.Power or {}).Ready) or 0) >= 3
+    local safeEconomy = (liveEcon.MassIncome or 0) >= 2.3
+        and (liveEcon.EnergyIncome or 0) >= 28
+        and (liveEcon.EnergyStorageRatio or 0) >= 0.1
+        and (liveEcon.EnergyTrend or 0) >= -4
+        and (liveEcon.MassTrend or 0) >= -0.2
     local expansionStalled = remoteSafeTech2 <= 0
         or mapControl < 0.4
         or (techPlan.ExtractorUpgradeReason == 'scouting_debt')
         or (confidence.Global or 0) < 0.58
-    local localZoneSecure = localRisk <= 2.2
+    local localZoneSecure = localRisk <= 2.6
         and (raid.LastThreatMexPos == nil or (mainPos and Distance2D(mainPos, raid.LastThreatMexPos) > localRadius + 30))
 
     if not earlyFactoryFloorMet or not safeEconomy then
@@ -403,7 +402,7 @@ local function CanConsolidateLocalTech2Extractors(aiBrain, radius)
     if unfinishedLocalT2 >= 1 then
         return true
     end
-    if localT2 >= 2 and not expansionStalled then
+    if localT2 >= 1 and not expansionStalled then
         return false
     end
 

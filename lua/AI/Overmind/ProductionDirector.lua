@@ -1187,6 +1187,7 @@ local function DecideCapacityPlan(runtime, current, constraints, rolePlan)
     local planner = runtime.StrategicPlanner or {}
     local now = GetGameTimeSeconds()
     local totalUnfinished = current.Factories.Pending or 0
+    local factoryTask = current.FactoryTask or {}
     local landRoleLoad = SumRoleField(rolePlan, { 'Engineer', 'LandDirect', 'LandAA', 'LandIndirect', 'LandScout' }, 'DesiredStrength')
     local airRoleLoad = SumRoleField(rolePlan, { 'AirFighter', 'AirBomber', 'AirScout' }, 'DesiredStrength')
     local seaRoleLoad = SumRoleField(rolePlan, { 'SeaSurface', 'SeaSub', 'SeaAA' }, 'DesiredStrength')
@@ -1202,6 +1203,16 @@ local function DecideCapacityPlan(runtime, current, constraints, rolePlan)
     local powerReady = (((current.Eco or {}).Power or {}).Ready) or 0
     local radarReady = (current.Structures and current.Structures.Radar) or 0
     local powerBufferLow = constraints.PowerBufferLow == true
+    local landFactoryCompletionDebt = factoryTask.Active
+        and factoryTask.Domain == 'Land'
+        and ((factoryTask.AssignedBuilders or 0) < math.max(1, factoryTask.RequiredBuilders or 0))
+    local landFactoryStalled = landFactoryCompletionDebt and (factoryTask.StallTime or 0) >= 8
+    local staffedFactoryShell = factoryTask.Active
+        and factoryTask.Domain == 'Land'
+        and not landFactoryCompletionDebt
+    local unstaffedFactoryShell = factoryTask.Active
+        and factoryTask.Domain == 'Land'
+        and ((factoryTask.AssignedBuilders or 0) <= 0 or landFactoryStalled)
     local emergencyAirFactory = (constraints.BomberPanic or constraints.ExposedMexAirRaid)
         and powerReady > 0
         and (current.Factories.Land.Ready >= 2
@@ -1387,6 +1398,14 @@ local function DecideCapacityPlan(runtime, current, constraints, rolePlan)
     if liveCombatWindow and current.Factories.Land.Ready >= 3 then
         landTarget = math.max(landTarget, 3)
     end
+    if current.Factories.Land.Ready >= 4
+        and current.Factories.Total >= 4
+        and not constraints.EcoCrash
+        and not constraints.QueueStarved
+        and not constraints.CriticalFactory
+        and not constraints.CriticalStructure then
+        landTarget = math.max(landTarget, 4)
+    end
     if secondLandEcoReady and not emergencyAirFactory then
         landTarget = math.max(landTarget, 2)
     end
@@ -1449,11 +1468,14 @@ local function DecideCapacityPlan(runtime, current, constraints, rolePlan)
     if starterGrowthLock then
         pauseGrowth = true
     end
-    if totalUnfinished >= 1 and not tempoRecoveryWindow then
+    if totalUnfinished >= 1 and not tempoRecoveryWindow and not staffedFactoryShell then
         pauseGrowth = true
     end
     if totalUnfinished >= 2 then
         pauseGrowth = true
+    end
+    if landFactoryCompletionDebt and current.Factories.Land.Total >= 2 and not constraints.EcoCrash then
+        pauseGrowth = false
     end
     if emergencyAirFactory and totalUnfinished <= 0 and not constraints.QueueStarved and not constraints.CriticalStructure then
         pauseGrowth = false
@@ -1490,6 +1512,9 @@ local function DecideCapacityPlan(runtime, current, constraints, rolePlan)
 
     -- Prevent delayed overcorrection: only open one new factory at a time.
     local unfinishedAllowance = totalUnfinished
+    if staffedFactoryShell and unfinishedAllowance > 0 then
+        unfinishedAllowance = unfinishedAllowance - 1
+    end
     if landTarget > current.Factories.Land.Total then
         landTarget = math.min(landTarget, current.Factories.Land.Total + math.max(0, 1 - unfinishedAllowance))
     end
@@ -1516,11 +1541,16 @@ local function DecideCapacityPlan(runtime, current, constraints, rolePlan)
         airTarget = math.max(airTarget, 1)
     end
 
+    local completionLock = unstaffedFactoryShell or (landFactoryCompletionDebt and current.Factories.Land.Total >= 2)
+    local landFactoryAllowed = (not pauseGrowth) and (not completionLock) and (current.Factories.Land.Total < landTarget)
+    local nonLandFactoryAllowed = (not pauseGrowth) and (not completionLock or emergencyAirFactory or threatenedAirUnlock or counterAirFactory)
+
     return {
-        AddLandFactory = (not pauseGrowth) and (current.Factories.Land.Total < landTarget),
-        AddAirFactory = (not pauseGrowth) and (current.Factories.Air.Total < airTarget),
-        AddSeaFactory = (not pauseGrowth) and (current.Factories.Navy.Total < seaTarget),
+        AddLandFactory = landFactoryAllowed,
+        AddAirFactory = nonLandFactoryAllowed and (current.Factories.Air.Total < airTarget),
+        AddSeaFactory = nonLandFactoryAllowed and (current.Factories.Navy.Total < seaTarget),
         PauseFactoryGrowth = pauseGrowth,
+        FactoryCompletionLock = completionLock and true or false,
         CriticalFactoryRecovery = constraints.CriticalFactory and true or false,
         CriticalFactoryDomain = constraints.CriticalFactoryDomain or 'none',
         CriticalFactoryAssigned = constraints.CriticalFactoryAssigned or 0,
@@ -1639,6 +1669,11 @@ local function DecideTechPlan(runtime, current, constraints, confidence, mode)
         upgradeExtractors = false
         aggressiveExtractors = false
         extractorReason = 'scouting_debt'
+    end
+    if (planner.TradeTechForTempo or planner.PunishGreed) and not overflowWindow then
+        upgradeExtractors = false
+        aggressiveExtractors = false
+        extractorReason = 'tempo_mode'
     end
 
     return {

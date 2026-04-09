@@ -388,6 +388,96 @@ local function PickBlueprintForRole(factory, roleName, entry, runtime, eco)
     return PickBuildBlueprint(factory, GetRoleCategory(roleName), roleName, preferCheap, techBias, needBias)
 end
 
+local function GetFactoryUpgradeBlueprintId(factory)
+    if not factory or factory.Dead or not factory.GetBlueprint then
+        return false
+    end
+    local bp = factory:GetBlueprint()
+    if not bp or not bp.General then
+        return false
+    end
+    local upgradeBp = bp.General.UpgradesTo
+    if type(upgradeBp) ~= 'string' or upgradeBp == '' then
+        return false
+    end
+    return upgradeBp
+end
+
+local function CountActiveFactoryUpgrades(aiBrain, kind)
+    local factories = aiBrain:GetListOfUnits(categories.FACTORY * categories.STRUCTURE, false, true) or {}
+    local count = 0
+    for _, fac in factories do
+        if fac and not fac.Dead and fac:IsUnitState('Upgrading') then
+            if not kind or ClassifyFactory(fac) == kind then
+                count = count + 1
+            end
+        end
+    end
+    return count
+end
+
+local function ShouldUpgradeFactory(aiBrain, factory, runtime, eco, qLen)
+    if qLen > 0 or not factory or factory.Dead then
+        return false, false
+    end
+    if ClassifyFactory(factory) ~= 'land' then
+        return false, false
+    end
+
+    local upgradeBp = GetFactoryUpgradeBlueprintId(factory)
+    if not upgradeBp or not factory:CanBuild(upgradeBp) then
+        return false, false
+    end
+
+    local plan = runtime.ProductionDirector or {}
+    local current = plan.Current or {}
+    local constraints = plan.ConstraintState or {}
+    local techPlan = plan.TechPlan or {}
+    local planner = runtime.StrategicPlanner or {}
+    local ecoCounts = current.Eco or {}
+    local landFactories = current.Factories and current.Factories.Land or {}
+    local readyLand = landFactories.Ready or 0
+    local totalLand = landFactories.Total or 0
+    local factoryTask = current.FactoryTask or {}
+    local completionDebt = factoryTask.Active
+        and factoryTask.Domain == 'Land'
+        and ((factoryTask.AssignedBuilders or 0) < math.max(1, factoryTask.RequiredBuilders or 0))
+
+    if readyLand < 4 or totalLand < 4 then
+        return false, false
+    end
+    if CountActiveFactoryUpgrades(aiBrain, 'land') > 0 then
+        return false, false
+    end
+    if constraints.EcoCrash or constraints.QueueStarved or constraints.PowerBufferLow or constraints.CriticalFactory or constraints.CriticalStructure then
+        return false, false
+    end
+    if completionDebt then
+        return false, false
+    end
+    if (eco.MassIncome or 0) < 4.2 or (eco.EnergyIncome or 0) < 90 then
+        return false, false
+    end
+    if (eco.MassStorageRatio or 0) < 0.12 or (eco.EnergyStorageRatio or 0) < 0.18 then
+        return false, false
+    end
+    if (((ecoCounts.Power or {}).Ready) or 0) < 5 or (((ecoCounts.Mex or {}).Ready) or 0) < 5 then
+        return false, false
+    end
+    if (eco.MassTrend or 0) < -0.06 or (eco.EnergyTrend or 0) < 2 then
+        return false, false
+    end
+
+    local strategicTechWindow = techPlan.EligibleForTech
+        or planner.TradeMapForTech
+        or ((plan.Mode == 'pressure' or plan.Mode == 'expand') and readyLand >= 4 and (eco.MassTrend or 0) >= 0)
+    if not strategicTechWindow then
+        return false, false
+    end
+
+    return true, upgradeBp
+end
+
 local function TryIssuePlannedBuild(aiBrain, factory, runtime, now, state, queueLen, forceTopoff)
     if not IsFactoryReady(factory) then
         return false, 'not-ready'
@@ -409,6 +499,16 @@ local function TryIssuePlannedBuild(aiBrain, factory, runtime, now, state, queue
     end
 
     local eco = GetEcon(runtime)
+    local shouldUpgrade, upgradeBp = ShouldUpgradeFactory(aiBrain, factory, runtime, eco, qLen)
+    if shouldUpgrade and upgradeBp and IssueUpgrade then
+        IssueUpgrade({ factory }, upgradeBp)
+        state.LastIssuedTime = now
+        state.LastRole = 'FactoryUpgrade'
+        state.LastUtility = 999
+        state.LastBlueprint = upgradeBp
+        state.NextIssueTime = now + 1.0
+        return true, 'FactoryUpgrade'
+    end
     local roleName, utility, entry = PickPlannedRole(factory, runtime, eco)
     if not roleName then
         return false, 'no-role'
