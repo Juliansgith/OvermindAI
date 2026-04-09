@@ -919,6 +919,24 @@ Success criteria:
 - `FORCE` shows a meaningful `main` group under pressure instead of mostly `guard`
 - base-edge attacks pull a coherent local response instead of scattered unit trickle
 
+### v119: Power Buffer Recovery
+
+Goals:
+
+- turn `power_buffer_low` into active eco recovery instead of only a tech denial reason
+
+Changes:
+
+- idle engineers now prefer unfinished or damaged core power structures before reclaim
+- if no nearby power task exists, engineer director opens one T1 pgen build near main
+- added `powerRec` to `ENGDIR` telemetry to show when spare engineers are being redirected into power recovery
+
+Success criteria:
+
+- when HQ tech is blocked on `power_buffer_low`, spare engineers visibly shift into pgen build/assist
+- reclaim no longer wins over core power recovery in those windows
+- replay logs show `powerRec>0` during those periods
+
 ### Extractor Validation Constraint
 
 Before further tech-policy work:

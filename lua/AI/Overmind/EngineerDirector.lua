@@ -842,6 +842,145 @@ local function ComputeFactoryTaskRequirements(domain, fraction, stallTime, ready
     return Clamp(required, 1, 5)
 end
 
+local function PickPowerBlueprint(builder)
+    if not builder or builder.Dead then
+        return false
+    end
+
+    local bps = EntityCategoryGetUnitList(categories.STRUCTURE * categories.ENERGYPRODUCTION * categories.TECH1)
+    if not bps or table.getn(bps) <= 0 then
+        return false
+    end
+
+    for _, bp in bps do
+        if bp and builder:CanBuild(bp) then
+            return bp
+        end
+    end
+
+    return false
+end
+
+local PowerBuildOffsets = {
+    { 18, 0 }, { -18, 0 }, { 0, 18 }, { 0, -18 },
+    { 28, 12 }, { -28, 12 }, { 12, -28 }, { -12, -28 },
+    { 36, 0 }, { -36, 0 }, { 0, 36 }, { 0, -36 },
+}
+
+local function GetFactoryAnchor(aiBrain, mainPos)
+    local factories = aiBrain:GetListOfUnits(categories.FACTORY * categories.LAND * categories.STRUCTURE, false, true) or {}
+    local best = mainPos
+    local bestDist = 999999
+    for _, unit in factories do
+        if unit and not unit.Dead and GetFraction(unit) >= 0.95 and not unit:IsUnitState('BeingBuilt') then
+            local pos = unit.GetPosition and unit:GetPosition() or false
+            if pos then
+                local dist = Distance2D(pos, mainPos)
+                if dist < bestDist then
+                    best = pos
+                    bestDist = dist
+                end
+            end
+        end
+    end
+    return best
+end
+
+local function FindPowerBuildPos(aiBrain, anchorPos)
+    if not aiBrain or not anchorPos then
+        return false
+    end
+
+    for _, offset in PowerBuildOffsets do
+        local pos = { (anchorPos[1] or 0) + offset[1], 0, (anchorPos[3] or 0) + offset[2] }
+        local powerNearby = aiBrain:GetNumUnitsAroundPoint(EnergyCategory, pos, 8, 'Ally') or 0
+        local factoryNearby = aiBrain:GetNumUnitsAroundPoint(categories.FACTORY * categories.STRUCTURE, pos, 6, 'Ally') or 0
+        if powerNearby <= 0 and factoryNearby <= 0 and not HasEnemyCombatNear(aiBrain, pos, 34) then
+            return pos
+        end
+    end
+
+    return false
+end
+
+local function CountNearbyUnfinishedPower(aiBrain, mainPos, radius)
+    local units = aiBrain:GetListOfUnits(EnergyCategory, false, true) or {}
+    local count = 0
+    for _, unit in units do
+        if unit and not unit.Dead then
+            local pos = unit.GetPosition and unit:GetPosition() or false
+            if pos and Distance2D(pos, mainPos) <= (radius or 180) and GetFraction(unit) < 0.995 and not unit:IsUnitState('Upgrading') then
+                count = count + 1
+            end
+        end
+    end
+    return count
+end
+
+local function GetPriorityPowerRecoveryTarget(aiBrain, runtime, mainPos, structureTargetObject, structureTask)
+    if not aiBrain or not mainPos then
+        return false
+    end
+
+    if structureTask and structureTask.Active and structureTask.Kind == 'Power' and structureTargetObject and not structureTargetObject.Dead then
+        return structureTargetObject
+    end
+
+    local best = false
+    local bestScore = -999999
+    local units = aiBrain:GetListOfUnits(EnergyCategory, false, true) or {}
+    for _, unit in units do
+        if unit and not unit.Dead and not unit:IsUnitState('Upgrading') then
+            local pos = unit.GetPosition and unit:GetPosition() or false
+            if pos then
+                local dist = Distance2D(pos, mainPos)
+                if dist <= 220 then
+                    local fraction = GetFraction(unit)
+                    local health = unit.GetHealth and unit:GetHealth() or 0
+                    local maxHealth = unit.GetMaxHealth and unit:GetMaxHealth() or 0
+                    local score = -999999
+                    if fraction < 0.995 then
+                        score = 320 + (fraction * 140) - dist
+                    elseif maxHealth > 0 and health > 0 and health < (maxHealth * 0.92) then
+                        score = 220 + ((1 - (health / maxHealth)) * 180) - dist
+                    end
+                    if score > bestScore then
+                        bestScore = score
+                        best = unit
+                    end
+                end
+            end
+        end
+    end
+
+    return best
+end
+
+local function TryOpenPowerRecoveryBuild(aiBrain, runtime, eng, mainPos, now)
+    if not eng or eng.Dead or not mainPos or not IssueBuildMobile then
+        return false
+    end
+
+    if now < ((runtime.LastPowerRecoveryIssueTime or -999) + 8) then
+        return false
+    end
+    if CountNearbyUnfinishedPower(aiBrain, mainPos, 180) >= 1 then
+        return false
+    end
+
+    local bp = PickPowerBlueprint(eng)
+    local anchor = bp and GetFactoryAnchor(aiBrain, mainPos) or false
+    local buildPos = bp and anchor and FindPowerBuildPos(aiBrain, anchor) or false
+    if not bp or not buildPos then
+        return false
+    end
+
+    IssueBuildMobile({ eng }, buildPos, bp, {})
+    runtime.LastPowerRecoveryIssueTime = now
+    runtime.LastPowerRecoveryPos = buildPos
+    return true
+end
+
 local function ComputeStructureTaskRequirements(kind, fraction, stallTime, eco)
     local required = 1
     if kind == 'Mex' then
@@ -1577,6 +1716,7 @@ function Update(aiBrain, now)
     local forcedFactoryRecover = 0
     local dispatchedExpand = 0
     local reclaimEnemyMex = 0
+    local powerRecoveryCount = 0
     local enemyPos = runtime.PrimaryEnemyPos
     local baseEngineers = aiBrain:GetNumUnitsAroundPoint(categories.ENGINEER * categories.MOBILE, mainPos, 80, 'Ally') or 0
     local needBase = math.max(0, baseFloor - baseEngineers)
@@ -1793,6 +1933,22 @@ function Update(aiBrain, now)
                     if (not acted)
                         and isIdle
                         and not constructing
+                        and constraints.PowerBufferLow == true
+                        and localThreat < 2.2
+                        and dist <= 360 then
+                        local powerTarget = GetPriorityPowerRecoveryTarget(aiBrain, runtime, mainPos, structureTargetObject, structureTask)
+                        if powerTarget and TryAssignAssistOrRepair(aiBrain, runtime, eng, powerTarget, false, now) then
+                            powerRecoveryCount = powerRecoveryCount + 1
+                            acted = true
+                        elseif TryOpenPowerRecoveryBuild(aiBrain, runtime, eng, mainPos, now) then
+                            powerRecoveryCount = powerRecoveryCount + 1
+                            acted = true
+                        end
+                    end
+
+                    if (not acted)
+                        and isIdle
+                        and not constructing
                         and factoryTask.Active
                         and factoryTargetObject
                         and (factoryTask.AssignedBuilders or 0) < (factoryTask.RequiredBuilders or 0)
@@ -1925,8 +2081,10 @@ function Update(aiBrain, now)
     runtime.LastEngineerStructureRecover = structureTask.AssignedBuilders or 0
     runtime.LastEngineerExpandDispatch = dispatchedExpand
     runtime.LastEngineerEnemyMexReclaim = reclaimEnemyMex
+    runtime.LastEngineerPowerRecovery = powerRecoveryCount
 
     local shouldLog = (recoverCount + threatenedCount + forcedFactoryRecover + dispatchedExpand + reclaimEnemyMex) > 0
+        or powerRecoveryCount > 0
         or factoryTask.Active
         or structureTask.Active
     if shouldLog and (now - (runtime.LastEngineerDirectorLogTime or -999)) >= 20 then
@@ -1940,12 +2098,13 @@ function Update(aiBrain, now)
             sz = structureTask.TargetPos[3] or 0
             structureNearby = aiBrain:GetNumUnitsAroundPoint(categories.ENGINEER * categories.MOBILE, structureTask.TargetPos, 18, 'Ally') or 0
         end
-        LOG(string.format('*OVERMIND ENGDIR A%d t=%.1f recover=%d threat=%d facRec=%d expand=%d baseNeed=%d facTask=%d:%s frac=%.2f stall=%.1f asn=%d/%d structTask=%d:%s:%s frac=%.2f stall=%.1f asn=%d/%d near=%d pos=%.1f,%.1f',
+        LOG(string.format('*OVERMIND ENGDIR A%d t=%.1f recover=%d threat=%d facRec=%d powerRec=%d expand=%d baseNeed=%d facTask=%d:%s frac=%.2f stall=%.1f asn=%d/%d structTask=%d:%s:%s frac=%.2f stall=%.1f asn=%d/%d near=%d pos=%.1f,%.1f',
             aiBrain:GetArmyIndex(),
             now,
             recoverCount,
             threatenedCount,
             forcedFactoryRecover,
+            powerRecoveryCount,
             dispatchedExpand,
             math.max(0, baseFloor - baseEngineers),
             factoryTask.Active and 1 or 0,
