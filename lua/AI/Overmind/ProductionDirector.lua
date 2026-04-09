@@ -458,6 +458,33 @@ local function BuildConstraints(runtime, current, confidence, scoutingDebt, nava
         airPanic = false
     end
     local navyLowValue = (not navalActive) or (((opp.Navy or 0) <= 0) and ((runtime.ZoneModel and runtime.ZoneModel.MapControl) or 0) < 0.62 and now < 900)
+    local surplusSpendWindow = not ecoCrash
+        and not queueStarved
+        and not criticalFactory
+        and not criticalStructure
+        and not unitCapPressure
+        and not econBootstrap
+        and engineerUnits >= math.max(6, starterEngineerFloor - 1)
+        and powerReady >= math.max(3, starterPowerFloor)
+        and mexReady >= math.max(5, starterMexFloor - 1)
+        and (
+            (
+                (eco.MassStorageRatio or 0) >= 0.4
+                and (eco.EnergyStorageRatio or 0) >= 0.3
+                and (eco.MassTrend or 0) >= 0.08
+                and (eco.EnergyTrend or 0) >= 4
+            )
+            or (
+                durableSurplus
+                and (eco.MassStorageRatio or 0) >= 0.28
+                and (eco.EnergyStorageRatio or 0) >= 0.24
+            )
+        )
+    local strongSurplusWindow = surplusSpendWindow
+        and (eco.MassStorageRatio or 0) >= 0.62
+        and (eco.EnergyStorageRatio or 0) >= 0.46
+        and (eco.MassTrend or 0) >= 0.14
+        and (eco.EnergyTrend or 0) >= 8
     local techBlocked = ecoWeak or queueStarved or frontCollapse or airPanic or visionPanic or unitCapPressure or confidence.Global < 0.5 or criticalFactory or criticalStructure or econBootstrap or starterPhase
 
     local engineerFloor = math.max((policy.EngineerReserveMin or 4), math.floor((current.Factories.Ready or 0) * ((policy.EngineerFactoryRatio or 1.0) + 0.1)))
@@ -509,6 +536,8 @@ local function BuildConstraints(runtime, current, confidence, scoutingDebt, nava
         EcoWeak = ecoWeak,
         EcoCrash = ecoCrash,
         DurableSurplus = durableSurplus,
+        SurplusSpendWindow = surplusSpendWindow and true or false,
+        StrongSurplusWindow = strongSurplusWindow and true or false,
         QueueStarved = queueStarved,
         EconBootstrap = econBootstrap,
         UnitCapPressure = unitCapPressure,
@@ -1540,6 +1569,16 @@ local function DecideCapacityPlan(runtime, current, constraints, rolePlan)
     if liveCombatWindow and current.Factories.Air.Ready >= 1 and current.Factories.Air.Total > 0 and not powerBufferLow then
         airTarget = math.max(airTarget, 1)
     end
+    if constraints.SurplusSpendWindow
+        and current.Factories.Land.Ready >= 4
+        and not constraints.CriticalFactory
+        and not constraints.CriticalStructure
+        and not completionLock then
+        landTarget = math.max(landTarget, math.min(6, current.Factories.Land.Total + 1))
+        if current.Factories.Land.Ready >= 6 and not powerBufferLow then
+            airTarget = math.max(airTarget, math.min(2, current.Factories.Air.Total + 1))
+        end
+    end
 
     local completionLock = unstaffedFactoryShell or (landFactoryCompletionDebt and current.Factories.Land.Total >= 2)
     local landFactoryAllowed = (not pauseGrowth) and (not completionLock) and (current.Factories.Land.Total < landTarget)
@@ -1616,6 +1655,11 @@ local function DecideTechPlan(runtime, current, constraints, confidence, mode)
         ecoBias = ecoBias - 0.08
         airBias = airBias + 0.12
     end
+    if constraints.SurplusSpendWindow then
+        eligible = true
+        ecoBias = ecoBias + 0.1
+        landBias = landBias + 0.04
+    end
 
     local overflowWindow = (eco.MassStorageRatio or 0) >= 0.78
         and (eco.MassTrend or 0) >= 0.12
@@ -1660,6 +1704,10 @@ local function DecideTechPlan(runtime, current, constraints, confidence, mode)
         upgradeExtractors = true
         aggressiveExtractors = extractorPriority >= 0.55 and confidence.Global >= 0.55
         extractorReason = 'eco_bias'
+    elseif constraints.SurplusSpendWindow and not constraints.TechBlocked then
+        upgradeExtractors = true
+        aggressiveExtractors = constraints.StrongSurplusWindow == true and confidence.Global >= 0.52
+        extractorReason = 'surplus_window'
     elseif stableUpgradeEco and confidence.Global >= 0.62 and (constraints.MapControl or 0) >= 0.48 and not constraints.LandPanic and not constraints.AirPanic then
         upgradeExtractors = true
         extractorReason = 'map_control'
@@ -1670,10 +1718,12 @@ local function DecideTechPlan(runtime, current, constraints, confidence, mode)
         aggressiveExtractors = false
         extractorReason = 'scouting_debt'
     end
-    if (planner.TradeTechForTempo or planner.PunishGreed) and not overflowWindow then
+    if (planner.TradeTechForTempo or planner.PunishGreed) and not overflowWindow and not constraints.SurplusSpendWindow then
         upgradeExtractors = false
         aggressiveExtractors = false
         extractorReason = 'tempo_mode'
+    elseif (planner.TradeTechForTempo or planner.PunishGreed) and constraints.SurplusSpendWindow and upgradeExtractors then
+        extractorReason = 'tempo_surplus'
     end
 
     return {

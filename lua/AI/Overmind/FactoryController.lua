@@ -468,20 +468,24 @@ local function ShouldUpgradeFactory(aiBrain, factory, runtime, eco, qLen)
     if completionDebt then
         return false, false
     end
-    if (eco.MassIncome or 0) < 3.2 or (eco.EnergyIncome or 0) < 60 then
+    local surplusSpendWindow = constraints.SurplusSpendWindow == true
+    local strongSurplusWindow = constraints.StrongSurplusWindow == true
+
+    if not surplusSpendWindow and ((eco.MassIncome or 0) < 3.2 or (eco.EnergyIncome or 0) < 60) then
         return false, false
     end
-    if (eco.MassStorageRatio or 0) < 0.06 or (eco.EnergyStorageRatio or 0) < 0.12 then
+    if not surplusSpendWindow and ((eco.MassStorageRatio or 0) < 0.06 or (eco.EnergyStorageRatio or 0) < 0.12) then
         return false, false
     end
     if (((ecoCounts.Power or {}).Ready) or 0) < 4 or (((ecoCounts.Mex or {}).Ready) or 0) < 4 then
         return false, false
     end
-    if (eco.MassTrend or 0) < -0.12 or (eco.EnergyTrend or 0) < -2 then
+    if not strongSurplusWindow and ((eco.MassTrend or 0) < -0.12 or (eco.EnergyTrend or 0) < -2) then
         return false, false
     end
 
     local strategicTechWindow = techPlan.EligibleForTech
+        or surplusSpendWindow
         or planner.TradeMapForTech
         or planner.ForceAirAnswer
         or ((plan.Mode == 'pressure' or plan.Mode == 'expand' or plan.Mode == 'air_control') and readyLand >= 4 and (eco.MassTrend or 0) >= -0.05)

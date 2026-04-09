@@ -852,6 +852,31 @@ Success criteria:
 - engineers assist the active directed mex/HQ upgrade instead of generic nearest upgrades
 - fewer cases where tech is “allowed” but no stable upgrade target is actually owned
 
+### v116: Surplus Spend Windows
+
+Status:
+
+- implemented in `v116`
+
+Goals:
+
+- stop treating a stable economy as a finished economy
+- force spare mass/energy into one more owned spend path instead of floating
+- make local mex tech, first HQ tech, and factory growth respond to sustained surplus
+
+Changes:
+
+- added explicit `SurplusSpendWindow` and `StrongSurplusWindow` in `ProductionDirector`
+- surplus windows now lower factory-growth brakes once the base core is online
+- surplus windows can keep mex upgrades enabled even when tempo mode would normally suppress them
+- `UpgradeDirector` now scores safe local `T1 -> T2` and first land HQ upgrades higher during sustained surplus
+- factory upgrade fallback also respects the surplus window instead of waiting for a perfect tech read
+
+Success criteria:
+
+- by `8-12` minutes, spare eco should convert into more local mex upgrades, a first land HQ, or more factory count
+- fewer cases where mass and energy float while `mex=0` and `tech=0`
+
 ### v102: Mainline Commitment
 
 Goals:
