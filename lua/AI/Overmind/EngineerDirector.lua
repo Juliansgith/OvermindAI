@@ -139,14 +139,27 @@ local function TryReclaimEnemyMex(aiBrain, runtime, eng, now)
         pos,
         24,
         'Ally') or 0
-    if localThreat > 2.2 and escort < 2 then
+    if localThreat > 0.8 or escort < 4 or HasEnemyCombatNear(aiBrain, pos, 28) then
         return false
     end
 
     local reclaimTargets = {}
     local maxTargets = math.min(2, table.getn(enemyMex))
     for i = 1, maxTargets do
-        table.insert(reclaimTargets, enemyMex[i])
+        local target = enemyMex[i]
+        if target and not target.Dead then
+            local targetPos = target.GetPosition and target:GetPosition() or false
+            local routeRisk = targetPos and OvermindMemory.GetRouteRisk(aiBrain, pos, targetPos, 4, 42) or 999
+            local targetThreat = targetPos and (aiBrain:GetThreatAtPosition(targetPos, 1, true, 'AntiSurface') or 0) or 999
+            local enemyGuard = targetPos and (aiBrain:GetNumUnitsAroundPoint(
+                categories.MOBILE * categories.LAND - categories.ENGINEER - categories.SCOUT - categories.COMMAND,
+                targetPos,
+                24,
+                'Enemy') or 0) or 999
+            if targetPos and routeRisk <= 1.35 and targetThreat <= 0.6 and enemyGuard <= 0 and not HasEnemyCombatNear(aiBrain, targetPos, 24) then
+                table.insert(reclaimTargets, target)
+            end
+        end
     end
     if table.getn(reclaimTargets) <= 0 then
         return false
@@ -242,7 +255,11 @@ local function IsSafeExpansionTarget(aiBrain, runtime, pos, mainPos, enemyPos, m
         return false
     end
     local routeRisk = OvermindMemory.GetRouteRisk(aiBrain, mainPos, pos, 5, 54)
-    if routeRisk > 4.6 then
+    if routeRisk > 3.4 then
+        return false
+    end
+
+    if HasEnemyCombatNear(aiBrain, pos, 30) then
         return false
     end
 
@@ -1742,6 +1759,25 @@ end
 local function TryAssignAssistOrRepair(aiBrain, runtime, eng, target, isUpgrade, now)
     if not eng or eng.Dead or not target or target.Dead then
         return false
+    end
+
+    local mainPos = GetMainPos(aiBrain, runtime)
+    local engPos = eng.GetPosition and eng:GetPosition() or false
+    local targetPos = target.GetPosition and target:GetPosition() or false
+    if engPos and targetPos then
+        local targetThreat = aiBrain:GetThreatAtPosition(targetPos, 1, true, 'AntiSurface') or 0
+        local localThreat = aiBrain:GetThreatAtPosition(engPos, 1, true, 'AntiSurface') or 0
+        local routeRisk = OvermindMemory.GetRouteRisk(aiBrain, engPos, targetPos, 4, 40)
+        local targetEnemyCombat = HasEnemyCombatNear(aiBrain, targetPos, 26)
+        local routeEnemyCombat = HasEnemyCombatNear(aiBrain, engPos, 20)
+        local nearMain = mainPos and Distance2D(targetPos, mainPos) <= 140
+        if (targetEnemyCombat and not nearMain)
+            or routeEnemyCombat
+            or targetThreat > (nearMain and 2.0 or 1.1)
+            or localThreat > 2.2
+            or routeRisk > (nearMain and 3.0 or 1.9) then
+            return false
+        end
     end
 
     if IssueClearCommands then
