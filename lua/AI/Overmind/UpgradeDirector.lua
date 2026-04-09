@@ -428,7 +428,7 @@ local function PickFactoryTarget(aiBrain, runtime, state)
     end
 end
 
-local function Update(aiBrain, now)
+local function UpdateDirector(aiBrain, now)
     local runtime = aiBrain.OvermindRuntime or {}
     aiBrain.OvermindRuntime = runtime
 
@@ -460,10 +460,10 @@ local function Update(aiBrain, now)
     end
 end
 
-Module.Update = Update
+Module.Update = UpdateDirector
 
 function Update(aiBrain, now)
-    return Module.Update(aiBrain, now)
+    return UpdateDirector(aiBrain, now)
 end
 
 return Module
