@@ -902,6 +902,83 @@ Success criteria:
 - more than one mex upgrade can run when surplus is real
 - first HQ starts earlier in stable midgame instead of waiting for a perfect tech state
 
+### v126: Economy Control Refactor
+
+Goals:
+
+- stop treating a stable economy as a reason to pause instead of a reason to keep converting
+- make `T1 -> T2` mex upgrades behave as mass consolidation rather than late tech greed
+- give Overmind a single coherent economy control path that is easier to tune without breaking tempo
+
+Design principles:
+
+- copy M28's control shape, not its exact thresholds
+- keep Overmind's stronger factory tempo and recovery behavior
+- move from scattered build gates to explicit economy modes and directed spend targets
+
+Implementation scope:
+
+1. Explicit economy modes in `EconomyOptimizer`
+- add and publish four concrete modes:
+  - `production_first`
+  - `mass_consolidation`
+  - `hq_transition`
+  - `surplus_scale`
+- make mode selection explicit in telemetry instead of inferring it from mixed reasons
+- `production_first` should allow minimal safe local mex consolidation, not zero tech forever
+
+2. Make `UpgradeDirector` authoritative
+- keep mex and HQ ownership in `UpgradeDirector` instead of broad builder-condition permission
+- decide upgrade class in priority order:
+  - first safe local/core `T1 -> T2`
+  - second safe `T1 -> T2` if budget supports it
+  - first land HQ
+  - later mex/HQ scaling
+- keep `T2 -> T3` on a separate stricter path
+
+3. Add mex candidate classes
+- classify mex targets as:
+  - `core`
+  - `local_safe`
+  - `local_edge`
+  - `remote`
+- score them in that order so exposed edge mexes inside the local radius stop winning over core mexes
+- log the chosen class and target position in `UPGDIR`
+
+4. Chain upgrades instead of re-blocking after every completion
+- when a mex upgrade completes, immediately reevaluate the next safe mex if the budget still supports it
+- when the first HQ completes, immediately reevaluate whether more T1 factories, more mex tech, or deeper tech should follow
+- avoid falling back to `none:tempo_mode` or `none:scouting_debt` if a valid chained spend path still exists
+
+5. Add an engineer spend ladder tied to owned upgrades
+- idle engineer priority should become:
+  - critical factory completion
+  - assist owned mex upgrade
+  - assist owned HQ upgrade
+  - power recovery if an owned upgrade is blocked on energy
+  - safe mex expansion
+  - core eco scaling
+  - reclaim
+- reclaim should remain fallback only
+
+6. Turn block reasons into action-coupled recovery
+- if `UPGDIR` blocks on `power_buffer_low`, `ENGDIR` should create/assist power work immediately
+- if `UPGDIR` blocks on `critical_factory`, `ENGDIR` should hard-prioritize factory recovery until cleared
+- if no safe mex exists, mode should move toward `hq_transition` or `surplus_scale`, not idle
+
+7. Soft HQ transition after the T1 floor
+- after roughly five ready land factories, strongly prefer the first land HQ
+- this should be a soft bias, not a hard stop on more T1 factories
+- pressure, overflow, or an already-started HQ can still justify more T1 production
+
+Success criteria:
+
+- by `8-12` minutes on contested maps, at least one local/core `T1 -> T2` mex is already in progress
+- if mass budget remains healthy, a second local/core `T1 -> T2` mex can chain in without waiting for a perfect surplus state
+- once the land T1 floor is stable, the first land HQ starts without getting stuck behind scattered block reasons
+- idle engineers primarily assist owned mex/HQ/power/factory recovery tasks instead of reclaiming
+- replay logs show explicit econ mode, explicit upgrade target class, and chained spend behavior that can be explained from telemetry
+
 ### v102: Mainline Commitment
 
 Goals:
