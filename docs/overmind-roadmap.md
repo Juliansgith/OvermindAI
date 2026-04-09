@@ -995,6 +995,12 @@ Phase 2 implemented in `v127`:
 - safe mex upgrades now strongly prefer the defended factory ring before outer local mexes
 - this is intended to stop Overmind from choosing technically local but strategically exposed mex upgrades first
 
+Phase 3 implemented in `v128`:
+
+- after the first land HQ exists, the first T2 engineer is now explicitly forced instead of being left to generic role utility
+- added a dedicated `First T2 Power Spike` path so a base that is still being carried by many T1 pgens can pivot into its first T2 pgen earlier
+- this makes the post-HQ sequence explicit: first T2 engineer, then first T2 power, then continued T2 land production
+
 ### v102: Mainline Commitment
 
 Goals:

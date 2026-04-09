@@ -416,6 +416,51 @@ local function CountActiveFactoryUpgrades(aiBrain, kind)
     return count
 end
 
+local function CountTechEngineers(aiBrain)
+    return aiBrain:GetCurrentUnits(categories.ENGINEER * categories.MOBILE * (categories.TECH2 + categories.TECH3)) or 0
+end
+
+local function ShouldForceFirstTechEngineer(aiBrain, factory, runtime, eco)
+    if not factory or factory.Dead then
+        return false
+    end
+    if ClassifyFactory(factory) ~= 'land' then
+        return false
+    end
+    if not EntityCategoryContains(categories.TECH2 + categories.TECH3, factory) then
+        return false
+    end
+    if CountTechEngineers(aiBrain) >= 1 then
+        return false
+    end
+
+    local plan = runtime.ProductionDirector or {}
+    local current = plan.Current or {}
+    local constraints = plan.ConstraintState or {}
+    local landFactories = current.Factories and current.Factories.Land or {}
+    local readyLand = landFactories.Ready or 0
+    local mexReady = (((current.Eco or {}).Mex or {}).Ready) or 0
+    local powerReady = (((current.Eco or {}).Power or {}).Ready) or 0
+
+    if readyLand < 3 or mexReady < 4 or powerReady < 4 then
+        return false
+    end
+    if constraints.EcoCrash or constraints.QueueStarved or constraints.LandPanic or constraints.AirPanic then
+        return false
+    end
+    if (eco.MassIncome or 0) < 3.2 or (eco.EnergyIncome or 0) < 55 then
+        return false
+    end
+    if (eco.MassTrend or 0) < -0.12 or (eco.EnergyTrend or 0) < -4 then
+        return false
+    end
+    if (eco.MassStorageRatio or 0) < 0.06 or (eco.EnergyStorageRatio or 0) < 0.12 then
+        return false
+    end
+
+    return true
+end
+
 local function ShouldUpgradeFactory(aiBrain, factory, runtime, eco, qLen)
     if qLen > 0 or not factory or factory.Dead then
         return false, false
@@ -518,6 +563,19 @@ local function TryIssuePlannedBuild(aiBrain, factory, runtime, now, state, queue
     end
 
     local eco = GetEcon(runtime)
+    if ShouldForceFirstTechEngineer(aiBrain, factory, runtime, eco) then
+        local bp = PickBuildBlueprint(factory, EngineerCategory, 'Engineer', true, 0.6, 1.4)
+        if bp and IssueBuildFactory then
+            IssueBuildFactory({ factory }, bp, 1)
+            state.LastIssuedTime = now
+            state.LastRole = 'FirstTechEngineer'
+            state.LastUtility = 995
+            state.LastBlueprint = bp
+            state.NextIssueTime = now + 0.6
+            return true, 'FirstTechEngineer'
+        end
+    end
+
     local shouldUpgrade, upgradeBp = ShouldUpgradeFactory(aiBrain, factory, runtime, eco, qLen)
     if shouldUpgrade and upgradeBp and IssueUpgrade then
         IssueUpgrade({ factory }, upgradeBp)

@@ -1410,6 +1410,23 @@ BuilderGroup {
         },
     },
     Builder {
+        BuilderName = 'Overmind First T2 Power Spike',
+        PlatoonTemplate = 'T2EngineerBuilder',
+        Priority = 1095,
+        InstanceCount = 1,
+        BuilderConditions = {
+            { OMBC, 'IsOvermindBrain', {} },
+            { OMBC, 'ShouldPrioritizeFirstTech2Power', {} },
+        },
+        BuilderType = 'Any',
+        BuilderData = {
+            Construction = {
+                BuildClose = false,
+                BuildStructures = { 'T2EnergyProduction' },
+            },
+        },
+    },
+    Builder {
         BuilderName = 'Overmind T2 Power Sustain',
         PlatoonTemplate = 'T2EngineerBuilder',
         Priority = 1025,

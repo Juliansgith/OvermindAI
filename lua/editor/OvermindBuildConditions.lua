@@ -1391,6 +1391,48 @@ function ShouldBuildPower(aiBrain, maxEnergyRatio, maxEnergyTrend, maxMassRatioF
     return false
 end
 
+function ShouldPrioritizeFirstTech2Power(aiBrain)
+    if not IsOvermindBrain(aiBrain) then
+        return false
+    end
+
+    local econ = GetEcon(aiBrain)
+    local director = GetProductionDirector(aiBrain)
+    local current = director and director.Current or false
+    local constraints = director and director.ConstraintState or {}
+    local power = current and current.Eco and current.Eco.Power or {}
+    local land = current and current.Factories and current.Factories.Land or {}
+    local t2plusEngineers = GetUnitCount(aiBrain, categories.ENGINEER * categories.MOBILE * (categories.TECH2 + categories.TECH3))
+    local t2plusPower = GetExistingUnitCount(aiBrain, categories.ENERGYPRODUCTION * (categories.TECH2 + categories.TECH3))
+    local unfinishedT2plusPower = GetUnfinishedUnitCount(aiBrain, categories.ENERGYPRODUCTION * (categories.TECH2 + categories.TECH3))
+    local t1PowerReady = GetExistingUnitCount(aiBrain, categories.ENERGYPRODUCTION * categories.TECH1)
+    local t2LandReady = GetExistingUnitCount(aiBrain, categories.FACTORY * categories.LAND * categories.TECH2)
+
+    if t2LandReady < 1 or t2plusEngineers < 1 then
+        return false
+    end
+    if t2plusPower > 0 or unfinishedT2plusPower > 0 then
+        return false
+    end
+    if land.Ready < 3 or (power.Ready or 0) < 6 or t1PowerReady < 8 then
+        return false
+    end
+    if constraints.EcoCrash or constraints.CriticalFactory or constraints.CriticalStructure then
+        return false
+    end
+    if (econ.EnergyStorageRatio or 0) >= 0.82 and (econ.EnergyTrend or 0) >= 16 then
+        return false
+    end
+    if (econ.MassIncome or 0) < 3.5 or (econ.EnergyIncome or 0) < 70 then
+        return false
+    end
+    if (econ.MassTrend or 0) < -0.1 or (econ.EnergyTrend or 0) < -6 then
+        return false
+    end
+
+    return true
+end
+
 function HasSafeEnergy(aiBrain, minEnergyRatio, minEnergyTrend)
     if not IsOvermindBrain(aiBrain) then
         return false
