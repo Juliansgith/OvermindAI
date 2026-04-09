@@ -709,7 +709,7 @@ function RunPressureCycle(aiBrain, now)
     local interceptCount = table.getn(interceptUnits)
     local frontPos = (frontTask and frontTask.TargetPos) or intel.FrontLinePos or (runtime.ZoneModel and runtime.ZoneModel.FrontLinePos) or LerpPos(ownPos, primaryEnemyPos, 0.45)
     local rearGuardPos = (baseTask and (baseTask.TargetPos or baseTask.AnchorPos)) or intel.RearGuardPos or (runtime.ZoneModel and runtime.ZoneModel.RearGuardPos) or ownPos
-    local acuPos = GetOwnACUPos(aiBrain) or ownPos
+    local acuPos = GetBrainAnchorPosition(aiBrain) or ownPos
     local acuEnemyUnits = aiBrain:GetUnitsAroundPoint(categories.MOBILE - categories.SCOUT, acuPos, 60, 'Enemy')
     local acuEnemyPos = (acuEmergencyTask and acuEmergencyTask.TargetPos)
         or (acuEnemyUnits and table.getn(acuEnemyUnits) > 0 and acuEnemyUnits[1] and acuEnemyUnits[1]:GetPosition())

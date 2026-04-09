@@ -5,6 +5,7 @@ local LandAACategory = categories.MOBILE * categories.LAND * categories.ANTIAIR
 local LandIndirectCategory = categories.MOBILE * categories.LAND * categories.INDIRECTFIRE
     - categories.ENGINEER - categories.SCOUT - categories.COMMAND
 local LandScoutCategory = categories.MOBILE * categories.LAND * categories.SCOUT - categories.ENGINEER
+local LandPressureCategory = categories.MOBILE * categories.LAND - categories.ENGINEER - categories.SCOUT - categories.COMMAND
 local AirFighterCategory = categories.MOBILE * categories.AIR * categories.ANTIAIR
     - categories.SCOUT - categories.TRANSPORTATION - categories.COMMAND
 local AirBomberCategory = categories.MOBILE * categories.AIR * categories.BOMBER
