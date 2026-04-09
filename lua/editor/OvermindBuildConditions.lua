@@ -6,6 +6,7 @@ local OvermindAutoTune = import('/mods/OvermindAI/lua/AI/Overmind/AutoTune.lua')
 local GetCompletedUnitCount
 local GetMainPos
 local CountSafeRemoteExtractorUpgradeCandidates
+local Distance2D
 
 local function GetEcon(aiBrain)
     return AIUtils.AIGetEconomyNumbers(aiBrain)
@@ -594,7 +595,7 @@ local function ShouldBypassGenericFirstRadar(aiBrain)
         or (structurePlan.RadarCritical == true and (structurePlan.Radar or 0) > 0)
 end
 
-local function Distance2D(a, b)
+Distance2D = function(a, b)
     local dx = (a[1] or 0) - (b[1] or 0)
     local dz = (a[3] or 0) - (b[3] or 0)
     return math.sqrt((dx * dx) + (dz * dz))
