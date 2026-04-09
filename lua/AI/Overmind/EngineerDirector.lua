@@ -1756,6 +1756,48 @@ local function GetPriorityRepairTarget(aiBrain, runtime, mainPos)
     return best
 end
 
+local function GetPriorityBuildAssistTarget(aiBrain, runtime, mainPos)
+    if not aiBrain or not mainPos then
+        return false
+    end
+
+    local best = false
+    local bestScore = -999999
+    local candidates = aiBrain:GetListOfUnits(categories.STRUCTURE + categories.FACTORY, false, true) or {}
+    for _, unit in candidates do
+        if unit and not unit.Dead and unit:IsUnitState('BeingBuilt') and not unit:IsUnitState('Upgrading') then
+            local pos = unit.GetPosition and unit:GetPosition() or false
+            if pos then
+                local dist = Distance2D(pos, mainPos)
+                if dist <= 360 then
+                    local score = 0
+                    if EntityCategoryContains(categories.FACTORY * categories.LAND, unit) then
+                        score = score + 260
+                    elseif EntityCategoryContains(categories.MASSEXTRACTION, unit) then
+                        score = score + 240
+                    elseif EntityCategoryContains(categories.ENERGYPRODUCTION, unit) then
+                        score = score + 210
+                    elseif EntityCategoryContains(categories.DEFENSE + categories.ANTIAIR, unit) then
+                        score = score + 160
+                    elseif EntityCategoryContains(categories.FACTORY, unit) then
+                        score = score + 150
+                    else
+                        score = score + 100
+                    end
+                    score = score + ((1 - GetFraction(unit)) * 80)
+                    score = score - dist
+                    if score > bestScore then
+                        bestScore = score
+                        best = unit
+                    end
+                end
+            end
+        end
+    end
+
+    return best
+end
+
 local function TryAssignAssistOrRepair(aiBrain, runtime, eng, target, isUpgrade, now)
     if not eng or eng.Dead or not target or target.Dead then
         return false
@@ -2148,6 +2190,19 @@ function Update(aiBrain, now)
                         end
                     end
 
+                    if (not acted)
+                        and isIdle
+                        and not constructing
+                        and (ShouldPersistentSurplusSpend(runtime, now) or ShouldScaleBaseEco(runtime, now))
+                        and localThreat < 2.0
+                        and dist <= 360 then
+                        local buildAssistTarget = GetPriorityBuildAssistTarget(aiBrain, runtime, mainPos)
+                        if buildAssistTarget and TryAssignAssistOrRepair(aiBrain, runtime, eng, buildAssistTarget, false, now) then
+                            surplusSpendCount = surplusSpendCount + 1
+                            acted = true
+                        end
+                    end
+
                     if (not acted) and isIdle and not constructing then
                         local repairTarget = GetPriorityRepairTarget(aiBrain, runtime, mainPos)
                         if repairTarget and localThreat < 2.2 and dist <= 360 and TryAssignAssistOrRepair(aiBrain, runtime, eng, repairTarget, false, now) then
@@ -2172,7 +2227,11 @@ function Update(aiBrain, now)
                         end
                     end
 
-                    if isIdle and not constructing and (not acted) and TryReclaimEnemyMex(aiBrain, runtime, eng, now) then
+                    if isIdle
+                        and not constructing
+                        and (not acted)
+                        and not (ShouldPersistentSurplusSpend(runtime, now) or ShouldScaleBaseEco(runtime, now))
+                        and TryReclaimEnemyMex(aiBrain, runtime, eng, now) then
                         reclaimEnemyMex = reclaimEnemyMex + 1
                         acted = true
                     end
