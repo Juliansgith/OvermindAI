@@ -8,7 +8,7 @@ return {
     FactoryFloorLate = 5,
     FactoryRecoveryStagnation = 85,
 
-    ScoutMinCount = 3,
+    ScoutMinCount = 5,
 
     ACUOpeningMaxDistance = 16,
     ACUMidMaxDistance = 24,

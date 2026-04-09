@@ -176,6 +176,7 @@ local function PickMexTarget(aiBrain, runtime, state)
     local scoutingDebt = techPlan.ExtractorUpgradeReason == 'scouting_debt'
     local surplusSpendWindow = constraints.SurplusSpendWindow == true
     local strongSurplusWindow = constraints.StrongSurplusWindow == true
+    local stableFactoryFloor = readyLand >= 4 and totalLand <= readyLand and powerReady >= 4 and mexReady >= 5
 
     state.Managed = true
     state.TargetUnit = false
@@ -188,9 +189,11 @@ local function PickMexTarget(aiBrain, runtime, state)
     state.Aggressive = false
 
     if constraints.CriticalFactory or constraints.CriticalStructure or constraints.EcoCrash or constraints.QueueStarved then
-        state.Reason = constraints.CriticalFactory and 'critical_factory' or constraints.CriticalStructure and 'critical_structure' or constraints.EcoCrash and 'eco_crash' or 'queue_starved'
-        state.InFlight = CountActiveMexUpgrades(aiBrain)
-        return
+        if not (constraints.CriticalFactory and stableFactoryFloor and not constraints.CriticalStructure and not constraints.EcoCrash and not constraints.QueueStarved) then
+            state.Reason = constraints.CriticalFactory and 'critical_factory' or constraints.CriticalStructure and 'critical_structure' or constraints.EcoCrash and 'eco_crash' or 'queue_starved'
+            state.InFlight = CountActiveMexUpgrades(aiBrain)
+            return
+        end
     end
 
     local activeMexUpgrades = CountActiveMexUpgrades(aiBrain)
@@ -215,7 +218,6 @@ local function PickMexTarget(aiBrain, runtime, state)
     end
 
     local allowGeneralT2 = techPlan.UpgradeExtractors == true
-        and not tempoMode
         and (eco.MassIncome or 0) >= 3.2
         and (eco.EnergyIncome or 0) >= 40
         and (eco.MassStorageRatio or 0) >= 0.16
@@ -281,7 +283,7 @@ local function PickMexTarget(aiBrain, runtime, state)
                         bestScope = 'local'
                     end
                 elseif tech == 1 and allowGeneralT2 and risk <= (isLocal and 3.4 or 2.4) and threat <= (isLocal and 1.9 or 1.1) then
-                    local generalScore = score + (isLocal and 70 or 28) + ((mapControl >= 0.5) and 10 or 0) + (surplusSpendWindow and 18 or 0)
+                    local generalScore = score + (isLocal and 70 or 28) + ((mapControl >= 0.5) and 10 or 0) + (surplusSpendWindow and 18 or 0) + (tempoMode and 18 or 0) + (scoutingDebt and 12 or 0)
                     if generalScore > bestScore then
                         bestScore = generalScore
                         best = mex
@@ -325,7 +327,7 @@ local function PickMexTarget(aiBrain, runtime, state)
         state.Aggressive = state.Cap > 1
     else
         state.Reason = tempoMode and not surplusSpendWindow and 'tempo_mode'
-            or scoutingDebt and not surplusSpendWindow and 'scouting_debt'
+            or scoutingDebt and not surplusSpendWindow and 'safe_wait'
             or surplusSpendWindow and 'surplus_wait'
             or (techPlan.ExtractorUpgradeReason or 'macro_hold')
         state.Cap = 0
@@ -397,15 +399,18 @@ local function PickFactoryTarget(aiBrain, runtime, state)
         state.Reason = 'in_flight'
         return
     end
+    local stableLandFloor = readyLand >= 5 and totalLand <= readyLand and powerReady >= 5 and mexReady >= 5
     if constraints.CriticalFactory or constraints.CriticalStructure or constraints.EcoCrash or constraints.QueueStarved or constraints.PowerBufferLow then
         local hqPowerOverride = constraints.PowerBufferLow
-            and readyLand >= 5
-            and totalLand >= 5
-            and powerReady >= 5
-            and mexReady >= 5
+            and stableLandFloor
             and (eco.EnergyStorageRatio or 0) >= 0.18
             and (eco.EnergyTrend or 0) >= 0
-        if hqPowerOverride and not constraints.CriticalFactory and not constraints.CriticalStructure and not constraints.EcoCrash and not constraints.QueueStarved then
+        local hqFactoryOverride = constraints.CriticalFactory
+            and stableLandFloor
+            and not constraints.CriticalStructure
+            and not constraints.EcoCrash
+            and not constraints.QueueStarved
+        if (hqPowerOverride or hqFactoryOverride) and not constraints.CriticalStructure and not constraints.EcoCrash and not constraints.QueueStarved then
             -- fall through
         else
             state.Reason = constraints.CriticalFactory and 'critical_factory'

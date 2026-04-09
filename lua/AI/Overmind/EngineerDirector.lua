@@ -982,6 +982,31 @@ local function TryOpenPowerRecoveryBuild(aiBrain, runtime, eng, mainPos, now)
     return true
 end
 
+local function ShouldScaleBaseEco(runtime, now)
+    local director = runtime and runtime.ProductionDirector or {}
+    local constraints = director.ConstraintState or {}
+    local current = director.Current or {}
+    local eco = runtime and runtime.EcoState or {}
+    local factories = current.Factories or {}
+    local readyLand = ((factories.Land or {}).Ready) or 0
+    local powerReady = (((current.Eco or {}).Power or {}).Ready) or 0
+    local mexReady = (((current.Eco or {}).Mex or {}).Ready) or 0
+
+    if now < 240 or constraints.EcoCrash or constraints.QueueStarved or constraints.CriticalFactory or constraints.CriticalStructure then
+        return false
+    end
+    if readyLand < 3 or mexReady < 5 then
+        return false
+    end
+    if (eco.MassStorageRatio or 0) < 0.14 or (eco.MassTrend or 0) < -0.12 then
+        return false
+    end
+    if (eco.EnergyStorageRatio or 0) >= 0.72 and powerReady >= (mexReady + 1) then
+        return false
+    end
+    return powerReady <= mexReady or (eco.EnergyStorageRatio or 0) < 0.52 or (eco.EnergyTrend or 0) < 10
+end
+
 local function ComputeStructureTaskRequirements(kind, fraction, stallTime, eco)
     local required = 1
     if kind == 'Mex' then
@@ -1934,7 +1959,7 @@ function Update(aiBrain, now)
                     if (not acted)
                         and isIdle
                         and not constructing
-                        and constraints.PowerBufferLow == true
+                        and (constraints.PowerBufferLow == true or ShouldScaleBaseEco(runtime, now))
                         and localThreat < 2.2
                         and dist <= 360 then
                         local powerTarget = GetPriorityPowerRecoveryTarget(aiBrain, runtime, mainPos, structureTargetObject, structureTask)

@@ -2871,7 +2871,7 @@ function ShouldBuildT1LandRole(aiBrain, role)
         local target = 1 + math.floor(now / 320)
         return landIndirect < target
     elseif key == 'scout' then
-        local target = (now > 260) and 2 or 1
+        local target = (now > 300) and 3 or 2
         return landScout < target
     end
     return false
@@ -2928,7 +2928,7 @@ function ShouldBuildT1AirRole(aiBrain, role)
         local target = (now < 420) and 2 or 6
         return airBomber < target
     elseif key == 'scout' then
-        local target = (now > 300) and 2 or 1
+        local target = (now > 300) and 5 or 3
         return airScout < target
     end
     return false
