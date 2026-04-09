@@ -132,7 +132,7 @@ local function FindStarterBuildPos(aiBrain, anchorPos, sameCategory, avoidCatego
     return false
 end
 
-local function FindNearbyStarterStructure(aiBrain, homePos, powerNeeded, radarNeeded)
+local function FindNearbyStarterStructure(aiBrain, homePos, powerNeeded, radarNeeded, mexPreferred)
     local targets = aiBrain:GetListOfUnits(
         categories.STRUCTURE * (categories.ENERGYPRODUCTION + categories.MASSEXTRACTION + categories.RADAR + categories.FACTORY),
         false,
@@ -148,11 +148,19 @@ local function FindNearbyStarterStructure(aiBrain, homePos, powerNeeded, radarNe
                 if pos and Distance2D(pos, homePos) <= 150 and not HasNearbyEnemyArmy(aiBrain, pos, 34) then
                     local score = (fraction * 120) - Distance2D(pos, homePos)
                     if EntityCategoryContains(StarterPowerCategory, unit) then
-                        score = score + (powerNeeded and 260 or 120)
+                        if mexPreferred then
+                            score = score + (powerNeeded and 40 or 20)
+                        else
+                            score = score + (powerNeeded and 260 or 120)
+                        end
                     elseif EntityCategoryContains(StarterRadarCategory, unit) then
                         score = score + (radarNeeded and 220 or 80)
                     elseif EntityCategoryContains(StarterMexCategory, unit) then
-                        score = score + ((not powerNeeded and 160) or 40)
+                        if mexPreferred then
+                            score = score + 260
+                        else
+                            score = score + ((not powerNeeded and 160) or 40)
+                        end
                     elseif EntityCategoryContains(categories.FACTORY, unit) then
                         score = score + 60
                     end
@@ -231,15 +239,38 @@ local function TryExecuteStarterTask(aiBrain, runtime, acu, homePos, director, c
     local radarReady = (current.Structures and current.Structures.Radar) or 0
     local powerFloor = constraints.StarterPowerFloor or constraints.BootstrapPowerFloor or 2
     local mexFloor = constraints.StarterMexFloor or constraints.BootstrapMexFloor or 4
+    local readyLandFactories = 0
+    local landFactories = aiBrain:GetListOfUnits(categories.FACTORY * categories.LAND * categories.STRUCTURE, false, true) or {}
+    for _, unit in landFactories do
+        if unit and not unit.Dead and GetFraction(unit) >= 0.95 then
+            readyLandFactories = readyLandFactories + 1
+        end
+    end
     local radarNeeded = constraints.StarterRadarRequired == true and radarReady <= 0 and powerReady >= math.max(1, powerFloor - 1)
     local powerNeeded = powerReady < powerFloor
+    local criticalPowerNeeded = powerReady <= 0
+    local starterMexRush = readyLandFactories >= 1
+        and powerReady >= 1
+        and mexReady < math.min(mexFloor, 2)
+    local mexPreferred = starterMexRush and not criticalPowerNeeded
 
-    local repairTarget = FindNearbyStarterStructure(aiBrain, homePos, powerNeeded, radarNeeded)
+    local repairTarget = FindNearbyStarterStructure(aiBrain, homePos, powerNeeded, radarNeeded, mexPreferred)
     if repairTarget and IssueRepair then
         IssueRepair({ acu }, repairTarget)
         runtime.ACUSafetyLockUntil = math.max(runtime.ACUSafetyLockUntil or -999, now + 6)
         runtime.ACUHardBuildLockUntil = math.max(runtime.ACUHardBuildLockUntil or -999, now + 10)
         return true
+    end
+
+    if mexPreferred and IssueBuildMobile then
+        local bp = PickBuildableBlueprint(acu, StarterMexCategory)
+        local mexPos = bp and FindClosestSafeMex(aiBrain, homePos, 220)
+        if bp and mexPos then
+            IssueBuildMobile({ acu }, mexPos, bp, {})
+            runtime.ACUSafetyLockUntil = math.max(runtime.ACUSafetyLockUntil or -999, now + 6)
+            runtime.ACUHardBuildLockUntil = math.max(runtime.ACUHardBuildLockUntil or -999, now + 10)
+            return true
+        end
     end
 
     if powerNeeded and IssueBuildMobile then
