@@ -7,6 +7,7 @@ local function Mod(a, b)
 end
 
 local BomberCategory = categories.MOBILE * categories.AIR * categories.BOMBER - categories.SCOUT - categories.TRANSPORTATION - categories.COMMAND
+local FighterCategory = categories.MOBILE * categories.AIR * categories.ANTIAIR * categories.FIGHTER
 local EnemyMexCategory = categories.STRUCTURE * categories.MASSEXTRACTION
 
 local function Distance2D(a, b)
@@ -49,6 +50,29 @@ local function GetIdleBombers(aiBrain, maxCount)
     return out
 end
 
+local function GetIdleFighters(aiBrain, maxCount)
+    local out = {}
+    local list = aiBrain:GetListOfUnits(FighterCategory, false, true)
+    if not list then
+        return out
+    end
+
+    for _, fighter in list do
+        if fighter and not fighter.Dead then
+            local q = fighter.GetCommandQueue and fighter:GetCommandQueue() or false
+            local qLen = q and table.getn(q) or 0
+            if qLen <= 0 and not fighter:IsUnitState('Building') then
+                table.insert(out, fighter)
+                if table.getn(out) >= maxCount then
+                    break
+                end
+            end
+        end
+    end
+
+    return out
+end
+
 local function ScoreTarget(aiBrain, runtime, pos, homePos, hotspots)
     local enemyMex = aiBrain:GetNumUnitsAroundPoint(EnemyMexCategory, pos, 22, 'Enemy') or 0
     if enemyMex <= 0 then
@@ -80,13 +104,19 @@ local function ScoreTarget(aiBrain, runtime, pos, homePos, hotspots)
     local homeDist = Distance2D(homePos, pos)
     local mobilityBonus = math.min(2.1, homeDist / 390)
 
-    local score = (enemyMex * 8.6)
+    local score = (enemyMex * 9.8)
         - (staticThreat * 0.95)
-        - (airThreat * 0.8)
-        - (aaThreat * 1.2)
+        - (airThreat * 0.65)
+        - (aaThreat * 1.95)
         - (risk * 1.35)
         + sightBonus
         + mobilityBonus
+
+    if aaThreat <= 0.5 and staticThreat <= 0.75 then
+        score = score + 3.5
+    elseif aaThreat <= 1.5 and staticThreat <= 1.5 then
+        score = score + 1.5
+    end
 
     local raid = runtime and runtime.RaidDefense or {}
     if raid and raid.LastThreatMexPos and Distance2D(pos, raid.LastThreatMexPos) < 92 then
@@ -223,6 +253,7 @@ function Module.Update(aiBrain, now)
     local state = runtime.BomberHarass or {
         NextTry = -999,
         LastLog = -999,
+        LastVariant = 0,
     }
     runtime.BomberHarass = state
 
@@ -253,46 +284,100 @@ function Module.Update(aiBrain, now)
         return
     end
 
-    local targets = ChooseTargets(aiBrain, runtime, 2)
+    local idleFighters = GetIdleFighters(aiBrain, 8)
+
+    local targets = ChooseTargets(aiBrain, runtime, 4)
     if table.getn(targets) <= 0 then
         state.NextTry = now + 8
         return
     end
 
     local assigned = 0
-    local goalCount = math.min((totalBombers >= 2) and 2 or 1, table.getn(idle))
+    local fighterCount = table.getn(idleFighters)
+    local bomberGroupSize = (totalBombers >= 4) and 2 or 1
+    local fighterGroupSize = (fighterCount >= 6 and bomberGroupSize >= 2) and 3 or ((fighterCount >= 2) and 2 or 0)
+    local maxGroups = math.min(2, math.floor(table.getn(idle) / bomberGroupSize))
+    if maxGroups <= 0 and table.getn(idle) > 0 then
+        maxGroups = 1
+        bomberGroupSize = 1
+    end
+    if fighterGroupSize > 0 then
+        maxGroups = math.min(maxGroups, math.max(1, math.floor(fighterCount / fighterGroupSize)))
+    end
+    if maxGroups <= 0 then
+        state.NextTry = now + 6
+        return
+    end
+
     local homePos = GetMainPos(aiBrain, runtime)
-    for i = 1, goalCount do
-        local bomber = idle[i]
-        local target = targets[Mod((i - 1), table.getn(targets)) + 1]
-        if bomber and target then
+    local bomberIndex = 1
+    local fighterIndex = 1
+    for groupIndex = 1, maxGroups do
+        local target = targets[Mod((groupIndex - 1), table.getn(targets)) + 1]
+        if target then
             local targetAA = aiBrain:GetThreatAtPosition(target, 1, true, 'AntiAir') or 0
-            if targetAA >= 9 and totalBombers <= 2 then
-                state.NextTry = now + 5
-                return
+            if targetAA < 8 or fighterGroupSize >= 2 then
+                local bombers = {}
+                for _ = 1, bomberGroupSize do
+                    local bomber = idle[bomberIndex]
+                    if bomber then
+                        table.insert(bombers, bomber)
+                        bomberIndex = bomberIndex + 1
+                    end
+                end
+                local escorts = {}
+                for _ = 1, fighterGroupSize do
+                    local fighter = idleFighters[fighterIndex]
+                    if fighter then
+                        table.insert(escorts, fighter)
+                        fighterIndex = fighterIndex + 1
+                    end
+                end
+
+                if table.getn(bombers) > 0 then
+                    if table.getn(escorts) <= 0 and targetAA >= 3 then
+                        state.NextTry = now + 5
+                        return
+                    end
+                    if IssueClearCommands then
+                        IssueClearCommands(bombers)
+                        if table.getn(escorts) > 0 then
+                            IssueClearCommands(escorts)
+                        end
+                    end
+                    state.LastVariant = (state.LastVariant or 0) + 1
+                    local waypoint = BuildWaypoint(homePos, target, state.LastVariant)
+                    if waypoint and IssueMove then
+                        IssueMove(bombers, waypoint)
+                        if table.getn(escorts) > 0 then
+                            IssueMove(escorts, waypoint)
+                        end
+                    end
+                    if IssueAggressiveMove then
+                        IssueAggressiveMove(bombers, target)
+                        if table.getn(escorts) > 0 then
+                            IssueAggressiveMove(escorts, target)
+                        end
+                    elseif IssueMove then
+                        IssueMove(bombers, target)
+                        if table.getn(escorts) > 0 then
+                            IssueMove(escorts, target)
+                        end
+                    end
+                    assigned = assigned + table.getn(bombers)
+                end
             end
-            if IssueClearCommands then
-                IssueClearCommands({ bomber })
-            end
-            local waypoint = BuildWaypoint(homePos, target, i)
-            if waypoint and IssueMove then
-                IssueMove({ bomber }, waypoint)
-            end
-            if IssueAggressiveMove then
-                IssueAggressiveMove({ bomber }, target)
-            elseif IssueMove then
-                IssueMove({ bomber }, target)
-            end
-            assigned = assigned + 1
         end
     end
 
     if assigned > 0 and now - (state.LastLog or -999) >= 16 then
         state.LastLog = now
-        LOG(string.format('*OVERMIND BOMBHARASS A%d t=%.1f assigned=%d targets=%d',
+        LOG(string.format('*OVERMIND BOMBHARASS A%d t=%.1f assigned=%d groups=%d escorts=%d targets=%d',
             aiBrain:GetArmyIndex(),
             now,
             assigned,
+            maxGroups,
+            fighterGroupSize,
             table.getn(targets)))
     end
 
