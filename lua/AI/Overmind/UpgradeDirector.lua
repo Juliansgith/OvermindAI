@@ -155,6 +155,37 @@ local function ComputeDynamicMexCap(eco, readyLand, totalLand, powerReady, mexRe
     return math.max(1, cap)
 end
 
+local function ComputeEarlyMexUpgradeBudget(eco, readyLand, totalLand, powerReady, mexReady)
+    if readyLand < 3 or totalLand < 3 or powerReady < 4 or mexReady < 5 then
+        return 0, 0
+    end
+
+    local massIncome = eco.MassIncome or 0
+    local massTrend = eco.MassTrend or 0
+    local massStorage = eco.MassStorageRatio or 0
+    local energyTrend = eco.EnergyTrend or 0
+    local energyStorage = eco.EnergyStorageRatio or 0
+
+    local effectiveBudget = massIncome
+        + math.max(0, massTrend * 6)
+        + math.max(0, (massStorage - 0.12) * 8)
+        + math.max(0, (energyStorage - 0.18) * 2)
+
+    if energyTrend < -8 or energyStorage < 0.06 or massTrend < -0.22 or massStorage < 0.04 then
+        return effectiveBudget, 0
+    end
+
+    local cap = 0
+    if effectiveBudget >= 8.5 then
+        cap = 1
+    end
+    if effectiveBudget >= 13.5 and massTrend >= -0.05 and massStorage >= 0.12 then
+        cap = 2
+    end
+
+    return effectiveBudget, cap
+end
+
 local function PickMexTarget(aiBrain, runtime, state)
     local director = runtime.ProductionDirector or {}
     local current = director.Current or {}
@@ -177,6 +208,7 @@ local function PickMexTarget(aiBrain, runtime, state)
     local surplusSpendWindow = constraints.SurplusSpendWindow == true
     local strongSurplusWindow = constraints.StrongSurplusWindow == true
     local stableFactoryFloor = readyLand >= 4 and totalLand <= readyLand and powerReady >= 4 and mexReady >= 5
+    local mexBudget, budgetT2Cap = ComputeEarlyMexUpgradeBudget(eco, readyLand, totalLand, powerReady, mexReady)
 
     state.Managed = true
     state.TargetUnit = false
@@ -213,6 +245,9 @@ local function PickMexTarget(aiBrain, runtime, state)
         and (eco.EnergyStorageRatio or 0) >= 0.05
         and not constraints.LandPanic
         and not constraints.AirPanic
+    if budgetT2Cap >= 1 then
+        allowLocalT2 = true
+    end
     if surplusSpendWindow and readyLand >= 4 and powerReady >= 4 and mexReady >= 5 then
         allowLocalT2 = true
     end
@@ -223,6 +258,9 @@ local function PickMexTarget(aiBrain, runtime, state)
         and (eco.MassStorageRatio or 0) >= 0.16
         and (eco.EnergyStorageRatio or 0) >= 0.14
         and (confidence.Global or 0) >= 0.55
+    if budgetT2Cap >= 1 then
+        allowGeneralT2 = true
+    end
     if surplusSpendWindow and readyLand >= 4 and powerReady >= 4 and mexReady >= 5 and not constraints.LandPanic and not constraints.AirPanic then
         allowGeneralT2 = true
     end
@@ -244,7 +282,7 @@ local function PickMexTarget(aiBrain, runtime, state)
     if strongSurplusWindow and not tempoMode and not scoutingDebt and readyLand >= 5 and powerReady >= 5 and mexReady >= 5 then
         allowTech3 = true
     end
-    local dynamicT2Cap = ComputeDynamicMexCap(eco, readyLand, totalLand, powerReady, mexReady, surplusSpendWindow, strongSurplusWindow)
+    local dynamicT2Cap = math.max(budgetT2Cap, ComputeDynamicMexCap(eco, readyLand, totalLand, powerReady, mexReady, surplusSpendWindow, strongSurplusWindow))
 
     if activeMexUpgrades > 0 then
         local activeMexes = aiBrain:GetListOfUnits(categories.MASSEXTRACTION * categories.STRUCTURE, false, true) or {}
@@ -275,7 +313,7 @@ local function PickMexTarget(aiBrain, runtime, state)
                 local score, risk, threat, dist = ScoreSafeUpgradeLocation(aiBrain, pos, mainPos, localRadius)
                 local isLocal = dist <= localRadius
                 if tech == 1 and allowLocalT2 and isLocal and risk <= 3.2 and threat <= 1.8 then
-                    local localScore = score + 90 + (tempoMode and 55 or 20) + (scoutingDebt and 28 or 0) + (surplusSpendWindow and 26 or 0)
+                    local localScore = score + 90 + (tempoMode and 55 or 20) + (scoutingDebt and 28 or 0) + (surplusSpendWindow and 26 or 0) + (budgetT2Cap >= 1 and 42 or 0) + math.min(20, math.max(0, mexBudget - 8.5) * 2.5)
                     if localScore > bestScore then
                         bestScore = localScore
                         best = mex
@@ -309,7 +347,8 @@ local function PickMexTarget(aiBrain, runtime, state)
         state.TargetTech = bestTech
         state.Scope = bestScope
         state.Enabled = true
-        state.Reason = tempoMode and bestTech == 'tech2' and 'tempo_consolidation'
+        state.Reason = budgetT2Cap >= 1 and bestTech == 'tech2' and 'budget_consolidation'
+            or tempoMode and bestTech == 'tech2' and 'tempo_consolidation'
             or surplusSpendWindow and bestTech == 'tech2' and 'surplus_consolidation'
             or scoutingDebt and bestTech == 'tech2' and 'scout_safe_consolidation'
             or bestTech == 'tech3' and 'safe_tech3'
