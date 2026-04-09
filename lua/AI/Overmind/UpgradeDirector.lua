@@ -508,6 +508,8 @@ local function PickFactoryTarget(aiBrain, runtime, state)
     state.UpgradeBp = false
     state.InFlight = upgradeCount
     state.PowerRecoveryWanted = false
+    state.NeedsFirstLandHQ = false
+    state.Mandatory = false
 
     if upgradeCount > 0 then
         local allFactories = aiBrain:GetListOfUnits(categories.FACTORY * categories.LAND * categories.STRUCTURE, false, true) or {}
@@ -537,23 +539,31 @@ local function PickFactoryTarget(aiBrain, runtime, state)
         and mexReady >= 4
         and not constraints.CriticalStructure
         and not constraints.EcoCrash
+    state.NeedsFirstLandHQ = stillNeedsFirstHQ and true or false
+    state.Mandatory = mandatoryFirstHQ and true or false
     local landFactoryDebt = factoryTask.Active and factoryTask.Domain == 'Land'
     local airFactoryDebt = factoryTask.Active and factoryTask.Domain == 'Air'
     state.PowerRecoveryWanted = constraints.PowerBufferLow and mandatoryFirstHQ
     if constraints.CriticalFactory or constraints.CriticalStructure or constraints.EcoCrash or constraints.QueueStarved or constraints.PowerBufferLow then
+        local ignoreAirFactoryDebt = constraints.CriticalFactory
+            and mandatoryFirstHQ
+            and airFactoryDebt
+            and not constraints.CriticalStructure
+            and not constraints.EcoCrash
+            and not constraints.QueueStarved
         local hqPowerOverride = constraints.PowerBufferLow
             and mandatoryFirstHQ
             and (eco.EnergyIncome or 0) >= 44
             and (eco.EnergyStorageRatio or 0) >= 0.04
             and (eco.EnergyTrend or 0) >= -6
-        local hqFactoryOverride = constraints.CriticalFactory
+        local hqFactoryOverride = ignoreAirFactoryDebt or (constraints.CriticalFactory
             and mandatoryFirstHQ
             and (not landFactoryDebt or airFactoryDebt)
             and not constraints.CriticalStructure
             and not constraints.EcoCrash
             and not constraints.QueueStarved
             and (eco.MassTrend or 0) >= -0.28
-            and (eco.MassStorageRatio or 0) >= 0.02
+            and (eco.MassStorageRatio or 0) >= 0.02)
         if (hqPowerOverride or hqFactoryOverride) and not constraints.CriticalStructure and not constraints.EcoCrash and not constraints.QueueStarved then
             -- fall through
         else
@@ -567,20 +577,26 @@ local function PickFactoryTarget(aiBrain, runtime, state)
     end
     local surplusSpendWindow = constraints.SurplusSpendWindow == true
     local strongSurplusWindow = constraints.StrongSurplusWindow == true
+    local firstHQMassIncomeFloor = mandatoryFirstHQ and ((airFactoryDebt and 2.2) or 2.5) or 3.2
+    local firstHQEnergyIncomeFloor = mandatoryFirstHQ and ((airFactoryDebt and 38) or 44) or 58
+    local firstHQMassStorageFloor = mandatoryFirstHQ and ((airFactoryDebt and 0.01) or 0.02) or 0.06
+    local firstHQEnergyStorageFloor = mandatoryFirstHQ and ((airFactoryDebt and 0.02) or 0.04) or 0.12
+    local firstHQMassTrendFloor = mandatoryFirstHQ and ((airFactoryDebt and -0.34) or -0.26) or -0.14
+    local firstHQEnergyTrendFloor = mandatoryFirstHQ and ((airFactoryDebt and -8) or -6) or -2
 
     if readyLand < 3 or totalLand < 4 or powerReady < 4 or mexReady < 4 then
         state.Reason = 'factory_floor'
         return
     end
-    if not surplusSpendWindow and ((eco.MassIncome or 0) < (mandatoryFirstHQ and 2.5 or 3.2) or (eco.EnergyIncome or 0) < (mandatoryFirstHQ and 44 or 58)) then
+    if not surplusSpendWindow and ((eco.MassIncome or 0) < firstHQMassIncomeFloor or (eco.EnergyIncome or 0) < firstHQEnergyIncomeFloor) then
         state.Reason = 'income_floor'
         return
     end
-    if not surplusSpendWindow and ((eco.MassStorageRatio or 0) < (mandatoryFirstHQ and 0.02 or 0.06) or (eco.EnergyStorageRatio or 0) < (mandatoryFirstHQ and 0.04 or 0.12)) then
+    if not surplusSpendWindow and ((eco.MassStorageRatio or 0) < firstHQMassStorageFloor or (eco.EnergyStorageRatio or 0) < firstHQEnergyStorageFloor) then
         state.Reason = 'storage_floor'
         return
     end
-    if not surplusSpendWindow and ((eco.MassTrend or 0) < (mandatoryFirstHQ and -0.26 or -0.14) or (eco.EnergyTrend or 0) < (mandatoryFirstHQ and -6 or -2)) then
+    if not surplusSpendWindow and ((eco.MassTrend or 0) < firstHQMassTrendFloor or (eco.EnergyTrend or 0) < firstHQEnergyTrendFloor) then
         state.Reason = 'trend_floor'
         return
     end

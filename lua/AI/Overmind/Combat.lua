@@ -402,6 +402,13 @@ function EnforceCommanderSafety(aiBrain, now)
         and distance <= math.max(28, maxDistance + 8)
         and localThreat <= (homeThreat + 3.6)
         and not catastrophicOverextend
+    local secureEscortedPosture = distance <= math.max(24, maxDistance + 8)
+        and escortCount >= 10
+        and healthRatio >= 0.86
+        and enemyRaiders <= 1
+        and localThreat <= (homeThreat + 2.2)
+        and not lowHealth
+        and not catastrophicOverextend
     local leashReposition = distance > math.max(maxDistance + 2, 20)
         and not shouldRecall
         and not lowHealth
@@ -430,6 +437,16 @@ function EnforceCommanderSafety(aiBrain, now)
         idleFar = false
         stuckFar = false
         earlyHardLeash = false
+    end
+    if secureEscortedPosture then
+        shouldRecall = false
+        idleFar = false
+        stuckFar = false
+        earlyHardLeash = false
+        noMansLand = false
+        enemyContactUnsafe = false
+        raidRecall = false
+        underThreat = false
     end
 
     local canInterruptConstruction = catastrophicOverextend
@@ -545,9 +562,28 @@ function EnforceCommanderSafety(aiBrain, now)
             runtime.LastAcuDistanceFromBase = distance
             return
         end
+        if secureEscortedPosture and not recallEscalated and sinceRecall < 32 then
+            runtime.LastAcuDistanceFromBase = distance
+            return
+        end
         if (recallAction == 'raid_cover_recall' or recallAction == 'stuck_recall' or recallAction == 'panic_leash_recall')
             and retreatingSuccessfully
             and sinceRecall < 18 then
+            runtime.LastAcuDistanceFromBase = distance
+            return
+        end
+        if recallAction == 'threat_recall'
+            and secureEscortedPosture
+            and sinceRecall < 28 then
+            runtime.LastAcuDistanceFromBase = distance
+            return
+        end
+        if recallAction == 'raid_cover_recall'
+            and heavilyEscortedForward
+            and escortCount >= 10
+            and enemyRaiders <= 1
+            and localThreat <= (homeThreat + 2.4)
+            and sinceRecall < 24 then
             runtime.LastAcuDistanceFromBase = distance
             return
         end

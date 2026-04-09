@@ -1215,6 +1215,8 @@ local function DecideCapacityPlan(runtime, current, constraints, rolePlan)
     local state = runtime.ProductionDirector or {}
     local planner = runtime.StrategicPlanner or {}
     local eco = runtime.EcoState or {}
+    local upgradeDirector = runtime.UpgradeDirector or {}
+    local factoryUpgrade = upgradeDirector.Factory or {}
     local now = GetGameTimeSeconds()
     local totalUnfinished = current.Factories.Pending or 0
     local factoryTask = current.FactoryTask or {}
@@ -1328,6 +1330,19 @@ local function DecideCapacityPlan(runtime, current, constraints, rolePlan)
         and mexReady >= math.max(8, constraints.StarterMexFloor or 5)
         and powerReady >= math.max(7, constraints.StarterPowerFloor or 2)
         and engineerUnits >= math.max(10, constraints.StarterEngineerFloor or 6)
+    local needsFirstLandHQ = factoryUpgrade.NeedsFirstLandHQ == true
+    local preserveAirWindow = emergencyAirFactory
+        or threatenedAirUnlock
+        or watchAirFactory
+        or counterAirFactory
+        or planner.ForceAirAnswer
+        or constraints.AirPanic
+        or constraints.BomberPanic
+        or constraints.ExposedMexAirRaid
+        or constraints.CounterAirWindow
+    local preHQAirClamp = needsFirstLandHQ
+        and current.Factories.Land.Ready >= 4
+        and not preserveAirWindow
 
     local landCap = math.max(
         6,
@@ -1354,6 +1369,9 @@ local function DecideCapacityPlan(runtime, current, constraints, rolePlan)
         landCap = landCap + 2
         airCap = airCap + 1
         seaCap = seaCap + 1
+    end
+    if preHQAirClamp then
+        airCap = math.min(airCap, math.max(1, current.Factories.Air.Total))
     end
 
     local landTarget = Clamp(math.max(1, math.ceil(landRoleLoad / 9.5), math.ceil(landRoleUnits / 12)), 1, landCap)
@@ -1603,9 +1621,12 @@ local function DecideCapacityPlan(runtime, current, constraints, rolePlan)
         and not constraints.CriticalStructure
         and not completionLock then
         landTarget = math.max(landTarget, math.min(landCap, current.Factories.Land.Total + 1))
-        if current.Factories.Land.Ready >= 6 and not powerBufferLow then
+        if current.Factories.Land.Ready >= 6 and not powerBufferLow and not needsFirstLandHQ then
             airTarget = math.max(airTarget, math.min(airCap, current.Factories.Air.Total + 1))
         end
+    end
+    if preHQAirClamp then
+        airTarget = math.min(airTarget, current.Factories.Air.Total)
     end
 
     local completionLock = unstaffedFactoryShell or (landFactoryCompletionDebt and current.Factories.Land.Total >= 2)
