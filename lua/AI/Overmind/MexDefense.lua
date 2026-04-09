@@ -167,6 +167,49 @@ local function FindBuildPos(aiBrain, mexPos, category, facingPos)
     return { (mexPos[1] or 0) + 10, 0, (mexPos[3] or 0) }
 end
 
+local function FindThreatenedMex(aiBrain, runtime, mainPos)
+    local mexes = aiBrain:GetListOfUnits(categories.STRUCTURE * categories.MASSEXTRACTION, false, true) or {}
+    local bestPos = false
+    local bestNeedAA = false
+    local bestScore = -999999
+
+    for _, mex in mexes do
+        if mex and not mex.Dead and mex.GetPosition then
+            local pos = mex:GetPosition()
+            if pos then
+                local enemyLand = aiBrain:GetNumUnitsAroundPoint(categories.MOBILE * categories.LAND - categories.ENGINEER - categories.SCOUT, pos, 24, 'Enemy') or 0
+                local enemyAir = aiBrain:GetNumUnitsAroundPoint(categories.MOBILE * categories.AIR - categories.SCOUT - categories.TRANSPORTATION, pos, 32, 'Enemy') or 0
+                if enemyLand > 0 or enemyAir > 0 then
+                    local tech = EntityCategoryContains(categories.TECH3, mex) and 3 or (EntityCategoryContains(categories.TECH2, mex) and 2 or 1)
+                    local distMain = mainPos and Distance2D(mainPos, pos) or 999
+                    local aaCount = aiBrain:GetNumUnitsAroundPoint(T1AAStructureCategory, pos, 18, 'Ally') or 0
+                    local pdCount = aiBrain:GetNumUnitsAroundPoint(T1PDStructureCategory, pos, 18, 'Ally') or 0
+                    local needAA = enemyAir > 0 or (enemyLand > 0 and aaCount <= 0 and tech >= 2)
+                    local stillExposed = (needAA and aaCount < 1) or ((not needAA) and pdCount < 1)
+                    if stillExposed then
+                        local score = (enemyLand * 70) + (enemyAir * 90) + (tech * 85) - (distMain * 0.12)
+                        if mex:IsUnitState('Upgrading') then
+                            score = score + 140
+                        end
+                        if distMain <= 180 then
+                            score = score + 90
+                        elseif distMain <= 260 then
+                            score = score + 35
+                        end
+                        if score > bestScore then
+                            bestScore = score
+                            bestPos = pos
+                            bestNeedAA = needAA
+                        end
+                    end
+                end
+            end
+        end
+    end
+
+    return bestPos, bestNeedAA, bestScore
+end
+
 function Module.Update(aiBrain, now)
     local runtime = aiBrain.OvermindRuntime
     if not runtime then
@@ -206,10 +249,16 @@ function Module.Update(aiBrain, now)
     end
 
     local mainPos = GetMainPos(aiBrain, runtime)
+    local threatenedMexPos, threatenedMexNeedAA = FindThreatenedMex(aiBrain, runtime, mainPos)
+    if threatenedMexPos then
+        chooseAA = threatenedMexNeedAA
+        buildPosBase = threatenedMexPos
+    end
+
     local useMexThreat = threatPos
         and raid.LastThreatLabel == 'mex'
         and (raid.UnderLandHarass or raid.UnderAirHarass)
-    if useMexThreat then
+    if not buildPosBase and useMexThreat then
         local needAA = raid.UnderAirHarass or (raid.LastBomberEnemyCount or 0) >= 1
         local needPD = raid.UnderLandHarass or (raid.LastLandEnemyCount or 0) >= 2
         local engineerLossRisk = OvermindMemory.GetEngineerLossRisk(aiBrain, threatPos, 42)

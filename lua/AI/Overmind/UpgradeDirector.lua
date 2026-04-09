@@ -158,6 +158,17 @@ local function ScoreSafeUpgradeLocation(aiBrain, pos, mainPos, anchorPos, localR
     return score, risk, threat, distMain, distAnchor
 end
 
+local function ClassifyMexScope(distMain, distAnchor)
+    if distMain <= 150 and distAnchor <= 115 then
+        return 'core'
+    elseif distMain <= 240 and distAnchor <= 170 then
+        return 'inner_local'
+    elseif distMain <= 340 then
+        return 'outer_local'
+    end
+    return 'remote'
+end
+
 local function ComputeDynamicMexCap(eco, readyLand, totalLand, powerReady, mexReady, surplusSpendWindow, strongSurplusWindow)
     if readyLand < 2 or totalLand < 3 or powerReady < 3 or mexReady < 4 then
         return 0
@@ -357,6 +368,7 @@ local function PickMexTarget(aiBrain, runtime, state)
             if pos and upgradeBp then
                 local score, risk, threat, distMain, distAnchor = ScoreSafeUpgradeLocation(aiBrain, pos, mainPos, factoryClusterPos, localRadius)
                 local isLocal = distMain <= localRadius
+                local scopeClass = ClassifyMexScope(distMain, distAnchor)
                 local localRiskCap = (budgetT2Cap >= 1) and 3.8 or 3.2
                 local localThreatCap = (budgetT2Cap >= 1) and 2.2 or 1.8
                 if tech == 1 and allowLocalT2 and isLocal and risk <= localRiskCap and threat <= localThreatCap then
@@ -369,27 +381,41 @@ local function PickMexTarget(aiBrain, runtime, state)
                         + math.min(30, math.max(0, mexBudget - 7.5) * 3.0)
                         + (distAnchor <= 85 and 36 or 0)
                         + (distAnchor <= 135 and 18 or 0)
+                        + (scopeClass == 'core' and 160 or 0)
+                        + (scopeClass == 'inner_local' and 70 or 0)
+                        - (scopeClass == 'outer_local' and 80 or 0)
+                        - (scopeClass == 'remote' and 220 or 0)
+                        - (distMain > 210 and 45 or 0)
+                        - (distAnchor > 160 and 55 or 0)
                     if localScore > bestScore then
                         bestScore = localScore
                         best = mex
                         bestTech = 'tech2'
-                        bestScope = 'local'
+                        bestScope = scopeClass == 'core' and 'core' or 'local'
                     end
                 elseif tech == 1 and allowGeneralT2 and risk <= (isLocal and 3.4 or 2.4) and threat <= (isLocal and 1.9 or 1.1) then
                     local generalScore = score + (isLocal and 70 or 28) + ((mapControl >= 0.5) and 10 or 0) + (surplusSpendWindow and 18 or 0) + (tempoMode and 18 or 0) + (scoutingDebt and 12 or 0)
+                        + (scopeClass == 'core' and 120 or 0)
+                        + (scopeClass == 'inner_local' and 45 or 0)
+                        - (scopeClass == 'outer_local' and 45 or 0)
+                        - (scopeClass == 'remote' and 120 or 0)
                     if generalScore > bestScore then
                         bestScore = generalScore
                         best = mex
                         bestTech = 'tech2'
-                        bestScope = isLocal and 'local' or 'remote'
+                        bestScope = scopeClass == 'core' and 'core' or (isLocal and 'local' or 'remote')
                     end
                 elseif tech == 2 and allowTech3 and risk <= (isLocal and 2.8 or 2.0) and threat <= (isLocal and 1.6 or 0.9) then
                     local t3Score = score + (isLocal and 34 or 12)
+                        + (scopeClass == 'core' and 90 or 0)
+                        + (scopeClass == 'inner_local' and 35 or 0)
+                        - (scopeClass == 'outer_local' and 40 or 0)
+                        - (scopeClass == 'remote' and 100 or 0)
                     if t3Score > bestScore then
                         bestScore = t3Score
                         best = mex
                         bestTech = 'tech3'
-                        bestScope = isLocal and 'local' or 'remote'
+                        bestScope = scopeClass == 'core' and 'core' or (isLocal and 'local' or 'remote')
                     end
                 end
             end
