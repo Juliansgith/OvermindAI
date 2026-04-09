@@ -1,10 +1,13 @@
 local OvermindMemory = import('/mods/OvermindAI/lua/AI/Overmind/Memory.lua')
+local OvermindRoleWeights = import('/mods/OvermindAI/lua/AI/Overmind/RoleWeights.lua')
 
 local PressureCategory = categories.MOBILE * (categories.LAND + categories.AIR) - categories.ENGINEER - categories.SCOUT - categories.COMMAND
 local LandPressureCategory = categories.MOBILE * categories.LAND - categories.ENGINEER - categories.SCOUT - categories.COMMAND
 local LandDirectEscortCategory = categories.MOBILE * categories.LAND * categories.DIRECTFIRE - categories.ENGINEER - categories.SCOUT - categories.COMMAND
 local LandIndirectCategory = categories.MOBILE * categories.LAND * categories.INDIRECTFIRE - categories.ENGINEER - categories.SCOUT - categories.COMMAND
 local LandAACategory = categories.MOBILE * categories.LAND * categories.ANTIAIR - categories.ENGINEER - categories.SCOUT - categories.COMMAND
+local LandHeavyCategory = categories.MOBILE * categories.LAND * categories.DIRECTFIRE * (categories.TECH2 + categories.TECH3)
+    - categories.ENGINEER - categories.SCOUT - categories.ANTIAIR - categories.COMMAND
 
 local function Distance2D(a, b)
     local dx = (a[1] or 0) - (b[1] or 0)
@@ -224,6 +227,19 @@ local function MergeUnitTables(a, b, c)
     return out
 end
 
+local function GetUnitsAroundPointSafe(aiBrain, category, pos, radius, alliance)
+    if not pos then
+        return {}
+    end
+    local units = aiBrain:GetUnitsAroundPoint(category, pos, radius, alliance)
+    return units or {}
+end
+
+local function GetLocalLandStrength(aiBrain, pos, radius, alliance)
+    local units = GetUnitsAroundPointSafe(aiBrain, LandPressureCategory, pos, radius, alliance)
+    return OvermindRoleWeights.SumUnitStrength(units), units
+end
+
 local function SelectReadyUnitsFromList(units, maxCount)
     local selected = {}
     local limit = math.max(0, math.floor(maxCount or 0))
@@ -309,6 +325,20 @@ local function SelectIdlePressureUnits(aiBrain, maxCount, ownPos, targetPos)
                         local escort = aiBrain:GetNumUnitsAroundPoint(LandDirectEscortCategory + LandAACategory, pos, 24, 'Ally') or 0
                         local enemies = aiBrain:GetNumUnitsAroundPoint(LandPressureCategory, pos, 26, 'Enemy') or 0
                         if escort < 2 or enemies > (escort + 1) then
+                            if IssueMove and staging then
+                                IssueMove({ unit }, staging)
+                            end
+                            skip = true
+                        end
+                    end
+                elseif EntityCategoryContains(LandHeavyCategory, unit) then
+                    local pos = unit:GetPosition()
+                    if pos then
+                        local directEscort = aiBrain:GetNumUnitsAroundPoint(LandDirectEscortCategory, pos, 24, 'Ally') or 0
+                        local aaEscort = aiBrain:GetNumUnitsAroundPoint(LandAACategory, pos, 24, 'Ally') or 0
+                        local enemies = aiBrain:GetNumUnitsAroundPoint(LandPressureCategory, pos, 28, 'Enemy') or 0
+                        local support = math.max(0, directEscort - 1) + aaEscort
+                        if support < 2 and (enemies > 0 or Distance2D(pos, staging) > 26) then
                             if IssueMove and staging then
                                 IssueMove({ unit }, staging)
                             end
@@ -404,13 +434,14 @@ local function IssueCohesiveLandOrders(aiBrain, ownPos, targetPos, allUnits, def
     local front = LerpPos(ownPos, targetPos, frontT)
     local rear = LerpPos(ownPos, targetPos, rearT)
     local flank = LerpPos(ownPos, targetPos, flankT)
+    local directAttackPos = (not defensive and Distance2D(front, targetPos) <= 28) and targetPos or front
 
     if table.getn(direct) > 0 then
         if IssueMove then
             IssueMove(direct, front)
         end
         if IssueAggressiveMove then
-            IssueAggressiveMove(direct, targetPos)
+            IssueAggressiveMove(direct, directAttackPos)
         end
     end
 
@@ -420,7 +451,7 @@ local function IssueCohesiveLandOrders(aiBrain, ownPos, targetPos, allUnits, def
                 IssueMove(aa, flank)
             end
             if not defensive and IssueAggressiveMove then
-                IssueAggressiveMove(aa, front)
+                IssueAggressiveMove(aa, flank)
             end
         else
             if IssueMove then
@@ -443,6 +474,8 @@ end
 local function CountLandComposition(units)
     local out = {
         Tank = 0,
+        Direct = 0,
+        Heavy = 0,
         AA = 0,
         Indirect = 0,
         Total = table.getn(units),
@@ -455,12 +488,68 @@ local function CountLandComposition(units)
             elseif EntityCategoryContains(LandAACategory, unit) then
                 out.AA = out.AA + 1
             elseif EntityCategoryContains(LandDirectEscortCategory, unit) then
+                out.Direct = out.Direct + 1
                 out.Tank = out.Tank + 1
+                if EntityCategoryContains(LandHeavyCategory, unit) then
+                    out.Heavy = out.Heavy + 1
+                end
             end
         end
     end
 
     return out
+end
+
+local function GetDirectEscortSupport(comp)
+    local direct = comp.Direct or comp.Tank or 0
+    local heavy = comp.Heavy or 0
+    local aa = comp.AA or 0
+    return math.max(0, direct - heavy) + aa
+end
+
+local function HasIndirectEscortGap(comp)
+    local indirect = comp.Indirect or 0
+    if indirect <= 0 then
+        return false
+    end
+    return GetDirectEscortSupport(comp) < math.max(2, indirect * 2)
+end
+
+local function HasHeavyEscortGap(comp)
+    local heavy = comp.Heavy or 0
+    if heavy <= 0 then
+        return false
+    end
+    local support = GetDirectEscortSupport(comp)
+    local aa = comp.AA or 0
+    return support < math.max(2, heavy + 1) or (heavy >= 2 and aa < 1)
+end
+
+local function EvaluateLandCohortPosture(aiBrain, ownPos, targetPos, units, comp, defensive)
+    if not units or table.getn(units) <= 0 or not targetPos then
+        return 'hold', ownPos
+    end
+
+    local centroid = GetUnitsCentroid(units) or ownPos
+    local stagePos = LerpPos(ownPos, targetPos, defensive and 0.28 or 0.4)
+    local frontPos = LerpPos(ownPos, targetPos, defensive and 0.34 or 0.56)
+
+    if HasIndirectEscortGap(comp) or HasHeavyEscortGap(comp) then
+        return 'regroup', stagePos
+    end
+
+    local ownStrength = OvermindRoleWeights.SumUnitStrength(units)
+    local enemyFrontStrength = GetLocalLandStrength(aiBrain, frontPos, defensive and 46 or 52, 'Enemy')
+    local enemyCentroidStrength = GetLocalLandStrength(aiBrain, centroid, 36, 'Enemy')
+    local nearbyAlliedStrength = GetLocalLandStrength(aiBrain, centroid, 34, 'Ally')
+    local localAdvantage = ownStrength + math.max(0, (nearbyAlliedStrength or 0) - ownStrength)
+    local strongestEnemy = math.max(enemyFrontStrength or 0, enemyCentroidStrength or 0)
+
+    if strongestEnemy > (localAdvantage * (defensive and 1.32 or 1.18)) then
+        return defensive and 'retreat' or 'regroup', stagePos
+    end
+
+    return 'commit', frontPos
 end
 
 local function RegroupIsolatedLand(aiBrain, ownPos, targetPos, maxCount, inRecovery)
@@ -661,7 +750,6 @@ function RunPressureCycle(aiBrain, now)
         minCommit = math.max(8, minCommit - 1)
     end
 
-    local weakEscortForIndirect = comp.Indirect >= 2 and ((comp.Tank + comp.AA) < (comp.Indirect * 2))
     local routeName = 'front'
     if runtime.StrategyGoal == 'raid' then
         routeName = 'raid'
@@ -670,11 +758,18 @@ function RunPressureCycle(aiBrain, now)
     end
     local graphAdvance = GetGraphAdvanceTarget(runtime, routeName, selectedTarget)
     local stagingPos = (frontTask and frontTask.StagingPos) or LerpPos(ownPos, graphAdvance or selectedTarget, 0.36)
-    if weakEscortForIndirect and IssueMove then
-        IssueMove(pressureUnits, stagingPos)
-        runtime.LastPressureOrder = 'RegroupEscort'
-        SetTaskExecution(frontTask, now, 'regrouping', 'move', selectedTarget, stagingPos, pressureCount)
-        SetTaskExecution(artilleryTask, now, 'screening', 'move', selectedTarget, stagingPos, table.getn(artilleryReady))
+    local cohortPosture, cohortAnchor = EvaluateLandCohortPosture(aiBrain, ownPos, selectedTarget, pressureUnits, comp, false)
+    if cohortPosture == 'regroup' and IssueMove then
+        IssueMove(pressureUnits, cohortAnchor or stagingPos)
+        runtime.LastPressureOrder = HasIndirectEscortGap(comp) and 'RegroupEscort' or (HasHeavyEscortGap(comp) and 'RegroupHeavy' or 'Regroup')
+        SetTaskExecution(frontTask, now, 'regrouping', 'move', selectedTarget, cohortAnchor or stagingPos, pressureCount)
+        SetTaskExecution(artilleryTask, now, 'screening', 'move', selectedTarget, cohortAnchor or stagingPos, table.getn(artilleryReady))
+        return
+    elseif cohortPosture == 'retreat' and IssueMove then
+        IssueMove(pressureUnits, cohortAnchor or stagingPos)
+        runtime.LastPressureOrder = 'RetreatDisadvantage'
+        SetTaskExecution(frontTask, now, 'retreating', 'move', selectedTarget, cohortAnchor or stagingPos, pressureCount)
+        SetTaskExecution(artilleryTask, now, 'screening', 'move', selectedTarget, cohortAnchor or stagingPos, table.getn(artilleryReady))
         return
     end
 

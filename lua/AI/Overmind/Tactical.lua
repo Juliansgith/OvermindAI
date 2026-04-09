@@ -2,6 +2,8 @@ local TacticalCategory = categories.MOBILE * (categories.LAND + categories.AIR +
 local LandDirectEscortCategory = categories.MOBILE * categories.LAND * categories.DIRECTFIRE - categories.ENGINEER - categories.SCOUT - categories.COMMAND
 local LandIndirectCategory = categories.MOBILE * categories.LAND * categories.INDIRECTFIRE - categories.ENGINEER - categories.SCOUT - categories.COMMAND
 local LandAACategory = categories.MOBILE * categories.LAND * categories.ANTIAIR - categories.ENGINEER - categories.SCOUT - categories.COMMAND
+local LandHeavyCategory = categories.MOBILE * categories.LAND * categories.DIRECTFIRE * (categories.TECH2 + categories.TECH3)
+    - categories.ENGINEER - categories.SCOUT - categories.ANTIAIR - categories.COMMAND
 
 local function Distance2D(a, b)
     local dx = (a[1] or 0) - (b[1] or 0)
@@ -44,16 +46,20 @@ end
 local function HasSoloIndirectProblem(aiBrain, units)
     local indirect = 0
     local escorts = 0
+    local heavy = 0
     for _, unit in units do
         if unit and not unit.Dead then
             if EntityCategoryContains(LandIndirectCategory, unit) then
                 indirect = indirect + 1
+            elseif EntityCategoryContains(LandHeavyCategory, unit) then
+                heavy = heavy + 1
             elseif EntityCategoryContains(LandDirectEscortCategory + LandAACategory, unit) then
                 escorts = escorts + 1
             end
         end
     end
-    return indirect >= 2 and escorts < (indirect * 2)
+    return (indirect >= 1 and escorts < math.max(2, indirect * 2))
+        or (heavy >= 1 and escorts < math.max(2, heavy + 1))
 end
 
 local function SplitUnits(units, firstCount)
