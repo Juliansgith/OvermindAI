@@ -496,6 +496,7 @@ local function PickFactoryTarget(aiBrain, runtime, state)
     local powerReady = (((current.Eco or {}).Power or {}).Ready) or 0
     local mexReady = (((current.Eco or {}).Mex or {}).Ready) or 0
     local upgradeCount = CountActiveLandFactoryUpgrades(aiBrain)
+    local factoryTask = current.FactoryTask or {}
 
     state.Managed = true
     state.TargetUnit = false
@@ -522,17 +523,19 @@ local function PickFactoryTarget(aiBrain, runtime, state)
         state.Reason = 'in_flight'
         return
     end
-    local stableLandFloor = readyLand >= 4
+    local stableLandFloor = readyLand >= 3
         and totalLand >= 4
         and totalLand <= (readyLand + 2)
         and powerReady >= 4
         and mexReady >= 4
     local mandatoryFirstHQ = stableLandFloor
-        and readyLand >= 4
-        and totalLand >= 5
+        and readyLand >= 3
+        and totalLand >= 4
         and mexReady >= 4
         and not constraints.CriticalStructure
         and not constraints.EcoCrash
+    local landFactoryDebt = factoryTask.Active and factoryTask.Domain == 'Land'
+    local airFactoryDebt = factoryTask.Active and factoryTask.Domain == 'Air'
     state.PowerRecoveryWanted = constraints.PowerBufferLow and mandatoryFirstHQ
     if constraints.CriticalFactory or constraints.CriticalStructure or constraints.EcoCrash or constraints.QueueStarved or constraints.PowerBufferLow then
         local hqPowerOverride = constraints.PowerBufferLow
@@ -542,6 +545,7 @@ local function PickFactoryTarget(aiBrain, runtime, state)
             and (eco.EnergyTrend or 0) >= -3
         local hqFactoryOverride = constraints.CriticalFactory
             and mandatoryFirstHQ
+            and not landFactoryDebt
             and not constraints.CriticalStructure
             and not constraints.EcoCrash
             and not constraints.QueueStarved
@@ -550,7 +554,7 @@ local function PickFactoryTarget(aiBrain, runtime, state)
         if (hqPowerOverride or hqFactoryOverride) and not constraints.CriticalStructure and not constraints.EcoCrash and not constraints.QueueStarved then
             -- fall through
         else
-            state.Reason = constraints.CriticalFactory and 'critical_factory'
+            state.Reason = constraints.CriticalFactory and (airFactoryDebt and 'air_factory_debt' or 'critical_factory')
             or constraints.CriticalStructure and 'critical_structure'
             or constraints.EcoCrash and 'eco_crash'
             or constraints.QueueStarved and 'queue_starved'
@@ -561,7 +565,7 @@ local function PickFactoryTarget(aiBrain, runtime, state)
     local surplusSpendWindow = constraints.SurplusSpendWindow == true
     local strongSurplusWindow = constraints.StrongSurplusWindow == true
 
-    if readyLand < 4 or totalLand < 4 or powerReady < 4 or mexReady < 4 then
+    if readyLand < 3 or totalLand < 4 or powerReady < 4 or mexReady < 4 then
         state.Reason = 'factory_floor'
         return
     end
@@ -577,7 +581,7 @@ local function PickFactoryTarget(aiBrain, runtime, state)
         state.Reason = 'trend_floor'
         return
     end
-    if planner.TradeTechForTempo and readyLand < 5 and not surplusSpendWindow and not mandatoryFirstHQ then
+    if planner.TradeTechForTempo and readyLand < 4 and not surplusSpendWindow and not mandatoryFirstHQ then
         state.Reason = 'tempo_hold'
         return
     end

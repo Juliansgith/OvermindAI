@@ -839,25 +839,22 @@ local function ComputeFactoryTaskRequirements(domain, fraction, stallTime, ready
     if domain == 'Land' and readyFactories <= 0 then
         required = required + 1
     end
-    if domain == 'Land' and readyFactories <= 1 and fraction >= 0.18 then
+    if domain == 'Land' and readyFactories <= 1 and fraction >= 0.28 then
         required = required + 1
     end
     if fraction >= 0.4 then
         required = required + 1
     end
-    if fraction >= 0.7 and domain == 'Land' then
-        required = required + 1
-    end
     if stallTime >= 8 then
-        required = required + 1
-    end
-    if stallTime >= 16 then
         required = required + 1
     end
     if (eco.MassStorageRatio or 0) <= 0.02 and required > 2 and readyFactories > 0 then
         required = required - 1
     end
-    return Clamp(required, 1, 5)
+    if domain == 'Land' then
+        return Clamp(required, 1, 3)
+    end
+    return Clamp(required, 1, 4)
 end
 
 local function PickPowerBlueprint(builder)
@@ -1335,16 +1332,16 @@ local function AssignBuildersToUnfinishedFactory(aiBrain, runtime, now, target, 
     if openingFactoryFloor then
         requiredBuilders = math.max(2, math.min(3, requiredBuilders))
     end
-    local forceInterrupt = stallTime >= 6 or readyFactories <= 0 or recovery.ForceFactoryRecovery or openingFactoryFloor
+    local forceInterrupt = stallTime >= 4 or readyFactories <= 0 or recovery.ForceFactoryRecovery or openingFactoryFloor
 
     local dispatchRadius = 240
-    if stallTime >= 10 then
+    if stallTime >= 6 then
         dispatchRadius = 420
     end
-    if stallTime >= 24 then
+    if stallTime >= 14 then
         dispatchRadius = 760
     end
-    if stallTime >= 48 then
+    if stallTime >= 28 then
         dispatchRadius = 960
     end
 
@@ -1352,7 +1349,7 @@ local function AssignBuildersToUnfinishedFactory(aiBrain, runtime, now, target, 
     if forceInterrupt then
         interruptQCap = 2
     end
-    if stallTime >= 18 then
+    if stallTime >= 10 then
         interruptQCap = 5
     end
     if readyFactories <= 0 and domain == 'Land' then
@@ -2135,13 +2132,13 @@ function Update(aiBrain, now)
                     end
 
                     if (not acted)
-                        and isIdle
-                        and not constructing
                         and factoryTask.Active
                         and factoryTargetObject
                         and (factoryTask.AssignedBuilders or 0) < (factoryTask.RequiredBuilders or 0)
                         and localThreat < 2.2
                         and dist <= 360
+                        and not eng:IsUnitState('Upgrading')
+                        and ((isIdle and not constructing) or (not constructing and GetCommandQueueLength(eng) <= 2))
                         and TryAssignAssistOrRepair(aiBrain, runtime, eng, factoryTargetObject, false, now) then
                         local entityId = GetEntityId(eng)
                         if entityId then

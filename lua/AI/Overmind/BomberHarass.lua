@@ -50,6 +50,26 @@ local function GetIdleBombers(aiBrain, maxCount)
     return out
 end
 
+local function CollectTaskBombers(runtime, maxCount)
+    local out = {}
+    local force = runtime and runtime.ForceDirector or {}
+    local groups = force.Groups or {}
+    local bombers = groups.BomberStrike or {}
+    for _, bomber in bombers do
+        if bomber and not bomber.Dead then
+            local q = bomber.GetCommandQueue and bomber:GetCommandQueue() or false
+            local qLen = q and table.getn(q) or 0
+            if qLen <= 1 and not bomber:IsUnitState('Building') then
+                table.insert(out, bomber)
+                if table.getn(out) >= maxCount then
+                    break
+                end
+            end
+        end
+    end
+    return out
+end
+
 local function GetIdleFighters(aiBrain, maxCount)
     local out = {}
     local list = aiBrain:GetListOfUnits(FighterCategory, false, true)
@@ -70,6 +90,46 @@ local function GetIdleFighters(aiBrain, maxCount)
         end
     end
 
+    return out
+end
+
+local function CollectTaskFighters(runtime, maxCount)
+    local out = {}
+    local force = runtime and runtime.ForceDirector or {}
+    local groups = force.Groups or {}
+    local fighters = groups.AirGuard or {}
+    for _, fighter in fighters do
+        if fighter and not fighter.Dead then
+            local q = fighter.GetCommandQueue and fighter:GetCommandQueue() or false
+            local qLen = q and table.getn(q) or 0
+            if qLen <= 1 and not fighter:IsUnitState('Building') then
+                table.insert(out, fighter)
+                if table.getn(out) >= maxCount then
+                    break
+                end
+            end
+        end
+    end
+    return out
+end
+
+local function MergeUniqueUnits(primary, secondary, maxCount)
+    local out = {}
+    local seen = {}
+    for _, list in { primary or {}, secondary or {} } do
+        for _, unit in list do
+            if unit and not unit.Dead then
+                local id = tostring((unit.GetEntityId and unit:GetEntityId()) or unit)
+                if not seen[id] then
+                    seen[id] = true
+                    table.insert(out, unit)
+                    if maxCount and table.getn(out) >= maxCount then
+                        return out
+                    end
+                end
+            end
+        end
+    end
     return out
 end
 
@@ -278,13 +338,13 @@ function Module.Update(aiBrain, now)
         return
     end
 
-    local idle = GetIdleBombers(aiBrain, 6)
-    if table.getn(idle) <= 0 then
+    local availableBombers = MergeUniqueUnits(CollectTaskBombers(runtime, 6), GetIdleBombers(aiBrain, 6), 6)
+    if table.getn(availableBombers) <= 0 then
         state.NextTry = now + 6
         return
     end
 
-    local idleFighters = GetIdleFighters(aiBrain, 8)
+    local availableFighters = MergeUniqueUnits(CollectTaskFighters(runtime, 8), GetIdleFighters(aiBrain, 8), 8)
 
     local targets = ChooseTargets(aiBrain, runtime, 4)
     if table.getn(targets) <= 0 then
@@ -293,11 +353,11 @@ function Module.Update(aiBrain, now)
     end
 
     local assigned = 0
-    local fighterCount = table.getn(idleFighters)
+    local fighterCount = table.getn(availableFighters)
     local bomberGroupSize = (totalBombers >= 4) and 2 or 1
     local fighterGroupSize = (fighterCount >= 6 and bomberGroupSize >= 2) and 3 or ((fighterCount >= 2) and 2 or 0)
-    local maxGroups = math.min(2, math.floor(table.getn(idle) / bomberGroupSize))
-    if maxGroups <= 0 and table.getn(idle) > 0 then
+    local maxGroups = math.min(2, math.floor(table.getn(availableBombers) / bomberGroupSize))
+    if maxGroups <= 0 and table.getn(availableBombers) > 0 then
         maxGroups = 1
         bomberGroupSize = 1
     end
@@ -319,7 +379,7 @@ function Module.Update(aiBrain, now)
             if targetAA < 8 or fighterGroupSize >= 2 then
                 local bombers = {}
                 for _ = 1, bomberGroupSize do
-                    local bomber = idle[bomberIndex]
+                    local bomber = availableBombers[bomberIndex]
                     if bomber then
                         table.insert(bombers, bomber)
                         bomberIndex = bomberIndex + 1
@@ -327,7 +387,7 @@ function Module.Update(aiBrain, now)
                 end
                 local escorts = {}
                 for _ = 1, fighterGroupSize do
-                    local fighter = idleFighters[fighterIndex]
+                    local fighter = availableFighters[fighterIndex]
                     if fighter then
                         table.insert(escorts, fighter)
                         fighterIndex = fighterIndex + 1
