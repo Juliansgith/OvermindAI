@@ -496,6 +496,7 @@ local function PickFactoryTarget(aiBrain, runtime, state)
     local powerReady = (((current.Eco or {}).Power or {}).Ready) or 0
     local mexReady = (((current.Eco or {}).Mex or {}).Ready) or 0
     local upgradeCount = CountActiveLandFactoryUpgrades(aiBrain)
+    local t2LandFactories = aiBrain:GetCurrentUnits(categories.FACTORY * categories.LAND * categories.STRUCTURE * categories.TECH2) or 0
     local factoryTask = current.FactoryTask or {}
 
     state.Managed = true
@@ -528,7 +529,9 @@ local function PickFactoryTarget(aiBrain, runtime, state)
         and totalLand <= (readyLand + 2)
         and powerReady >= 4
         and mexReady >= 4
-    local mandatoryFirstHQ = stableLandFloor
+    local stillNeedsFirstHQ = t2LandFactories <= 0 and upgradeCount <= 0
+    local mandatoryFirstHQ = stillNeedsFirstHQ
+        and (stableLandFloor or (readyLand >= 5 and totalLand >= 5 and mexReady >= 4 and powerReady >= 4))
         and readyLand >= 3
         and totalLand >= 4
         and mexReady >= 4
@@ -540,17 +543,17 @@ local function PickFactoryTarget(aiBrain, runtime, state)
     if constraints.CriticalFactory or constraints.CriticalStructure or constraints.EcoCrash or constraints.QueueStarved or constraints.PowerBufferLow then
         local hqPowerOverride = constraints.PowerBufferLow
             and mandatoryFirstHQ
-            and (eco.EnergyIncome or 0) >= 52
-            and (eco.EnergyStorageRatio or 0) >= 0.08
-            and (eco.EnergyTrend or 0) >= -3
+            and (eco.EnergyIncome or 0) >= 44
+            and (eco.EnergyStorageRatio or 0) >= 0.04
+            and (eco.EnergyTrend or 0) >= -6
         local hqFactoryOverride = constraints.CriticalFactory
             and mandatoryFirstHQ
-            and not landFactoryDebt
+            and (not landFactoryDebt or airFactoryDebt)
             and not constraints.CriticalStructure
             and not constraints.EcoCrash
             and not constraints.QueueStarved
-            and (eco.MassTrend or 0) >= -0.22
-            and (eco.MassStorageRatio or 0) >= 0.03
+            and (eco.MassTrend or 0) >= -0.28
+            and (eco.MassStorageRatio or 0) >= 0.02
         if (hqPowerOverride or hqFactoryOverride) and not constraints.CriticalStructure and not constraints.EcoCrash and not constraints.QueueStarved then
             -- fall through
         else
@@ -569,15 +572,15 @@ local function PickFactoryTarget(aiBrain, runtime, state)
         state.Reason = 'factory_floor'
         return
     end
-    if not surplusSpendWindow and ((eco.MassIncome or 0) < (mandatoryFirstHQ and 2.8 or 3.2) or (eco.EnergyIncome or 0) < (mandatoryFirstHQ and 48 or 58)) then
+    if not surplusSpendWindow and ((eco.MassIncome or 0) < (mandatoryFirstHQ and 2.5 or 3.2) or (eco.EnergyIncome or 0) < (mandatoryFirstHQ and 44 or 58)) then
         state.Reason = 'income_floor'
         return
     end
-    if not surplusSpendWindow and ((eco.MassStorageRatio or 0) < (mandatoryFirstHQ and 0.04 or 0.06) or (eco.EnergyStorageRatio or 0) < (mandatoryFirstHQ and 0.08 or 0.12)) then
+    if not surplusSpendWindow and ((eco.MassStorageRatio or 0) < (mandatoryFirstHQ and 0.02 or 0.06) or (eco.EnergyStorageRatio or 0) < (mandatoryFirstHQ and 0.04 or 0.12)) then
         state.Reason = 'storage_floor'
         return
     end
-    if not surplusSpendWindow and ((eco.MassTrend or 0) < (mandatoryFirstHQ and -0.18 or -0.14) or (eco.EnergyTrend or 0) < (mandatoryFirstHQ and -4 or -2)) then
+    if not surplusSpendWindow and ((eco.MassTrend or 0) < (mandatoryFirstHQ and -0.26 or -0.14) or (eco.EnergyTrend or 0) < (mandatoryFirstHQ and -6 or -2)) then
         state.Reason = 'trend_floor'
         return
     end

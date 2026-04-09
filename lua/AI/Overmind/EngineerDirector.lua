@@ -74,6 +74,11 @@ local function IsIdle(unit)
     return (not q) or table.getn(q) == 0
 end
 
+local function GetCommandQueueLength(unit)
+    local q = unit and unit.GetCommandQueue and unit:GetCommandQueue() or false
+    return q and table.getn(q) or 0
+end
+
 local function IsConstructing(unit)
     if not unit or unit.Dead then
         return false
