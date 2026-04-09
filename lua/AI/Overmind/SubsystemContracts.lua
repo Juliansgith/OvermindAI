@@ -29,19 +29,36 @@ local OvermindBomberHarass = import('/mods/OvermindAI/lua/AI/Overmind/BomberHara
 local OvermindMexDefense = import('/mods/OvermindAI/lua/AI/Overmind/MexDefense.lua')
 local OvermindForceDirector = import('/mods/OvermindAI/lua/AI/Overmind/ForceDirector.lua')
 
+local function TryResolveField(tbl, key)
+    if type(tbl) ~= 'table' or not key then
+        return false
+    end
+    local direct = rawget(tbl, key)
+    if direct ~= nil then
+        return direct
+    end
+    local ok, value = pcall(function()
+        return tbl[key]
+    end)
+    if ok then
+        return value
+    end
+    return false
+end
+
 local function ResolveUpgradeDirectorUpdate()
     local moduleRef = OvermindUpgradeDirector
     if type(moduleRef) ~= 'table' then
         moduleRef = import('/mods/OvermindAI/lua/AI/Overmind/UpgradeDirector.lua')
     end
     if type(moduleRef) == 'table' then
-        local direct = rawget(moduleRef, 'Update') or moduleRef.Update
+        local direct = TryResolveField(moduleRef, 'Update')
         if type(direct) == 'function' then
             return direct
         end
-        local nested = rawget(moduleRef, 'Module') or moduleRef.Module
+        local nested = TryResolveField(moduleRef, 'Module')
         if type(nested) == 'table' then
-            local nestedUpdate = rawget(nested, 'Update') or nested.Update
+            local nestedUpdate = TryResolveField(nested, 'Update')
             if type(nestedUpdate) == 'function' then
                 return nestedUpdate
             end
