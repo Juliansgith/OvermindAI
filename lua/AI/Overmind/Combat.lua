@@ -230,18 +230,33 @@ function EnforceCommanderSafety(aiBrain, now)
     if now < 360 then
         maxDistance = math.min(maxDistance, openingMaxDistance)
     end
+    local heavilyEscortedForward = escortCount >= 10
+        and healthRatio >= 0.84
+        and enemyRaiders <= 2
+        and localThreat <= (homeThreat + 3.6)
+    local stableEscortedForward = escortCount >= 6
+        and healthRatio >= 0.80
+        and enemyRaiders <= 2
+        and localThreat <= (homeThreat + 2.8)
     if runtime.ACURoleMaxDistance then
-        maxDistance = math.min(maxDistance, runtime.ACURoleMaxDistance + 6)
+        local leashAllowance = 6
+        if heavilyEscortedForward then
+            leashAllowance = 12
+        elseif stableEscortedForward then
+            leashAllowance = 8
+        end
+        maxDistance = math.min(maxDistance, runtime.ACURoleMaxDistance + leashAllowance)
     end
 
     local explicitPush = runtime.ACURole == 'push' and escortCount >= 12 and localThreat < (homeThreat + 1.6)
     local earlyHardLeash = now < 380 and distance > 16 and escortCount < 8 and not explicitPush
     local strictLeashActive = now < (runtime.ACUStrictLeashUntil or -999)
     if strictLeashActive then
-        maxDistance = math.min(maxDistance, 12)
+        maxDistance = math.min(maxDistance, heavilyEscortedForward and 18 or 16)
     end
 
-    local catastrophicOverextend = distance > math.max(maxDistance + 8, 24)
+    local catastrophicDistance = math.max(maxDistance + (heavilyEscortedForward and 14 or 8), heavilyEscortedForward and 34 or 24)
+    local catastrophicOverextend = distance > catastrophicDistance
         or (distance > 16 and now < 1200 and escortCount <= 3 and enemyRaiders > 0)
         or (distance > 14 and now < 720 and escortCount <= 2)
 
@@ -327,6 +342,10 @@ function EnforceCommanderSafety(aiBrain, now)
         and enemyRaiders <= 2
         and not lowHealth
         and not catastrophicOverextend
+    local moderateEscortedLeash = stableEscortedForward
+        and distance <= math.max(28, maxDistance + 8)
+        and localThreat <= (homeThreat + 3.6)
+        and not catastrophicOverextend
     if stableEscortedPerimeter and not enemyContactUnsafe and not noMansLand then
         shouldRecall = false
         idleFar = false
@@ -341,6 +360,12 @@ function EnforceCommanderSafety(aiBrain, now)
         earlyHardLeash = false
         raidRecall = false
         enemyContactUnsafe = false
+    end
+    if moderateEscortedLeash and not enemyContactUnsafe and not noMansLand and not raidRecall then
+        shouldRecall = false
+        idleFar = false
+        stuckFar = false
+        earlyHardLeash = false
     end
 
     local canInterruptConstruction = catastrophicOverextend
@@ -394,7 +419,7 @@ function EnforceCommanderSafety(aiBrain, now)
         local sinceReason = now - lastReasonTime
         local reasonCooldown = 10.0
         if recallAction == 'panic_leash_recall' then
-            reasonCooldown = 2.0
+            reasonCooldown = 6.0
         elseif recallAction == 'low_health_recall' then
             reasonCooldown = 4.0
         elseif recallAction == 'enemy_contact_recall' then
@@ -416,6 +441,9 @@ function EnforceCommanderSafety(aiBrain, now)
         local recallEscalated = catastrophicOverextend
             or (severeDanger and (lowHealth or enemyContactUnsafe or localThreat > (homeThreat + 2.8)))
             or stuckFar
+        if heavilyEscortedForward and not lowHealth and not enemyContactUnsafe and not noMansLand then
+            recallEscalated = catastrophicOverextend or stuckFar
+        end
         if insideDefendedSpace and not recallEscalated then
             runtime.LastAcuDistanceFromBase = distance
             return
@@ -429,6 +457,10 @@ function EnforceCommanderSafety(aiBrain, now)
             return
         end
         if heavilyEscortedNearHome and not recallEscalated and sinceRecall < 30 then
+            runtime.LastAcuDistanceFromBase = distance
+            return
+        end
+        if moderateEscortedLeash and not recallEscalated and sinceRecall < 24 then
             runtime.LastAcuDistanceFromBase = distance
             return
         end

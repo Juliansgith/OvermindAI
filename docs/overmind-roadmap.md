@@ -752,6 +752,32 @@ Success criteria:
 - at least one safe local `T1 -> T2` mex can start during tempo mode
 - one land factory can begin upgrading before the game is already decided
 
+### v106: ACU Leash Reset
+
+Status:
+
+- implemented in `v106`
+
+Goals:
+
+- stop treating escorted near-home ACU posture as panic overextension
+- reserve `panic_leash_recall` for genuinely severe leash failures
+- keep `v105` factory tempo intact while reducing commander self-churn
+
+Changes:
+
+- widened ACU role distance bands for `anchor`, `assist`, and `push`
+- relaxed strict leash clamping when the ACU is heavily escorted
+- increased catastrophic-overextend thresholds for stable escorted forward posture
+- suppress moderate escorted leash drift from escalating into repeated recalls
+- lengthened `panic_leash_recall` cooldown so the same leash failure does not retrigger immediately
+
+Success criteria:
+
+- materially fewer `panic_leash_recall` events during the `6-14` minute window
+- escorted ACU can hold a forward defended perimeter without constant retreat loops
+- commander still hard-recalls on true low-health or catastrophic overextend cases
+
 ### v102: Mainline Commitment
 
 Goals:

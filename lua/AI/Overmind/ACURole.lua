@@ -322,11 +322,11 @@ local function RoleDistance(role)
     if role == 'retreat' then
         return 10
     elseif role == 'anchor' then
-        return 12
+        return 16
     elseif role == 'assist' then
-        return 18
-    elseif role == 'push' then
         return 24
+    elseif role == 'push' then
+        return 30
     end
     return 18
 end
@@ -441,7 +441,7 @@ function Update(aiBrain, now)
     runtime.ACURole = roleState.Current
     runtime.ACURoleMaxDistance = RoleDistance(roleState.Current)
     if strictLeash then
-        runtime.ACURoleMaxDistance = math.min(runtime.ACURoleMaxDistance, 12)
+        runtime.ACURoleMaxDistance = math.min(runtime.ACURoleMaxDistance, 16)
     end
 
     local actionInterval = 7
@@ -472,7 +472,7 @@ function Update(aiBrain, now)
     end
 
     if roleState.Current == 'retreat' or roleState.Current == 'anchor' then
-        local anchorMaxDistance = math.min(runtime.ACURoleMaxDistance or 14, 12)
+        local anchorMaxDistance = math.min(runtime.ACURoleMaxDistance or 18, 16)
         if distance > (anchorMaxDistance + 1.5) then
             local q = acu.GetCommandQueue and acu:GetCommandQueue() or false
             local qLen = q and table.getn(q) or 0
@@ -483,7 +483,7 @@ function Update(aiBrain, now)
         return
     end
 
-    if roleState.Current == 'assist' and distance > (runtime.ACURoleMaxDistance + 6) then
+    if roleState.Current == 'assist' and distance > (runtime.ACURoleMaxDistance + 8) then
         local assistPos = GetGraphAdvanceTarget(runtime, 'front', LerpPos(homePos, runtime.PrimaryEnemyPos, 0.28))
         local q = acu.GetCommandQueue and acu:GetCommandQueue() or false
         local qLen = q and table.getn(q) or 0
@@ -506,7 +506,7 @@ function Update(aiBrain, now)
             return
         end
 
-        if pushPos and escort >= 8 and localThreat < (homeThreat + 3.5) and distance < (runtime.ACURoleMaxDistance + 8) then
+        if pushPos and escort >= 8 and localThreat < (homeThreat + 3.5) and distance < (runtime.ACURoleMaxDistance + 10) then
             local q = acu.GetCommandQueue and acu:GetCommandQueue() or false
             if not q or table.getn(q) == 0 then
                 if IssueAggressiveMove then
