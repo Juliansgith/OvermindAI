@@ -527,16 +527,16 @@ local function PickFactoryTarget(aiBrain, runtime, state)
         return
     end
     local stableLandFloor = readyLand >= 3
-        and totalLand >= 4
+        and totalLand >= 3
         and totalLand <= (readyLand + 2)
         and powerReady >= 4
-        and mexReady >= 4
+        and mexReady >= 3
     local stillNeedsFirstHQ = t2LandFactories <= 0 and upgradeCount <= 0
     local mandatoryFirstHQ = stillNeedsFirstHQ
-        and (stableLandFloor or (readyLand >= 5 and totalLand >= 5 and mexReady >= 4 and powerReady >= 4))
+        and (stableLandFloor or (readyLand >= 4 and totalLand >= 4 and mexReady >= 3 and powerReady >= 4))
         and readyLand >= 3
-        and totalLand >= 4
-        and mexReady >= 4
+        and totalLand >= 3
+        and mexReady >= 3
         and not constraints.CriticalStructure
         and not constraints.EcoCrash
     state.NeedsFirstLandHQ = stillNeedsFirstHQ and true or false
@@ -577,14 +577,14 @@ local function PickFactoryTarget(aiBrain, runtime, state)
     end
     local surplusSpendWindow = constraints.SurplusSpendWindow == true
     local strongSurplusWindow = constraints.StrongSurplusWindow == true
-    local firstHQMassIncomeFloor = mandatoryFirstHQ and ((airFactoryDebt and 2.2) or 2.5) or 3.2
-    local firstHQEnergyIncomeFloor = mandatoryFirstHQ and ((airFactoryDebt and 38) or 44) or 58
-    local firstHQMassStorageFloor = mandatoryFirstHQ and ((airFactoryDebt and 0.01) or 0.02) or 0.06
-    local firstHQEnergyStorageFloor = mandatoryFirstHQ and ((airFactoryDebt and 0.02) or 0.04) or 0.12
-    local firstHQMassTrendFloor = mandatoryFirstHQ and ((airFactoryDebt and -0.34) or -0.26) or -0.14
-    local firstHQEnergyTrendFloor = mandatoryFirstHQ and ((airFactoryDebt and -8) or -6) or -2
+    local firstHQMassIncomeFloor = mandatoryFirstHQ and ((airFactoryDebt and 2.0) or 2.3) or 3.2
+    local firstHQEnergyIncomeFloor = mandatoryFirstHQ and ((airFactoryDebt and 34) or 40) or 58
+    local firstHQMassStorageFloor = mandatoryFirstHQ and ((airFactoryDebt and 0.00) or 0.01) or 0.06
+    local firstHQEnergyStorageFloor = mandatoryFirstHQ and ((airFactoryDebt and 0.01) or 0.03) or 0.12
+    local firstHQMassTrendFloor = mandatoryFirstHQ and ((airFactoryDebt and -0.42) or -0.34) or -0.14
+    local firstHQEnergyTrendFloor = mandatoryFirstHQ and ((airFactoryDebt and -12) or -9) or -2
 
-    if readyLand < 3 or totalLand < 4 or powerReady < 4 or mexReady < 4 then
+    if readyLand < 3 or totalLand < 3 or powerReady < 4 or mexReady < 3 then
         state.Reason = 'factory_floor'
         return
     end

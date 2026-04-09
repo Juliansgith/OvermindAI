@@ -1414,7 +1414,7 @@ function ShouldPrioritizeFirstTech2Power(aiBrain)
     if t2plusPower > 0 or unfinishedT2plusPower > 0 then
         return false
     end
-    if land.Ready < 3 or (power.Ready or 0) < 6 or t1PowerReady < 8 then
+    if land.Ready < 2 or (power.Ready or 0) < 5 or t1PowerReady < 6 then
         return false
     end
     if constraints.EcoCrash or constraints.CriticalFactory or constraints.CriticalStructure then
@@ -1423,10 +1423,10 @@ function ShouldPrioritizeFirstTech2Power(aiBrain)
     if (econ.EnergyStorageRatio or 0) >= 0.82 and (econ.EnergyTrend or 0) >= 16 then
         return false
     end
-    if (econ.MassIncome or 0) < 3.5 or (econ.EnergyIncome or 0) < 70 then
+    if (econ.MassIncome or 0) < 2.8 or (econ.EnergyIncome or 0) < 55 then
         return false
     end
-    if (econ.MassTrend or 0) < -0.1 or (econ.EnergyTrend or 0) < -6 then
+    if (econ.MassTrend or 0) < -0.18 or (econ.EnergyTrend or 0) < -10 then
         return false
     end
 

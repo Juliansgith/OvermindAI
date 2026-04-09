@@ -469,6 +469,10 @@ function Module.Update(aiBrain, now)
     local acuEmergencyAANeed = 0
     local acuEmergencyPos = false
     local acuEmergencyThreat = 0
+    local acuDist = Distance2D(acuPos, ownPos)
+    local previousAcuEmergencyTask = previousTasks.acu_emergency_intercept or false
+    local previousAcuEmergencyCount = previousAcuEmergencyTask and (previousAcuEmergencyTask.CurrentUnits or 0) or 0
+    state.ACUEmergencyHoldUntil = state.ACUEmergencyHoldUntil or -999
     if acu and not acu.Dead then
         acuEmergencyPos = raid.LastThreatPos
         if raid.LastThreatLabel ~= 'acu' then
@@ -478,12 +482,20 @@ function Module.Update(aiBrain, now)
             acuEmergencyPos = approachCluster.StagePos or approachCluster.Pos or acuPos
         end
         acuEmergencyThreat = math.max(localAcuThreat, raid.LastThreatAmount or 0)
-        local acuRush = localAcuEnemyCount >= 5
-            or (raid.UnderLandHarass and raid.LastThreatLabel == 'acu' and (raid.LastLandEnemyCount or 0) >= 4)
-            or localAcuThreat >= (homeThreat + 2.2)
+        local acuDamageRecent = (runtime.LastAcuDamageTime or -999) >= (now - 18)
+        local acuEmergencySticky = state.ACUEmergencyHoldUntil > now
+        local acuRush = localAcuEnemyCount >= 2
+            or (raid.UnderLandHarass and raid.LastThreatLabel == 'acu' and (raid.LastLandEnemyCount or 0) >= 2)
+            or localAcuThreat >= (homeThreat + 1.0)
+            or (acuDist > 18 and localAcuEnemyCount >= 1)
+            or acuDamageRecent
+            or (acuEmergencySticky and (localAcuEnemyCount >= 1 or localAcuThreat > math.max(2, homeThreat - 1)))
         if acuRush then
-            acuEmergencyDirectNeed = Clamp(5 + math.floor(math.max(0, acuEmergencyThreat) * 0.22) + math.min(4, localAcuEnemyCount), 5, 18)
-            acuEmergencyAANeed = Clamp(((approachAir > 0) and 1 or 0) + ((raid.UnderAirHarass and 1) or 0), 0, 3)
+            state.ACUEmergencyHoldUntil = now + (acuDamageRecent and 20 or 16)
+            acuEmergencyDirectNeed = Clamp(8 + math.floor(math.max(0, acuEmergencyThreat) * 0.30) + math.min(8, localAcuEnemyCount * 2) + (acuDamageRecent and 4 or 0) + ((previousAcuEmergencyCount > 0) and 2 or 0), 8, 26)
+            acuEmergencyAANeed = Clamp(((approachAir > 0) and 1 or 0) + ((raid.UnderAirHarass and 1) or 0) + ((acuDamageRecent and approachAir > 0) and 1 or 0), 0, 4)
+        elseif previousAcuEmergencyCount <= 0 and localAcuEnemyCount <= 0 and localAcuThreat <= (homeThreat + 0.4) then
+            state.ACUEmergencyHoldUntil = now - 1
         end
     end
     local acuEmergencyNeed = acuEmergencyDirectNeed + acuEmergencyAANeed
@@ -699,19 +711,32 @@ function Module.Update(aiBrain, now)
         return moved
     end
     if acuEmergencyNeed > 0 then
+        interceptDirectNeed = 0
+        interceptAANeed = 0
+        interceptNeed = 0
+        raiderNeed = 0
         local need = acuEmergencyDirectNeed
         if need > 0 then
-            need = need - ShiftNamedUnits(mainline, acuEmergency, math.max(10, minimumMainlineCommit), need)
+            need = need - ShiftNamedUnits(mainline, acuEmergency, math.max(4, minimumMainlineCommit - 8), need)
+        end
+        if need > 0 then
+            need = need - ShiftNamedUnits(baseGuardDirect, acuEmergency, 1, need)
         end
         if need > 0 then
             need = need - ShiftNamedUnits(raiders, acuEmergency, 0, need)
         end
+        if need > 0 then
+            need = need - ShiftNamedUnits(interceptUnits, acuEmergency, 0, need)
+        end
         local aaNeed = acuEmergencyAANeed
         if aaNeed > 0 then
-            aaNeed = aaNeed - ShiftNamedUnits(baseGuardAA, acuEmergency, math.min(table.getn(baseGuardAA), 1), aaNeed)
+            aaNeed = aaNeed - ShiftNamedUnits(baseGuardAA, acuEmergency, 0, aaNeed)
         end
         if aaNeed > 0 then
             aaNeed = aaNeed - ShiftNamedUnits(interceptUnits, acuEmergency, 0, aaNeed)
+        end
+        if aaNeed > 0 then
+            aaNeed = aaNeed - ShiftNamedUnits(mainline, acuEmergency, math.max(2, minimumMainlineCommit - 10), aaNeed)
         end
     end
 

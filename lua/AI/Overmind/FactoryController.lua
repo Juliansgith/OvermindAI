@@ -442,19 +442,19 @@ local function ShouldForceFirstTechEngineer(aiBrain, factory, runtime, eco)
     local mexReady = (((current.Eco or {}).Mex or {}).Ready) or 0
     local powerReady = (((current.Eco or {}).Power or {}).Ready) or 0
 
-    if readyLand < 3 or mexReady < 4 or powerReady < 4 then
+    if readyLand < 2 or mexReady < 3 or powerReady < 4 then
         return false
     end
     if constraints.EcoCrash or constraints.QueueStarved or constraints.LandPanic or constraints.AirPanic then
         return false
     end
-    if (eco.MassIncome or 0) < 3.2 or (eco.EnergyIncome or 0) < 55 then
+    if (eco.MassIncome or 0) < 2.4 or (eco.EnergyIncome or 0) < 45 then
         return false
     end
-    if (eco.MassTrend or 0) < -0.12 or (eco.EnergyTrend or 0) < -4 then
+    if (eco.MassTrend or 0) < -0.22 or (eco.EnergyTrend or 0) < -10 then
         return false
     end
-    if (eco.MassStorageRatio or 0) < 0.06 or (eco.EnergyStorageRatio or 0) < 0.12 then
+    if (eco.MassStorageRatio or 0) < 0.02 or (eco.EnergyStorageRatio or 0) < 0.06 then
         return false
     end
 

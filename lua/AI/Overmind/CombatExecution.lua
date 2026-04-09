@@ -268,6 +268,28 @@ local function ResolveTaskUnits(task, fallbackUnits, maxCount)
     return SelectReadyUnitsFromList(taskUnits, maxCount)
 end
 
+local function ResolvePersistentTaskUnits(task, fallbackUnits, maxCount)
+    local selected = {}
+    local limit = math.max(0, math.floor(maxCount or 0))
+    if limit <= 0 then
+        return selected
+    end
+    local taskUnits = (task and task.AssignedUnitRefs) or fallbackUnits or {}
+    for _, unit in taskUnits do
+        if unit and not unit.Dead then
+            local q = unit.GetCommandQueue and unit:GetCommandQueue() or false
+            local qLen = q and table.getn(q) or 0
+            if qLen <= 4 or unit:IsUnitState('Moving') then
+                table.insert(selected, unit)
+                if table.getn(selected) >= limit then
+                    break
+                end
+            end
+        end
+    end
+    return selected
+end
+
 local function SetTaskExecution(task, now, executionState, orderClass, targetPos, stagePos, issuedCount)
     if not task then
         return
@@ -701,7 +723,7 @@ function RunPressureCycle(aiBrain, now)
     local escortReady = ResolveTaskUnits(escortTask, groups.ACUEscort or {}, math.max(0, baseGuardLimit - table.getn(guardReady)))
     local baseGuardUnits = MergeUnitTables(guardReady, escortReady, {})
     local baseGuardCount = table.getn(baseGuardUnits)
-    local acuEmergencyUnits = ResolveTaskUnits(acuEmergencyTask, groups.ACUEmergency or {}, math.max(5, math.floor(maxUnits * 0.34)))
+    local acuEmergencyUnits = ResolvePersistentTaskUnits(acuEmergencyTask, groups.ACUEmergency or {}, math.max(8, math.floor(maxUnits * 0.52)))
     local acuEmergencyCount = table.getn(acuEmergencyUnits)
     local raidUnits = ResolveTaskUnits(raidTask, groups.Raiders or {}, math.max(2, math.floor(maxUnits * 0.24)))
     local raidCount = table.getn(raidUnits)
@@ -810,10 +832,22 @@ function RunPressureCycle(aiBrain, now)
     if acuEmergencyActive then
         IssueCohesiveLandOrders(aiBrain, ownPos, acuEnemyPos, acuEmergencyUnits, true)
         SetTaskExecution(acuEmergencyTask, now, 'intercepting', 'cohesive-defend', acuEnemyPos, acuPos, acuEmergencyCount)
-        if pressureCount >= 8 then
-            local emergencyReinforce = pressureUnits
+        local emergencyReinforce = {}
+        if pressureCount > 0 then
+            emergencyReinforce = MergeUnitTables(emergencyReinforce, pressureUnits, {})
+        end
+        if baseGuardCount > 0 then
+            emergencyReinforce = MergeUnitTables(emergencyReinforce, baseGuardUnits, {})
+        end
+        if raidCount > 0 then
+            emergencyReinforce = MergeUnitTables(emergencyReinforce, raidUnits, {})
+        end
+        if interceptCount > 0 then
+            emergencyReinforce = MergeUnitTables(emergencyReinforce, interceptUnits, {})
+        end
+        if table.getn(emergencyReinforce) >= 6 then
             IssueCohesiveLandOrders(aiBrain, ownPos, acuEnemyPos, emergencyReinforce, true)
-            SetTaskExecution(frontTask, now, 'intercepting', 'cohesive-defend', acuEnemyPos, acuPos, pressureCount)
+            SetTaskExecution(frontTask, now, 'intercepting', 'cohesive-defend', acuEnemyPos, acuPos, table.getn(emergencyReinforce))
             SetTaskExecution(artilleryTask, now, 'screening', 'cohesive-defend', acuEnemyPos, acuPos, table.getn(artilleryReady))
         elseif baseGuardCount > 0 then
             IssueCohesiveLandOrders(aiBrain, ownPos, acuEnemyPos, baseGuardUnits, true)
@@ -822,6 +856,10 @@ function RunPressureCycle(aiBrain, now)
         if raidCount > 0 and IssueCohesiveLandOrders then
             IssueCohesiveLandOrders(aiBrain, ownPos, acuEnemyPos, raidUnits, true)
             SetTaskExecution(raidTask, now, 'recalling', 'cohesive-defend', acuEnemyPos, acuPos, raidCount)
+        end
+        if interceptCount > 0 then
+            IssueCohesiveLandOrders(aiBrain, ownPos, acuEnemyPos, interceptUnits, true)
+            SetTaskExecution(interceptTask, now, 'intercepting', 'cohesive-defend', acuEnemyPos, acuPos, interceptCount)
         end
         runtime.LastPressureOrder = 'ACUEmergencyIntercept'
         return
