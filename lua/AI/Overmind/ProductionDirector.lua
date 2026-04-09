@@ -1371,7 +1371,7 @@ local function DecideCapacityPlan(runtime, current, constraints, rolePlan)
         seaCap = seaCap + 1
     end
     if preHQAirClamp then
-        airCap = math.min(airCap, math.max(1, current.Factories.Air.Total))
+        airCap = math.min(airCap, math.min(current.Factories.Air.Total, 1))
     end
 
     local landTarget = Clamp(math.max(1, math.ceil(landRoleLoad / 9.5), math.ceil(landRoleUnits / 12)), 1, landCap)
@@ -1626,7 +1626,10 @@ local function DecideCapacityPlan(runtime, current, constraints, rolePlan)
         end
     end
     if preHQAirClamp then
-        airTarget = math.min(airTarget, current.Factories.Air.Total)
+        airTarget = math.min(airTarget, math.min(current.Factories.Air.Total, 1))
+        if current.Factories.Land.Ready >= 3 and not preserveAirWindow then
+            airTarget = math.min(airTarget, 1)
+        end
     end
 
     local completionLock = unstaffedFactoryShell or (landFactoryCompletionDebt and current.Factories.Land.Total >= 2)

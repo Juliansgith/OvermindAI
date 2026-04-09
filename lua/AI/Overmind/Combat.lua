@@ -423,10 +423,20 @@ function EnforceCommanderSafety(aiBrain, now)
         and localThreat <= (homeThreat + 2.2)
         and not lowHealth
         and not catastrophicOverextend
+    runtime.AcuCombatRetreatHoldUntil = runtime.AcuCombatRetreatHoldUntil or -999
     local sustainedCombatRetreat = (runtime.LastAcuDamageTime or -999) >= (now - 18)
         and healthRatio <= 0.98
         and escortCount >= 6
         and localThreat >= math.max(4, homeThreat - 2)
+    if sustainedCombatRetreat then
+        runtime.AcuCombatRetreatHoldUntil = math.max(runtime.AcuCombatRetreatHoldUntil, now + 10)
+    elseif runtime.AcuCombatRetreatHoldUntil <= now
+        and healthRatio >= 0.90
+        and localThreat <= (homeThreat + 0.8)
+        and enemyRaiders <= 0 then
+        runtime.AcuCombatRetreatHoldUntil = now - 1
+    end
+    local combatRetreatSticky = runtime.AcuCombatRetreatHoldUntil > now
     local leashReposition = distance > math.max(maxDistance + 2, 20)
         and not shouldRecall
         and not lowHealth
@@ -499,7 +509,7 @@ function EnforceCommanderSafety(aiBrain, now)
             and healthRatio >= 0.82
             and localThreat <= ((runtime.LastAcuRecallLocalThreat or localThreat) + 4.0)
         local recallAction = 'threat_recall'
-        if sustainedCombatRetreat and (underThreat or raidRecall or enemyContactUnsafe or shouldRecall) then
+        if (sustainedCombatRetreat or combatRetreatSticky) and (underThreat or raidRecall or enemyContactUnsafe or shouldRecall or localThreat > math.max(2.5, homeThreat - 1.2)) then
             recallAction = 'combat_retreat'
         elseif catastrophicOverextend then
             recallAction = 'panic_leash_recall'

@@ -511,6 +511,11 @@ local function PickFactoryTarget(aiBrain, runtime, state)
     state.NeedsFirstLandHQ = false
     state.Mandatory = false
 
+    local needsFirstHQOverall = t2LandFactories <= 0
+    state.NeedsFirstLandHQ = needsFirstHQOverall and true or false
+    state.Mandatory = needsFirstHQOverall and true or false
+    state.PowerRecoveryWanted = constraints.PowerBufferLow and needsFirstHQOverall
+
     if upgradeCount > 0 then
         local allFactories = aiBrain:GetListOfUnits(categories.FACTORY * categories.LAND * categories.STRUCTURE, false, true) or {}
         for _, fac in allFactories do
@@ -519,21 +524,21 @@ local function PickFactoryTarget(aiBrain, runtime, state)
                 state.TargetId = GetEntityId(fac)
                 state.Enabled = true
                 state.UpgradeBp = GetUpgradeBlueprintId(fac)
-                state.Reason = 'in_flight'
+                state.Reason = needsFirstHQOverall and 'mandatory_first_hq_in_flight' or 'in_flight'
                 return
             end
         end
-        state.Reason = 'in_flight'
+        state.Reason = needsFirstHQOverall and 'mandatory_first_hq_in_flight' or 'in_flight'
         return
     end
     local stableLandFloor = readyLand >= 3
         and totalLand >= 3
         and totalLand <= (readyLand + 2)
-        and powerReady >= 4
+        and powerReady >= 3
         and mexReady >= 3
     local stillNeedsFirstHQ = t2LandFactories <= 0 and upgradeCount <= 0
     local mandatoryFirstHQ = stillNeedsFirstHQ
-        and (stableLandFloor or (readyLand >= 4 and totalLand >= 4 and mexReady >= 3 and powerReady >= 4))
+        and (stableLandFloor or (readyLand >= 4 and totalLand >= 4 and mexReady >= 3 and powerReady >= 3))
         and readyLand >= 3
         and totalLand >= 3
         and mexReady >= 3
@@ -543,7 +548,7 @@ local function PickFactoryTarget(aiBrain, runtime, state)
     state.Mandatory = mandatoryFirstHQ and true or false
     local landFactoryDebt = factoryTask.Active and factoryTask.Domain == 'Land'
     local airFactoryDebt = factoryTask.Active and factoryTask.Domain == 'Air'
-    state.PowerRecoveryWanted = constraints.PowerBufferLow and mandatoryFirstHQ
+    state.PowerRecoveryWanted = constraints.PowerBufferLow and (mandatoryFirstHQ or needsFirstHQOverall)
     if constraints.CriticalFactory or constraints.CriticalStructure or constraints.EcoCrash or constraints.QueueStarved or constraints.PowerBufferLow then
         local ignoreAirFactoryDebt = constraints.CriticalFactory
             and mandatoryFirstHQ
@@ -577,14 +582,14 @@ local function PickFactoryTarget(aiBrain, runtime, state)
     end
     local surplusSpendWindow = constraints.SurplusSpendWindow == true
     local strongSurplusWindow = constraints.StrongSurplusWindow == true
-    local firstHQMassIncomeFloor = mandatoryFirstHQ and ((airFactoryDebt and 2.0) or 2.3) or 3.2
-    local firstHQEnergyIncomeFloor = mandatoryFirstHQ and ((airFactoryDebt and 34) or 40) or 58
+    local firstHQMassIncomeFloor = mandatoryFirstHQ and ((airFactoryDebt and 1.8) or 2.0) or 3.2
+    local firstHQEnergyIncomeFloor = mandatoryFirstHQ and ((airFactoryDebt and 28) or 34) or 58
     local firstHQMassStorageFloor = mandatoryFirstHQ and ((airFactoryDebt and 0.00) or 0.01) or 0.06
-    local firstHQEnergyStorageFloor = mandatoryFirstHQ and ((airFactoryDebt and 0.01) or 0.03) or 0.12
-    local firstHQMassTrendFloor = mandatoryFirstHQ and ((airFactoryDebt and -0.42) or -0.34) or -0.14
-    local firstHQEnergyTrendFloor = mandatoryFirstHQ and ((airFactoryDebt and -12) or -9) or -2
+    local firstHQEnergyStorageFloor = mandatoryFirstHQ and ((airFactoryDebt and 0.00) or 0.02) or 0.12
+    local firstHQMassTrendFloor = mandatoryFirstHQ and ((airFactoryDebt and -0.55) or -0.40) or -0.14
+    local firstHQEnergyTrendFloor = mandatoryFirstHQ and ((airFactoryDebt and -16) or -12) or -2
 
-    if readyLand < 3 or totalLand < 3 or powerReady < 4 or mexReady < 3 then
+    if readyLand < 3 or totalLand < 3 or powerReady < 3 or mexReady < 3 then
         state.Reason = 'factory_floor'
         return
     end

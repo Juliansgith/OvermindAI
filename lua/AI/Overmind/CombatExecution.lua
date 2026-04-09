@@ -738,6 +738,7 @@ function RunPressureCycle(aiBrain, now)
         or GetStrongestNearbyEnemyPosition(aiBrain, ownPos)
     local raidTarget = (raidTask and raidTask.TargetPos) or intel.BestRaidPos or (runtime.ZoneModel and runtime.ZoneModel.BestRaidPos) or primaryEnemyPos
     local acuEmergencyActive = acuEnemyPos and acuEmergencyCount > 0
+    local acuDangerRecent = (runtime.LastAcuDamageTime or -999) >= (now - 24)
     if pressureCount <= 0 then
         if acuEmergencyActive and IssueCohesiveLandOrders then
             IssueCohesiveLandOrders(aiBrain, ownPos, acuEnemyPos, acuEmergencyUnits, true)
@@ -845,7 +846,10 @@ function RunPressureCycle(aiBrain, now)
         if interceptCount > 0 then
             emergencyReinforce = MergeUnitTables(emergencyReinforce, interceptUnits, {})
         end
-        if table.getn(emergencyReinforce) >= 6 then
+        if table.getn(artilleryReady) > 0 and acuDangerRecent then
+            emergencyReinforce = MergeUnitTables(emergencyReinforce, artilleryReady, {})
+        end
+        if table.getn(emergencyReinforce) >= (acuDangerRecent and 3 or 6) then
             IssueCohesiveLandOrders(aiBrain, ownPos, acuEnemyPos, emergencyReinforce, true)
             SetTaskExecution(frontTask, now, 'intercepting', 'cohesive-defend', acuEnemyPos, acuPos, table.getn(emergencyReinforce))
             SetTaskExecution(artilleryTask, now, 'screening', 'cohesive-defend', acuEnemyPos, acuPos, table.getn(artilleryReady))

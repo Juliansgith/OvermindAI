@@ -482,17 +482,18 @@ function Module.Update(aiBrain, now)
             acuEmergencyPos = approachCluster.StagePos or approachCluster.Pos or acuPos
         end
         acuEmergencyThreat = math.max(localAcuThreat, raid.LastThreatAmount or 0)
-        local acuDamageRecent = (runtime.LastAcuDamageTime or -999) >= (now - 18)
+        local acuDamageRecent = (runtime.LastAcuDamageTime or -999) >= (now - 24)
         local acuEmergencySticky = state.ACUEmergencyHoldUntil > now
         local acuRush = localAcuEnemyCount >= 2
             or (raid.UnderLandHarass and raid.LastThreatLabel == 'acu' and (raid.LastLandEnemyCount or 0) >= 2)
             or localAcuThreat >= (homeThreat + 1.0)
             or (acuDist > 18 and localAcuEnemyCount >= 1)
+            or (localAcuEnemyCount >= 1 and (raid.UnderLandHarass or localAcuThreat >= math.max(1.5, homeThreat - 0.5) or acuDist > 10))
             or acuDamageRecent
-            or (acuEmergencySticky and (localAcuEnemyCount >= 1 or localAcuThreat > math.max(2, homeThreat - 1)))
+            or (acuEmergencySticky and (localAcuEnemyCount >= 1 or localAcuThreat > math.max(1.2, homeThreat - 1.4)))
         if acuRush then
-            state.ACUEmergencyHoldUntil = now + (acuDamageRecent and 20 or 16)
-            acuEmergencyDirectNeed = Clamp(8 + math.floor(math.max(0, acuEmergencyThreat) * 0.30) + math.min(8, localAcuEnemyCount * 2) + (acuDamageRecent and 4 or 0) + ((previousAcuEmergencyCount > 0) and 2 or 0), 8, 26)
+            state.ACUEmergencyHoldUntil = now + (acuDamageRecent and 30 or 22)
+            acuEmergencyDirectNeed = Clamp(10 + math.floor(math.max(0, acuEmergencyThreat) * 0.34) + math.min(10, localAcuEnemyCount * 2) + (acuDamageRecent and 6 or 0) + ((previousAcuEmergencyCount > 0) and 3 or 0), 10, 30)
             acuEmergencyAANeed = Clamp(((approachAir > 0) and 1 or 0) + ((raid.UnderAirHarass and 1) or 0) + ((acuDamageRecent and approachAir > 0) and 1 or 0), 0, 4)
         elseif previousAcuEmergencyCount <= 0 and localAcuEnemyCount <= 0 and localAcuThreat <= (homeThreat + 0.4) then
             state.ACUEmergencyHoldUntil = now - 1
