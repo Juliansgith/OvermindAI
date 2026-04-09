@@ -98,6 +98,58 @@ local function GetBrainAnchorPosition(aiBrain)
     return false
 end
 
+local function IsRetreatTargetSafe(aiBrain, targetPos, localThreat, forceStats)
+    if not aiBrain or not targetPos then
+        return false
+    end
+    local targetThreat = aiBrain:GetThreatAtPosition(targetPos, 2, true, 'AntiSurface') or 0
+    local targetEnemy = aiBrain:GetNumUnitsAroundPoint(PressureCategory, targetPos, 34, 'Enemy') or 0
+    local targetAlly = aiBrain:GetNumUnitsAroundPoint(PressureCategory, targetPos, 34, 'Ally') or 0
+    local baseGuard = (forceStats and forceStats.BaseGuard) or 0
+    if targetEnemy == 0 and targetThreat <= math.max(2.0, localThreat + 0.8) then
+        return true
+    end
+    if targetThreat > math.max(localThreat + 1.8, 4.0) then
+        return false
+    end
+    return (targetAlly + baseGuard) >= math.max(4, targetEnemy + 2)
+end
+
+local function GetSafeRetreatTarget(aiBrain, acuPos, homePos, enemyPos, localThreat, forceStats, sideBias)
+    if not homePos then
+        return false
+    end
+    if IsRetreatTargetSafe(aiBrain, homePos, localThreat, forceStats) then
+        return homePos
+    end
+
+    local candidates = {
+        LerpPos(acuPos, homePos, 0.45),
+        LerpPos(acuPos, homePos, 0.6),
+        BuildDetourPoint(acuPos, homePos, sideBias),
+    }
+    if enemyPos then
+        table.insert(candidates, RetreatFromEnemy(homePos, enemyPos, 0.22))
+    end
+
+    local best = false
+    local bestThreat = 9999
+    for _, candidate in candidates do
+        if candidate then
+            local candidateThreat = aiBrain:GetThreatAtPosition(candidate, 2, true, 'AntiSurface') or 0
+            local candidateEnemy = aiBrain:GetNumUnitsAroundPoint(PressureCategory, candidate, 30, 'Enemy') or 0
+            local candidateAlly = aiBrain:GetNumUnitsAroundPoint(PressureCategory, candidate, 30, 'Ally') or 0
+            local baseGuard = (forceStats and forceStats.BaseGuard) or 0
+            if candidateThreat < bestThreat and (candidateEnemy == 0 or (candidateAlly + baseGuard) >= candidateEnemy) then
+                best = candidate
+                bestThreat = candidateThreat
+            end
+        end
+    end
+
+    return best or homePos
+end
+
 local function GetNearestEnemyBasePosition(aiBrain, ownPos)
     local nearestPos = false
     local nearestDist = 100000
@@ -256,7 +308,7 @@ function EnforceCommanderSafety(aiBrain, now)
     end
 
     local catastrophicDistance = math.max(maxDistance + (heavilyEscortedForward and 14 or 8), heavilyEscortedForward and 34 or 24)
-    local catastrophicOverextend = distance > catastrophicDistance
+    local hardOverextendDistance = distance > catastrophicDistance
         or (distance > 16 and now < 1200 and escortCount <= 3 and enemyRaiders > 0)
         or (distance > 14 and now < 720 and escortCount <= 2)
 
@@ -264,7 +316,7 @@ function EnforceCommanderSafety(aiBrain, now)
     if earlyHardLeash then
         shouldRecall = true
     end
-    if catastrophicOverextend then
+    if hardOverextendDistance then
         shouldRecall = true
     end
 
@@ -292,6 +344,10 @@ function EnforceCommanderSafety(aiBrain, now)
     end
     local stuckFar = distance > math.max(22, maxDistance + 3) and (now - (runtime.LastAcuMoveTime or now)) > 8
     local noMansLand = distance > 20 and (localThreat > 0.8 or enemyRaiders > 0) and escortCount <= 4
+    local retreatTargetSafe = IsRetreatTargetSafe(aiBrain, homePos, localThreat, forceStats)
+    local escortCollapsed = escortCount <= math.min(4, math.max(2, enemyRaiders))
+    local threatCollapse = localThreat > (homeThreat + 3.4)
+    local catastrophicOverextend = hardOverextendDistance and (lowHealth or escortCollapsed or threatCollapse or noMansLand or not retreatTargetSafe)
     local insideDefendedSpace = distance <= math.max(12, math.min(20, maxDistance + 2))
         and (escortCount >= 3 or (forceStats.BaseGuard or 0) >= 4)
         and localThreat <= (homeThreat + 1.2)
@@ -346,6 +402,14 @@ function EnforceCommanderSafety(aiBrain, now)
         and distance <= math.max(28, maxDistance + 8)
         and localThreat <= (homeThreat + 3.6)
         and not catastrophicOverextend
+    local leashReposition = distance > math.max(maxDistance + 2, 20)
+        and not shouldRecall
+        and not lowHealth
+        and escortCount >= 4
+        and localThreat <= (homeThreat + 2.6)
+        and not enemyContactUnsafe
+        and not raidRecall
+        and not noMansLand
     if stableEscortedPerimeter and not enemyContactUnsafe and not noMansLand then
         shouldRecall = false
         idleFar = false
@@ -379,7 +443,7 @@ function EnforceCommanderSafety(aiBrain, now)
         return
     end
 
-    if shouldRecall or idleFar or stuckFar or noMansLand or enemyContactUnsafe or raidRecall then
+    if shouldRecall or idleFar or stuckFar or noMansLand or enemyContactUnsafe or raidRecall or leashReposition then
         local lastRecall = runtime.LastAcuRecallTime or -100
         local recallCooldown = 4.0
         if raidRecall or enemyContactUnsafe then
@@ -402,6 +466,8 @@ function EnforceCommanderSafety(aiBrain, now)
         local recallAction = 'threat_recall'
         if catastrophicOverextend then
             recallAction = 'panic_leash_recall'
+        elseif leashReposition then
+            recallAction = 'leash_reposition'
         elseif stuckFar then
             recallAction = 'stuck_recall'
         elseif noMansLand then
@@ -440,6 +506,8 @@ function EnforceCommanderSafety(aiBrain, now)
             reasonCooldown = 14.0
         elseif recallAction == 'stuck_recall' then
             reasonCooldown = 9.0
+        elseif recallAction == 'leash_reposition' then
+            reasonCooldown = 8.0
         end
         local worseningThreat = localThreat >= ((runtime.LastAcuRecallLocalThreat or localThreat) + 2.5)
             or homeThreat >= ((runtime.LastAcuRecallHomeThreat or homeThreat) + 1.5)
@@ -447,6 +515,9 @@ function EnforceCommanderSafety(aiBrain, now)
         local recallEscalated = catastrophicOverextend
             or (severeDanger and (lowHealth or enemyContactUnsafe or localThreat > (homeThreat + 2.8)))
             or stuckFar
+        if recallAction == 'leash_reposition' then
+            recallEscalated = false
+        end
         if heavilyEscortedForward and not lowHealth and not enemyContactUnsafe and not noMansLand then
             recallEscalated = catastrophicOverextend or stuckFar
         end
@@ -505,10 +576,12 @@ function EnforceCommanderSafety(aiBrain, now)
             return
         end
         if (now - lastRecall) > recallCooldown then
-            local recallPos = homePos
+            local recallPos = GetSafeRetreatTarget(aiBrain, acuPos, homePos, runtime.PrimaryEnemyPos, localThreat, forceStats, aiBrain:GetArmyIndex())
             if severeDanger then
-                recallPos = RetreatFromEnemy(homePos, runtime.PrimaryEnemyPos, 0.42) or homePos
+                recallPos = GetSafeRetreatTarget(aiBrain, acuPos, RetreatFromEnemy(homePos, runtime.PrimaryEnemyPos, 0.42) or homePos, runtime.PrimaryEnemyPos, localThreat, forceStats, aiBrain:GetArmyIndex())
                 runtime.ACUSafetyLockUntil = math.max(runtime.ACUSafetyLockUntil or -999, now + 24)
+            elseif recallAction == 'leash_reposition' then
+                recallPos = LerpPos(acuPos, recallPos or homePos, 0.45)
             elseif earlyHardLeash or openingLock or hardAnchor then
                 runtime.ACUSafetyLockUntil = math.max(runtime.ACUSafetyLockUntil or -999, now + 12)
             end
@@ -518,7 +591,7 @@ function EnforceCommanderSafety(aiBrain, now)
                 runtime.ACUStrictLeashUntil = math.max(runtime.ACUStrictLeashUntil or -999, now + 45)
             end
 
-            if severeDanger and IssueClearCommands then
+            if severeDanger and recallAction ~= 'leash_reposition' and IssueClearCommands then
                 IssueClearCommands({ acu })
             end
             if IssueMove then
