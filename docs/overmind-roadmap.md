@@ -670,6 +670,55 @@ Success criteria:
 - by `3-6` minutes the AI escapes `1/0/0` more reliably
 - when mass is floating and energy buffer is still modest, power continues to grow past the initial floor
 
+### v104: Factory Completion And Engineer Conversion
+
+Status:
+
+- planned
+
+Goals:
+
+- keep `v103` aggression but convert it into finished production instead of stalled shells
+- use spare engineers on factory completion, mex upgrades, repairs, and core eco work
+- allow local `T1 -> T2` mex upgrades to act as default consolidation when expansion is stalled
+- unlock the first `T2` factory earlier once a stable `4`-factory midgame exists
+
+Changes:
+
+- hard-gate new land factory shells behind staffed existing shells
+- treat stalled unfinished land factories as top-priority engineer work and allow multiple engineers to assist them
+- make free engineers prefer, in order:
+  - unfinished factory shells
+  - active mex upgrades
+  - damaged core structure repairs
+  - critical core structures
+  - safe local `T1 -> T2` mex upgrades
+  - only then expansion / secondary defense / reclaim
+- relax local/core `T1 -> T2` mex upgrades further under expansion stall while keeping `T2 -> T3` strict
+- unlock the first `T2` factory earlier when:
+  - `3-4` factories are online
+  - eco is stable
+  - no critical recovery is active
+  - pressure justifies stronger units
+- add explicit repair priority for damaged factories, mexes, radar, and core defenses
+
+Implementation order:
+
+1. factory completion lock and staffed-shell growth accounting
+2. engineer spend priority and multi-engineer assists
+3. local `T1 -> T2` consolidation / assist behavior
+4. earlier `T2` factory tech unlock
+5. repair priority
+
+Success criteria:
+
+- no long-lived unfinished factory with `asn=0/2` or `asn=0/3`
+- multiple engineers can be seen assisting the same factory shell or mex upgrade when appropriate
+- at least one safe local `T1 -> T2` mex occurs when expansion is stalled
+- one factory starts upgrading to `T2` once a stable `4`-factory midgame exists
+- engineers repair damaged core assets instead of drifting into low-value work
+- no return to one-factory limp mode after the early transition
+
 ### v101: ACU Safety Hysteresis
 
 Goals:
