@@ -1404,6 +1404,19 @@ local function GetPriorityUpgradeAssistTarget(aiBrain, runtime, mainPos)
         return false, false
     end
 
+    local upgradeDirector = runtime and runtime.UpgradeDirector or false
+    if upgradeDirector then
+        local directedExtractor = upgradeDirector.Extractor or false
+        if directedExtractor and directedExtractor.Enabled == true and directedExtractor.TargetUnit and not directedExtractor.TargetUnit.Dead and directedExtractor.TargetUnit:IsUnitState('Upgrading') then
+            return directedExtractor.TargetUnit, true
+        end
+
+        local directedFactory = upgradeDirector.Factory or false
+        if directedFactory and directedFactory.Enabled == true and directedFactory.TargetUnit and not directedFactory.TargetUnit.Dead and directedFactory.TargetUnit:IsUnitState('Upgrading') then
+            return directedFactory.TargetUnit, true
+        end
+    end
+
     local best = false
     local bestScore = -999999
     local isUpgradeTarget = false

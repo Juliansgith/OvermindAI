@@ -826,6 +826,32 @@ Success criteria:
 - `ENGDIR` clearly shows build vs repair vs upgrade vs resume for structure tasks
 - easier diagnosis of engineer clumps around unexpected tasks in live tests
 
+### v110: Upgrade Director Baseline
+
+Status:
+
+- implemented in `v110`
+
+Goals:
+
+- stop spreading mex and HQ upgrade ownership across production policy, builder conditions, and generic engineer assist logic
+- choose one safe upgrade target at a time and keep assists focused on it
+- give Overmind a more stable base for future tech/tempo tuning
+
+Changes:
+
+- added `UpgradeDirector.lua` as a centralized upgrade arbiter
+- choose one safe mex upgrade target and directly issue the mex upgrade from the director
+- choose one safe land HQ upgrade target and make `FactoryController` honor that chosen target
+- route mex builder conditions through the directed target instead of broad “upgrade allowed” heuristics
+- route engineer upgrade assists through the directed mex/HQ target first
+
+Success criteria:
+
+- `UPGDIR` logs show one owned mex/HQ target instead of diffuse upgrade permission
+- engineers assist the active directed mex/HQ upgrade instead of generic nearest upgrades
+- fewer cases where tech is “allowed” but no stable upgrade target is actually owned
+
 ### v102: Mainline Commitment
 
 Goals:

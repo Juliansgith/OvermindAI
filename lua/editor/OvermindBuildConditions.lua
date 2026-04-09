@@ -38,6 +38,13 @@ local function GetProductionDirector(aiBrain)
     return false
 end
 
+local function GetUpgradeDirector(aiBrain)
+    if aiBrain and aiBrain.OvermindRuntime and aiBrain.OvermindRuntime.UpgradeDirector then
+        return aiBrain.OvermindRuntime.UpgradeDirector
+    end
+    return false
+end
+
 local function GetEngineerState(aiBrain)
     if aiBrain and aiBrain.OvermindRuntime and aiBrain.OvermindRuntime.EngineerState then
         return aiBrain.OvermindRuntime.EngineerState
@@ -269,6 +276,18 @@ local function GetUnfinishedUnitCount(aiBrain, category, aroundPos, radius)
 end
 
 local function GetExtractorUpgradePlan(aiBrain)
+    local upgradeDirector = GetUpgradeDirector(aiBrain)
+    local directedExtractor = upgradeDirector and upgradeDirector.Extractor or false
+    if directedExtractor and directedExtractor.Managed == true then
+        local cap = math.max(0, math.floor((directedExtractor.Cap or 0) + 0.5))
+        local inFlight = math.max(0, directedExtractor.InFlight or 0)
+        return {
+            UpgradeExtractors = directedExtractor.Enabled == true,
+            AggressiveExtractorUpgrades = directedExtractor.Aggressive == true,
+            ExtractorUpgradeReason = directedExtractor.Reason or 'directed',
+        }, cap, inFlight
+    end
+
     local director = GetProductionDirector(aiBrain)
     local techPlan = director and director.TechPlan or false
     if not techPlan then
@@ -1465,6 +1484,12 @@ function ShouldUpgradeExtractors(aiBrain, minMassIncome, minEnergyIncome, minMas
         return false
     end
 
+    local upgradeDirector = GetUpgradeDirector(aiBrain)
+    local directedExtractor = upgradeDirector and upgradeDirector.Extractor or false
+    if directedExtractor and directedExtractor.Managed == true then
+        return directedExtractor.Enabled == true
+    end
+
     local econ = GetEcon(aiBrain)
     local policy = GetPolicy(aiBrain)
     local director = GetProductionDirector(aiBrain)
@@ -1528,6 +1553,11 @@ function ShouldUpgradeExtractorsAggressive(aiBrain)
     if not IsOvermindBrain(aiBrain) then
         return false
     end
+    local upgradeDirector = GetUpgradeDirector(aiBrain)
+    local directedExtractor = upgradeDirector and upgradeDirector.Extractor or false
+    if directedExtractor and directedExtractor.Managed == true then
+        return directedExtractor.Enabled == true and directedExtractor.Aggressive == true
+    end
     local director = GetProductionDirector(aiBrain)
     local techPlan = director and director.TechPlan or false
     if techPlan and techPlan.ExtractorUpgradeReason then
@@ -1539,6 +1569,14 @@ end
 function ShouldUpgradeLocalExtractors(aiBrain, targetTech, radius)
     if not IsOvermindBrain(aiBrain) then
         return false
+    end
+    local upgradeDirector = GetUpgradeDirector(aiBrain)
+    local directedExtractor = upgradeDirector and upgradeDirector.Extractor or false
+    if directedExtractor and directedExtractor.Managed == true then
+        return directedExtractor.Enabled == true
+            and directedExtractor.TargetTech == ((targetTech == 'tech3' or targetTech == 3) and 'tech3' or 'tech2')
+            and directedExtractor.Scope == 'local'
+            and directedExtractor.TargetId ~= false
     end
     if (targetTech == 'tech3') or (targetTech == 3) then
         if not CanUpgradeToTech3Extractors(aiBrain, math.max(radius or 240, 360)) then
@@ -1553,6 +1591,14 @@ end
 function ShouldUpgradeRemoteExtractors(aiBrain, targetTech, minRadius)
     if not IsOvermindBrain(aiBrain) then
         return false
+    end
+    local upgradeDirector = GetUpgradeDirector(aiBrain)
+    local directedExtractor = upgradeDirector and upgradeDirector.Extractor or false
+    if directedExtractor and directedExtractor.Managed == true then
+        return directedExtractor.Enabled == true
+            and directedExtractor.TargetTech == ((targetTech == 'tech3' or targetTech == 3) and 'tech3' or 'tech2')
+            and directedExtractor.Scope == 'remote'
+            and directedExtractor.TargetId ~= false
     end
 
     if HasCriticalFactoryTask(aiBrain) or HasCriticalStructureTask(aiBrain) then
@@ -1614,6 +1660,21 @@ end
 function UnderExtractorUpgradeCap(aiBrain, targetTech)
     if not IsOvermindBrain(aiBrain) then
         return false
+    end
+
+    local upgradeDirector = GetUpgradeDirector(aiBrain)
+    local directedExtractor = upgradeDirector and upgradeDirector.Extractor or false
+    if directedExtractor and directedExtractor.Managed == true then
+        if directedExtractor.Enabled ~= true then
+            return false
+        end
+        local normalizedTarget = ((targetTech == 'tech3') or (targetTech == 3)) and 'tech3' or 'tech2'
+        if directedExtractor.TargetTech ~= normalizedTarget then
+            return false
+        end
+        local cap = math.max(0, math.floor((directedExtractor.Cap or 0) + 0.5))
+        local inFlight = math.max(0, directedExtractor.InFlight or 0)
+        return cap > 0 and inFlight < cap
     end
 
     local techPlan, cap, inFlight = GetExtractorUpgradePlan(aiBrain)

@@ -430,6 +430,8 @@ local function ShouldUpgradeFactory(aiBrain, factory, runtime, eco, qLen)
     end
 
     local plan = runtime.ProductionDirector or {}
+    local upgradeDirector = runtime.UpgradeDirector or {}
+    local directedFactory = upgradeDirector.Factory or {}
     local current = plan.Current or {}
     local constraints = plan.ConstraintState or {}
     local techPlan = plan.TechPlan or {}
@@ -442,6 +444,17 @@ local function ShouldUpgradeFactory(aiBrain, factory, runtime, eco, qLen)
     local completionDebt = factoryTask.Active
         and factoryTask.Domain == 'Land'
         and ((factoryTask.AssignedBuilders or 0) < math.max(1, factoryTask.RequiredBuilders or 0))
+
+    if directedFactory.Managed == true then
+        local factoryId = tostring(factory.GetEntityId and factory:GetEntityId() or factory.UnitId or factory)
+        if directedFactory.Enabled ~= true or directedFactory.TargetId ~= factoryId then
+            return false, false
+        end
+        if directedFactory.UpgradeBp and factory:CanBuild(directedFactory.UpgradeBp) then
+            return true, directedFactory.UpgradeBp
+        end
+        return false, false
+    end
 
     if readyLand < 3 or totalLand < 4 then
         return false, false

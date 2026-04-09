@@ -141,6 +141,13 @@ local DeclaredStateInitializers = {
             LastLogTime = -999,
         }
     end,
+    UpgradeDirector = function()
+        return {
+            Extractor = {},
+            Factory = {},
+            LastLogTime = -999,
+        }
+    end,
     Recovery = function()
         return {}
     end,
@@ -292,6 +299,7 @@ function Update(aiBrain, now)
     EnsureStateSlice(runtime, 'StrategicPlanner')
     EnsureStateSlice(runtime, 'ForceDirector')
     EnsureStateSlice(runtime, 'ProductionDirector')
+    EnsureStateSlice(runtime, 'UpgradeDirector')
     EnsureStateSlice(runtime, 'Recovery')
     EnsureStateSlice(runtime, 'ACUState')
     EnsureStateSlice(runtime, 'EngineerState')

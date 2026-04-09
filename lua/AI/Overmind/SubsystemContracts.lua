@@ -22,6 +22,7 @@ local OvermindFactoryHeartbeat = import('/mods/OvermindAI/lua/AI/Overmind/Factor
 local OvermindFactoryResume = import('/mods/OvermindAI/lua/AI/Overmind/FactoryResume.lua')
 local OvermindRaidDefense = import('/mods/OvermindAI/lua/AI/Overmind/RaidDefense.lua')
 local OvermindProductionDirector = import('/mods/OvermindAI/lua/AI/Overmind/ProductionDirector.lua')
+local OvermindUpgradeDirector = import('/mods/OvermindAI/lua/AI/Overmind/UpgradeDirector.lua')
 local OvermindFactoryController = import('/mods/OvermindAI/lua/AI/Overmind/FactoryController.lua')
 local OvermindRadarFallback = import('/mods/OvermindAI/lua/AI/Overmind/RadarFallback.lua')
 local OvermindBomberHarass = import('/mods/OvermindAI/lua/AI/Overmind/BomberHarass.lua')
@@ -118,6 +119,7 @@ local ActionGroups = {
         BuildAction({ Name = 'FactoryHeartbeat', Label = 'factory-heartbeat', Group = 'macro-control', ModuleRef = OvermindFactoryHeartbeat, Outputs = { 'FactoryState' } }),
         BuildAction({ Name = 'FactoryResume', Label = 'factory-resume', Group = 'macro-control', StateSlice = 'FactoryResume', ModuleRef = OvermindFactoryResume, Inputs = { 'Recovery', 'ZoneModel', 'EngineerState' }, Outputs = { 'FactoryResume' } }),
         BuildAction({ Name = 'RaidDefense', Label = 'raid-defense', Group = 'macro-control', StateSlice = 'RaidDefense', ModuleRef = OvermindRaidDefense, Inputs = { 'IntelModel', 'ZoneModel' }, Outputs = { 'RaidDefense' } }),
+        BuildAction({ Name = 'UpgradeDirector', Label = 'upgrade-director', Group = 'macro-control', StateSlice = 'UpgradeDirector', ModuleRef = OvermindUpgradeDirector, Inputs = { 'ProductionDirector', 'StrategicPlanner', 'ZoneGraph', 'ZoneModel', 'IntelModel', 'Recovery', 'EngineerState' }, Outputs = { 'UpgradeDirector' } }),
         BuildAction({ Name = 'EngineerDirector', Label = 'engineer-director', Group = 'macro-control', StateSlice = 'EngineerState', ModuleRef = OvermindEngineerDirector, Inputs = { 'ZoneGraph', 'IntelModel', 'Recovery' }, Outputs = { 'EngineerState' } }),
         BuildAction({ Name = 'ScoutDirector', Label = 'scout-director', Group = 'macro-control', StateSlice = 'ReconState', ModuleRef = OvermindScoutManager, Inputs = { 'ZoneGraph', 'IntelModel', 'Recovery' }, Outputs = { 'ReconState' } }),
         BuildAction({ Name = 'ACURole', Label = 'acu-role', Group = 'macro-control', StateSlice = 'ACUState', ModuleRef = OvermindACURole, Inputs = { 'IntelModel', 'ForceDirector', 'ZoneGraph' }, Outputs = { 'ACUState', 'ACURole' } }),
@@ -126,7 +128,7 @@ local ActionGroups = {
         BuildAction({ Name = 'MexDefense', Label = 'mex-defense', Group = 'macro-control', StateSlice = 'MexDefense', ModuleRef = OvermindMexDefense, Inputs = { 'ProductionDirector', 'RaidDefense', 'EcoState' }, Outputs = { 'MexDefense' } }),
     },
     ['factory-control'] = {
-        BuildAction({ Name = 'FactoryController', Label = 'factory-controller', Group = 'factory-control', StateSlice = 'FactoryController', ModuleRef = OvermindFactoryController, Inputs = { 'ProductionDirector', 'ForceDirector', 'EcoPolicy', 'Recovery' }, Outputs = { 'FactoryController', 'Recovery' } }),
+        BuildAction({ Name = 'FactoryController', Label = 'factory-controller', Group = 'factory-control', StateSlice = 'FactoryController', ModuleRef = OvermindFactoryController, Inputs = { 'ProductionDirector', 'UpgradeDirector', 'ForceDirector', 'EcoPolicy', 'Recovery' }, Outputs = { 'FactoryController', 'Recovery' } }),
     },
     telemetry = {
         BuildAction({ Name = 'TelemetryCapture', Label = 'telemetry-capture', Group = 'telemetry', Method = 'Capture', StateSlice = 'Telemetry', ModuleRef = OvermindTelemetry, Inputs = { 'EcoState', 'ProductionDirector', 'ForceDirector', 'StrategicPlanner', 'IntelModel', 'EnemyClusterTracker', 'ZoneGraph', 'RaidDefense' }, Outputs = { 'Telemetry', 'LastTelemetry' } }),
