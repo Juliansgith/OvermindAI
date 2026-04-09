@@ -1511,6 +1511,26 @@ local function TryAssignAssistOrRepair(aiBrain, runtime, eng, target, isUpgrade,
     return false
 end
 
+local function DescribeStructureTaskTarget(target)
+    if not target or target.Dead then
+        return 'none'
+    end
+    if target:IsUnitState('Upgrading') then
+        return 'upgrade'
+    end
+    if target:IsUnitState('BeingBuilt') then
+        return 'build'
+    end
+    if target.GetHealth and target.GetMaxHealth then
+        local maxHealth = math.max(1, target:GetMaxHealth() or 1)
+        local health = target:GetHealth() or maxHealth
+        if health < (maxHealth * 0.995) then
+            return 'repair'
+        end
+    end
+    return 'resume'
+end
+
 function Update(aiBrain, now)
     local runtime = aiBrain.OvermindRuntime
     if not runtime then
@@ -1705,9 +1725,9 @@ function Update(aiBrain, now)
             elseif structureKind == 'Radar' then
                 stickyDuration = 14
             elseif structureKind == 'AA' or structureKind == 'Defense' then
-                stickyDuration = 18
+                stickyDuration = 24
             elseif string.lower(structureKind or 'none') == 'structure' then
-                stickyDuration = 16
+                stickyDuration = 20
             end
             if structureFraction >= 0.45 then
                 stickyDuration = stickyDuration + 6
@@ -1898,7 +1918,16 @@ function Update(aiBrain, now)
         or structureTask.Active
     if shouldLog and (now - (runtime.LastEngineerDirectorLogTime or -999)) >= 20 then
         runtime.LastEngineerDirectorLogTime = now
-        LOG(string.format('*OVERMIND ENGDIR A%d t=%.1f recover=%d threat=%d facRec=%d expand=%d baseNeed=%d facTask=%d:%s frac=%.2f stall=%.1f asn=%d/%d structTask=%d:%s frac=%.2f stall=%.1f asn=%d/%d',
+        local structureTaskMode = structureTask.Active and DescribeStructureTaskTarget(structureTargetObject) or 'none'
+        local structureNearby = 0
+        local sx = 0
+        local sz = 0
+        if structureTask.Active and structureTask.TargetPos then
+            sx = structureTask.TargetPos[1] or 0
+            sz = structureTask.TargetPos[3] or 0
+            structureNearby = aiBrain:GetNumUnitsAroundPoint(categories.ENGINEER * categories.MOBILE, structureTask.TargetPos, 18, 'Ally') or 0
+        end
+        LOG(string.format('*OVERMIND ENGDIR A%d t=%.1f recover=%d threat=%d facRec=%d expand=%d baseNeed=%d facTask=%d:%s frac=%.2f stall=%.1f asn=%d/%d structTask=%d:%s:%s frac=%.2f stall=%.1f asn=%d/%d near=%d pos=%.1f,%.1f',
             aiBrain:GetArmyIndex(),
             now,
             recoverCount,
@@ -1914,9 +1943,13 @@ function Update(aiBrain, now)
             factoryTask.RequiredBuilders or 0,
             structureTask.Active and 1 or 0,
             structureTask.Kind or 'none',
+            structureTaskMode,
             structureTask.TargetFraction or 1,
             structureTask.StallTime or 0,
             structureTask.AssignedBuilders or 0,
-            structureTask.RequiredBuilders or 0))
+            structureTask.RequiredBuilders or 0,
+            structureNearby,
+            sx,
+            sz))
     end
 end

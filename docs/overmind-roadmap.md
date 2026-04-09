@@ -802,6 +802,30 @@ Success criteria:
 - ACU contributes to nearby core bootstrap work instead of standing still
 - no regression into early leash-spam while doing opener work
 
+### v108: ACU Pressure Cleanup And Structure Telemetry
+
+Status:
+
+- implemented in `v108`
+
+Goals:
+
+- stop repeated ACU recall spam while the commander is already retreating successfully
+- make structure-task oddities directly visible in replay logs
+- keep AA/PD/Defense tasks owned longer once started
+
+Changes:
+
+- suppress repeat `raid_cover_recall`, `stuck_recall`, and `panic_leash_recall` when the ACU is already moving home under healthy escort
+- increase sticky duration for AA/Defense/Structure tasks
+- expand `ENGDIR` logging with structure task mode, nearby engineer count, and task position
+
+Success criteria:
+
+- fewer duplicate recall lines while the ACU is already retreating
+- `ENGDIR` clearly shows build vs repair vs upgrade vs resume for structure tasks
+- easier diagnosis of engineer clumps around unexpected tasks in live tests
+
 ### v102: Mainline Commitment
 
 Goals:

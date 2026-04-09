@@ -393,6 +393,12 @@ function EnforceCommanderSafety(aiBrain, now)
         local distanceAfterRecall = runtime.LastAcuRecallDistance or 9999
         local closingToBase = distance <= (distanceAfterRecall - 1.2)
         local settlingNearBase = closingToBase and distance <= math.max(14, maxDistance + 2)
+        local retreatingSuccessfully = closingToBase
+            and q
+            and table.getn(q) > 0
+            and escortCount >= 8
+            and healthRatio >= 0.82
+            and localThreat <= ((runtime.LastAcuRecallLocalThreat or localThreat) + 4.0)
         local recallAction = 'threat_recall'
         if catastrophicOverextend then
             recallAction = 'panic_leash_recall'
@@ -444,6 +450,10 @@ function EnforceCommanderSafety(aiBrain, now)
         if heavilyEscortedForward and not lowHealth and not enemyContactUnsafe and not noMansLand then
             recallEscalated = catastrophicOverextend or stuckFar
         end
+        if retreatingSuccessfully and not recallEscalated then
+            runtime.LastAcuDistanceFromBase = distance
+            return
+        end
         if insideDefendedSpace and not recallEscalated then
             runtime.LastAcuDistanceFromBase = distance
             return
@@ -461,6 +471,12 @@ function EnforceCommanderSafety(aiBrain, now)
             return
         end
         if moderateEscortedLeash and not recallEscalated and sinceRecall < 24 then
+            runtime.LastAcuDistanceFromBase = distance
+            return
+        end
+        if (recallAction == 'raid_cover_recall' or recallAction == 'stuck_recall' or recallAction == 'panic_leash_recall')
+            and retreatingSuccessfully
+            and sinceRecall < 18 then
             runtime.LastAcuDistanceFromBase = distance
             return
         end
