@@ -403,7 +403,7 @@ local function PickFactoryTarget(aiBrain, runtime, state)
     end
 end
 
-function Module.Update(aiBrain, now)
+local function Update(aiBrain, now)
     local runtime = aiBrain.OvermindRuntime or {}
     aiBrain.OvermindRuntime = runtime
 
@@ -434,5 +434,7 @@ function Module.Update(aiBrain, now)
             tostring(state.Factory.Reason or 'none')))
     end
 end
+
+Module.Update = Update
 
 return Module
