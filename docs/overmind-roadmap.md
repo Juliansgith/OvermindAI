@@ -952,6 +952,21 @@ Success criteria:
 - no repeated `ProductionDirector` runtime error about missing `eco`
 - `FACTCTRL` targets reflect real production policy again instead of broken fallback values
 
+### v121: Engineer Power Helper Scope Fix
+
+Goals:
+
+- restore clean execution of the new power recovery path in `EngineerDirector`
+
+Changes:
+
+- fixed `HasEnemyCombatNear` helper scoping so `FindPowerBuildPos` can call it safely
+
+Success criteria:
+
+- no `EngineerDirector` runtime error about missing `HasEnemyCombatNear`
+- `powerRec` can finally activate in clean replays when spare engineers should shift into pgen recovery
+
 ### Extractor Validation Constraint
 
 Before further tech-policy work:

@@ -12,6 +12,7 @@ local AADefenseCategory = categories.STRUCTURE * categories.DEFENSE * categories
 local DefenseCategory = categories.STRUCTURE * categories.DEFENSE
 local BuilderCategory = categories.ENGINEER * categories.MOBILE + categories.COMMAND
 local ComputeAirThreatFlags
+local HasEnemyCombatNear
 
 local function Distance2D(a, b)
     local dx = (a[1] or 0) - (b[1] or 0)
@@ -1160,7 +1161,7 @@ local function ScoreFactoryBuilder(unit, dist, busy, alreadyAssigned, isCommande
     return score
 end
 
-local function HasEnemyCombatNear(aiBrain, pos, radius)
+HasEnemyCombatNear = function(aiBrain, pos, radius)
     if not aiBrain or not pos then
         return false
     end
