@@ -35,13 +35,13 @@ local function ResolveUpgradeDirectorUpdate()
         moduleRef = import('/mods/OvermindAI/lua/AI/Overmind/UpgradeDirector.lua')
     end
     if type(moduleRef) == 'table' then
-        local direct = rawget(moduleRef, 'Update')
+        local direct = rawget(moduleRef, 'Update') or moduleRef.Update
         if type(direct) == 'function' then
             return direct
         end
-        local nested = rawget(moduleRef, 'Module')
+        local nested = rawget(moduleRef, 'Module') or moduleRef.Module
         if type(nested) == 'table' then
-            local nestedUpdate = rawget(nested, 'Update')
+            local nestedUpdate = rawget(nested, 'Update') or nested.Update
             if type(nestedUpdate) == 'function' then
                 return nestedUpdate
             end
