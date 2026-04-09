@@ -156,7 +156,7 @@ local function ComputeDynamicMexCap(eco, readyLand, totalLand, powerReady, mexRe
 end
 
 local function ComputeEarlyMexUpgradeBudget(eco, readyLand, totalLand, powerReady, mexReady)
-    if readyLand < 3 or totalLand < 3 or powerReady < 4 or mexReady < 5 then
+    if readyLand < 2 or totalLand < 2 or powerReady < 3 or mexReady < 4 then
         return 0, 0
     end
 
@@ -167,19 +167,21 @@ local function ComputeEarlyMexUpgradeBudget(eco, readyLand, totalLand, powerRead
     local energyStorage = eco.EnergyStorageRatio or 0
 
     local effectiveBudget = massIncome
-        + math.max(0, massTrend * 6)
-        + math.max(0, (massStorage - 0.12) * 8)
-        + math.max(0, (energyStorage - 0.18) * 2)
+        + math.max(0, massTrend * 8)
+        + math.max(0, (massStorage - 0.08) * 10)
+        + math.max(0, (energyStorage - 0.14) * 3)
+        + math.max(0, readyLand - 2) * 0.6
+        + math.max(0, mexReady - 4) * 0.35
 
-    if energyTrend < -8 or energyStorage < 0.06 or massTrend < -0.22 or massStorage < 0.04 then
+    if energyTrend < -12 or energyStorage < 0.04 or massTrend < -0.34 or massStorage < 0.02 then
         return effectiveBudget, 0
     end
 
     local cap = 0
-    if effectiveBudget >= 8.5 then
+    if effectiveBudget >= 7.5 then
         cap = 1
     end
-    if effectiveBudget >= 13.5 and massTrend >= -0.05 and massStorage >= 0.12 then
+    if effectiveBudget >= 12.0 and massTrend >= -0.12 and massStorage >= 0.08 then
         cap = 2
     end
 
@@ -207,8 +209,13 @@ local function PickMexTarget(aiBrain, runtime, state)
     local scoutingDebt = techPlan.ExtractorUpgradeReason == 'scouting_debt'
     local surplusSpendWindow = constraints.SurplusSpendWindow == true
     local strongSurplusWindow = constraints.StrongSurplusWindow == true
-    local stableFactoryFloor = readyLand >= 4 and totalLand <= readyLand and powerReady >= 4 and mexReady >= 5
     local mexBudget, budgetT2Cap = ComputeEarlyMexUpgradeBudget(eco, readyLand, totalLand, powerReady, mexReady)
+    local activeMexUpgrades = CountActiveMexUpgrades(aiBrain)
+    local stableFactoryFloor = readyLand >= 2
+        and totalLand <= (readyLand + 1)
+        and powerReady >= 3
+        and mexReady >= 4
+        and (eco.EnergyStorageRatio or 0) >= 0.05
 
     state.Managed = true
     state.TargetUnit = false
@@ -220,28 +227,34 @@ local function PickMexTarget(aiBrain, runtime, state)
     state.Cap = 0
     state.Aggressive = false
 
+    local allowBudgetThroughFactoryRecovery = constraints.CriticalFactory
+        and budgetT2Cap >= 1
+        and activeMexUpgrades <= 0
+        and stableFactoryFloor
+        and not constraints.CriticalStructure
+        and not constraints.EcoCrash
+        and not constraints.QueueStarved
     if constraints.CriticalFactory or constraints.CriticalStructure or constraints.EcoCrash or constraints.QueueStarved then
-        if not (constraints.CriticalFactory and stableFactoryFloor and not constraints.CriticalStructure and not constraints.EcoCrash and not constraints.QueueStarved) then
+        if not ((constraints.CriticalFactory and stableFactoryFloor and not constraints.CriticalStructure and not constraints.EcoCrash and not constraints.QueueStarved) or allowBudgetThroughFactoryRecovery) then
             state.Reason = constraints.CriticalFactory and 'critical_factory' or constraints.CriticalStructure and 'critical_structure' or constraints.EcoCrash and 'eco_crash' or 'queue_starved'
-            state.InFlight = CountActiveMexUpgrades(aiBrain)
+            state.InFlight = activeMexUpgrades
             return
         end
     end
 
-    local activeMexUpgrades = CountActiveMexUpgrades(aiBrain)
     state.InFlight = activeMexUpgrades
     local inflightTarget = false
     local inflightTargetTech = false
     local inflightTargetScope = false
 
     local allowLocalT2 = readyLand >= 2
-        and totalLand >= 3
+        and totalLand >= 2
         and powerReady >= 3
         and mexReady >= 4
-        and (eco.MassIncome or 0) >= 2.6
+        and (eco.MassIncome or 0) >= 2.3
         and (eco.EnergyIncome or 0) >= 28
-        and (eco.MassTrend or 0) >= -0.3
-        and (eco.EnergyTrend or 0) >= -10
+        and (eco.MassTrend or 0) >= -0.34
+        and (eco.EnergyTrend or 0) >= -12
         and (eco.EnergyStorageRatio or 0) >= 0.05
         and not constraints.LandPanic
         and not constraints.AirPanic
@@ -312,8 +325,10 @@ local function PickMexTarget(aiBrain, runtime, state)
             if pos and upgradeBp then
                 local score, risk, threat, dist = ScoreSafeUpgradeLocation(aiBrain, pos, mainPos, localRadius)
                 local isLocal = dist <= localRadius
-                if tech == 1 and allowLocalT2 and isLocal and risk <= 3.2 and threat <= 1.8 then
-                    local localScore = score + 90 + (tempoMode and 55 or 20) + (scoutingDebt and 28 or 0) + (surplusSpendWindow and 26 or 0) + (budgetT2Cap >= 1 and 42 or 0) + math.min(20, math.max(0, mexBudget - 8.5) * 2.5)
+                local localRiskCap = (budgetT2Cap >= 1) and 3.8 or 3.2
+                local localThreatCap = (budgetT2Cap >= 1) and 2.2 or 1.8
+                if tech == 1 and allowLocalT2 and isLocal and risk <= localRiskCap and threat <= localThreatCap then
+                    local localScore = score + 90 + (tempoMode and 55 or 20) + (scoutingDebt and 28 or 0) + (surplusSpendWindow and 26 or 0) + (budgetT2Cap >= 1 and 56 or 0) + math.min(30, math.max(0, mexBudget - 7.5) * 3.0)
                     if localScore > bestScore then
                         bestScore = localScore
                         best = mex
@@ -365,11 +380,12 @@ local function PickMexTarget(aiBrain, runtime, state)
         state.Cap = (inflightTargetTech == 'tech3') and 1 or dynamicT2Cap
         state.Aggressive = state.Cap > 1
     else
-        state.Reason = tempoMode and not surplusSpendWindow and 'tempo_mode'
+        state.Reason = budgetT2Cap >= 1 and 'budget_wait'
+            or tempoMode and not surplusSpendWindow and 'tempo_mode'
             or scoutingDebt and not surplusSpendWindow and 'safe_wait'
             or surplusSpendWindow and 'surplus_wait'
             or (techPlan.ExtractorUpgradeReason or 'macro_hold')
-        state.Cap = 0
+        state.Cap = budgetT2Cap
     end
 end
 

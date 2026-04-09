@@ -904,6 +904,10 @@ Success criteria:
 
 ### v126: Economy Control Refactor
 
+Status:
+
+- phase 1 shipped in `v126`
+
 Goals:
 
 - stop treating a stable economy as a reason to pause instead of a reason to keep converting
@@ -978,6 +982,12 @@ Success criteria:
 - once the land T1 floor is stable, the first land HQ starts without getting stuck behind scattered block reasons
 - idle engineers primarily assist owned mex/HQ/power/factory recovery tasks instead of reclaiming
 - replay logs show explicit econ mode, explicit upgrade target class, and chained spend behavior that can be explained from telemetry
+
+Phase 1 implemented in `v126`:
+
+- relaxed early mex budget gates so safe local/core `T1 -> T2` can start from a working `2`-factory floor instead of waiting for a clear midgame
+- softened `critical_factory` as a mex-upgrade blocker when the base already has a stable minimum floor
+- improved `UPGDIR` telemetry so early budget-driven waits show as `budget_wait` instead of looking like generic macro idling
 
 ### v102: Mainline Commitment
 
