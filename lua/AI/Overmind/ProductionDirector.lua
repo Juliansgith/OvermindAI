@@ -425,6 +425,25 @@ local function BuildConstraints(runtime, current, confidence, scoutingDebt, nava
         or criticalFactory
         or (criticalStructure and ((structureTask.Kind == 'Power') or (structureTask.Kind == 'Radar') or (structureTask.Kind == 'Mex')))
     )
+    if starterPhase
+        and current.Factories.Land.Total >= 2
+        and current.Factories.Land.Ready >= 1
+        and mexReady >= math.max(4, starterMexFloor - 1)
+        and powerReady >= starterPowerFloor
+        and not criticalFactory
+        and not (criticalStructure and ((structureTask.Kind == 'Power') or (structureTask.Kind == 'Radar') or (structureTask.Kind == 'Mex'))) then
+        starterPhase = false
+    end
+    if starterPhase
+        and factoryTask.Active
+        and factoryTask.Domain == 'Land'
+        and (factoryTask.Fraction or 0) >= 0.12
+        and current.Factories.Land.Ready >= 1
+        and mexReady >= math.max(4, starterMexFloor - 1)
+        and powerReady >= starterPowerFloor
+        and not criticalFactory then
+        starterPhase = false
+    end
 
     local realApproach = ((approachConfirmedUnits > 0) and approachDistance < 230 and approachConfidence >= 0.28)
         or ((approachMemoryThreat >= 2.4) and approachMemoryHits >= 3 and approachDistance < 150 and approachConfidence >= 0.30)
@@ -1371,6 +1390,12 @@ local function DecideCapacityPlan(runtime, current, constraints, rolePlan)
         airTarget = 0
         seaTarget = 0
     end
+    if current.Factories.Land.Total >= 2 and not constraints.EcoCrash then
+        landTarget = math.max(landTarget, 2)
+    end
+    if unfinishedLandFactory and (factoryTask.Fraction or 0) >= 0.12 and current.Factories.Land.Ready >= 1 and not constraints.EcoCrash then
+        landTarget = math.max(landTarget, 2)
+    end
     if secondLandLatched and not constraints.StarterPhase and not constraints.EconBootstrap then
         landTarget = math.max(landTarget, 2)
     end
@@ -1441,7 +1466,7 @@ local function DecideCapacityPlan(runtime, current, constraints, rolePlan)
 
     local starterGrowthLock = constraints.StarterPhase
         and (
-            current.Factories.Total <= 1
+            (current.Factories.Total <= 1 and current.Factories.Land.Total <= 1 and not (unfinishedLandFactory and (factoryTask.Fraction or 0) >= 0.12))
             or constraints.RadarCritical
             or constraints.CriticalFactory
             or (constraints.CriticalStructure and (
@@ -1475,6 +1500,16 @@ local function DecideCapacityPlan(runtime, current, constraints, rolePlan)
     if secondLandEcoReady
         and current.Factories.Land.Total <= 1
         and totalUnfinished <= 0
+        and not constraints.EcoCrash
+        and not constraints.QueueStarved
+        and not constraints.CriticalFactory
+        and not structurePausesGrowth then
+        landTarget = math.max(landTarget, 2)
+        pauseGrowth = false
+    end
+    if current.Factories.Land.Total >= 2
+        and current.Factories.Land.Ready >= 1
+        and totalUnfinished <= 1
         and not constraints.EcoCrash
         and not constraints.QueueStarved
         and not constraints.CriticalFactory

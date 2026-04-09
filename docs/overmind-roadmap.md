@@ -536,8 +536,9 @@ Recommended rollout:
 
 1. `v97`: stabilize factory growth and factory completion
 2. `v98`: unblock local `T1 -> T2` mex consolidation and fix reclaim crash
-3. `v99`: reduce ACU safety churn with stronger hysteresis
-4. `v100`: tighten force commitment and mainline allocation under pressure
+3. `v99`: keep second-land tempo alive and loosen local `T1 -> T2` further
+4. `v100`: reduce ACU safety churn with stronger hysteresis
+5. `v101`: tighten force commitment and mainline allocation under pressure
 
 ### v97: Factory Ramp And Completion
 
@@ -594,7 +595,31 @@ Success criteria:
 - local/core `T1 -> T2` mex upgrades occur even when `ExtractorUpgradeReason=scouting_debt`
 - no premature `T2 -> T3` upgrades under pressure or weak economy
 
-### v99: ACU Safety Hysteresis
+### v99: Factory Tempo And Local Tech2 Floor
+
+Status:
+
+- implemented in `v99-factory-tempo-local-tech2`
+
+Goals:
+
+- stop regressing back to one effective land factory after the second shell starts
+- make `T1 -> T2` local mex upgrades viable with one ready land factory when expansion is stalled
+
+Changes:
+
+- reduce `starterPhase` stickiness once a second land shell exists and early eco floors are met
+- keep land target at least `2` while a second land shell exists or is being built
+- raise builder commitment to unfinished land factories at low and mid fractions
+- allow local/core `T1 -> T2` consolidation with one ready land factory instead of waiting for two
+
+Success criteria:
+
+- by `5-8` minutes, the AI does not keep falling back to `1/0/0` after starting the second land factory
+- unfinished second land factories keep assigned builders and finish faster
+- local/core `T1 -> T2` mex upgrades can occur before the AI reaches a large multi-factory state
+
+### v100: ACU Safety Hysteresis
 
 Goals:
 
@@ -612,7 +637,7 @@ Success criteria:
 - substantially fewer `panic_leash_recall`, `opening_recall`, `raid_cover_recall`, and `enemy_contact_recall` loops in the `4-10` minute window
 - ACU remains responsive to real danger, but stops wasting time on repeated soft retreats
 
-### v100: Mainline Commitment
+### v101: Mainline Commitment
 
 Goals:
 

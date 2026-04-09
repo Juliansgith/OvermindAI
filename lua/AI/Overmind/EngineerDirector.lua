@@ -870,7 +870,13 @@ local function ComputeFactoryTaskRequirements(domain, fraction, stallTime, ready
     if domain == 'Land' and readyFactories <= 0 then
         required = required + 1
     end
+    if domain == 'Land' and readyFactories <= 1 and fraction >= 0.12 then
+        required = required + 1
+    end
     if fraction >= 0.4 then
+        required = required + 1
+    end
+    if domain == 'Land' and readyFactories <= 1 and fraction >= 0.3 then
         required = required + 1
     end
     if domain == 'Land' and fraction >= 0.65 then
@@ -907,6 +913,9 @@ local function ShouldKeepTrackedFactoryTask(now, task, trackedTargetId, trackedD
     if assigned > 0 and trackedFraction >= 0.3 then
         keep = true
     end
+    if trackedDomain == 'Land' and trackedReadyFactories <= 1 and trackedFraction >= 0.12 then
+        keep = true
+    end
     if trackedDomain == 'Land' and trackedFraction >= 0.35 then
         keep = true
     end
@@ -922,6 +931,9 @@ local function ShouldKeepTrackedFactoryTask(now, task, trackedTargetId, trackedD
     local preemptMargin = 36
     if trackedDomain == 'Land' and trackedFraction >= 0.35 then
         preemptMargin = preemptMargin + 28
+    end
+    if trackedDomain == 'Land' and trackedReadyFactories <= 1 and trackedFraction >= 0.12 then
+        preemptMargin = preemptMargin + 46
     end
     if trackedFraction >= 0.7 then
         preemptMargin = preemptMargin + 42
@@ -1171,7 +1183,16 @@ local function AssignBuildersToUnfinishedFactory(aiBrain, runtime, now, target, 
     if openingFactoryFloor then
         requiredBuilders = math.max(2, math.min(3, requiredBuilders))
     end
+    if domain == 'Land' and readyFactories <= 1 and GetFraction(target) >= 0.12 then
+        requiredBuilders = math.max(requiredBuilders, 2)
+    end
+    if domain == 'Land' and readyFactories <= 1 and GetFraction(target) >= 0.3 then
+        requiredBuilders = math.max(requiredBuilders, 3)
+    end
     local forceInterrupt = stallTime >= 6 or readyFactories <= 0 or recovery.ForceFactoryRecovery or openingFactoryFloor
+    if domain == 'Land' and readyFactories <= 1 and GetFraction(target) >= 0.12 then
+        forceInterrupt = true
+    end
 
     local dispatchRadius = 240
     if stallTime >= 10 then
@@ -1193,6 +1214,9 @@ local function AssignBuildersToUnfinishedFactory(aiBrain, runtime, now, target, 
     end
     if readyFactories <= 0 and domain == 'Land' then
         interruptQCap = math.max(interruptQCap, 8)
+    end
+    if readyFactories <= 1 and domain == 'Land' and GetFraction(target) >= 0.12 then
+        interruptQCap = math.max(interruptQCap, 5)
     end
 
     local candidates = {}

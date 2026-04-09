@@ -376,7 +376,7 @@ local function CanConsolidateLocalTech2Extractors(aiBrain, radius)
     local mapControl = GetZoneMapControl(aiBrain)
     local localT2 = CountLocalUpgradedExtractors(aiBrain, 'tech2', localRadius + 20)
     local unfinishedLocalT2 = CountLocalUnfinishedUpgradedExtractors(aiBrain, 'tech2', localRadius + 40)
-    local earlyFactoryFloorMet = ((factories.Land or {}).Ready or 0) >= 2
+    local earlyFactoryFloorMet = ((factories.Land or {}).Ready or 0) >= 1
         and (((eco.Power or {}).Ready) or 0) >= 4
         and (structures.Radar or 0) > 0
     local safeEconomy = (liveEcon.MassIncome or 0) >= 2.8
@@ -400,7 +400,7 @@ local function CanConsolidateLocalTech2Extractors(aiBrain, radius)
     if unfinishedLocalT2 >= 1 then
         return true
     end
-    if localT2 >= 1 and not expansionStalled then
+    if localT2 >= 2 and not expansionStalled then
         return false
     end
 
