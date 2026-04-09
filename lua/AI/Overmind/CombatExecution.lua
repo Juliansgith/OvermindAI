@@ -423,11 +423,24 @@ local function ManageIndirectStandoff(aiBrain, ownPos, targetPos, directUnits, a
     return issued
 end
 
+local HasUnsupportedAAPosture
+
 local function IssueCohesiveLandOrders(aiBrain, ownPos, targetPos, allUnits, defensive)
     if not allUnits or table.getn(allUnits) <= 0 or not targetPos then
         return false
     end
     local direct, aa, indirect, other = PartitionLandUnits(allUnits)
+    local comp = {
+        Direct = table.getn(direct),
+        AA = table.getn(aa),
+        Indirect = table.getn(indirect),
+        Heavy = 0,
+    }
+    for _, unit in direct do
+        if unit and not unit.Dead and EntityCategoryContains(LandHeavyCategory, unit) then
+            comp.Heavy = comp.Heavy + 1
+        end
+    end
     local frontT = defensive and 0.36 or 0.58
     local rearT = defensive and 0.22 or 0.42
     local flankT = defensive and 0.3 or 0.5
@@ -435,6 +448,7 @@ local function IssueCohesiveLandOrders(aiBrain, ownPos, targetPos, allUnits, def
     local rear = LerpPos(ownPos, targetPos, rearT)
     local flank = LerpPos(ownPos, targetPos, flankT)
     local directAttackPos = (not defensive and Distance2D(front, targetPos) <= 28) and targetPos or front
+    local unsupportedAA = HasUnsupportedAAPosture and HasUnsupportedAAPosture(comp, defensive)
 
     if table.getn(direct) > 0 then
         if IssueMove then
@@ -446,7 +460,7 @@ local function IssueCohesiveLandOrders(aiBrain, ownPos, targetPos, allUnits, def
     end
 
     if table.getn(aa) > 0 then
-        if table.getn(direct) > 0 then
+        if table.getn(direct) > 0 and not unsupportedAA then
             if IssueMove then
                 IssueMove(aa, flank)
             end
@@ -455,7 +469,7 @@ local function IssueCohesiveLandOrders(aiBrain, ownPos, targetPos, allUnits, def
             end
         else
             if IssueMove then
-                IssueMove(aa, front)
+                IssueMove(aa, rear)
             end
         end
     end
@@ -525,6 +539,27 @@ local function HasHeavyEscortGap(comp)
     return support < math.max(2, heavy + 1) or (heavy >= 2 and aa < 1)
 end
 
+HasUnsupportedAAPosture = function(comp, defensive)
+    local aa = comp.AA or 0
+    if aa <= 0 then
+        return false
+    end
+
+    local direct = comp.Direct or comp.Tank or 0
+    local indirect = comp.Indirect or 0
+    local heavy = comp.Heavy or 0
+    if defensive then
+        return direct <= 0 and indirect <= 0 and heavy <= 0
+    end
+    if direct <= 0 and indirect <= 0 and heavy <= 0 then
+        return true
+    end
+    if direct <= 1 and aa >= math.max(3, indirect + heavy + 2) then
+        return true
+    end
+    return aa >= math.max(4, direct + heavy + 2)
+end
+
 local function EvaluateLandCohortPosture(aiBrain, ownPos, targetPos, units, comp, defensive)
     if not units or table.getn(units) <= 0 or not targetPos then
         return 'hold', ownPos
@@ -534,7 +569,7 @@ local function EvaluateLandCohortPosture(aiBrain, ownPos, targetPos, units, comp
     local stagePos = LerpPos(ownPos, targetPos, defensive and 0.28 or 0.4)
     local frontPos = LerpPos(ownPos, targetPos, defensive and 0.34 or 0.56)
 
-    if HasIndirectEscortGap(comp) or HasHeavyEscortGap(comp) then
+    if HasIndirectEscortGap(comp) or HasHeavyEscortGap(comp) or HasUnsupportedAAPosture(comp, defensive) then
         return 'regroup', stagePos
     end
 
@@ -761,7 +796,9 @@ function RunPressureCycle(aiBrain, now)
     local cohortPosture, cohortAnchor = EvaluateLandCohortPosture(aiBrain, ownPos, selectedTarget, pressureUnits, comp, false)
     if cohortPosture == 'regroup' and IssueMove then
         IssueMove(pressureUnits, cohortAnchor or stagingPos)
-        runtime.LastPressureOrder = HasIndirectEscortGap(comp) and 'RegroupEscort' or (HasHeavyEscortGap(comp) and 'RegroupHeavy' or 'Regroup')
+        runtime.LastPressureOrder = HasIndirectEscortGap(comp) and 'RegroupEscort'
+            or (HasHeavyEscortGap(comp) and 'RegroupHeavy'
+            or (HasUnsupportedAAPosture(comp, false) and 'RegroupAA' or 'Regroup'))
         SetTaskExecution(frontTask, now, 'regrouping', 'move', selectedTarget, cohortAnchor or stagingPos, pressureCount)
         SetTaskExecution(artilleryTask, now, 'screening', 'move', selectedTarget, cohortAnchor or stagingPos, table.getn(artilleryReady))
         return

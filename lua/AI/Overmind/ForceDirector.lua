@@ -598,11 +598,17 @@ function Module.Update(aiBrain, now)
             { MaxRetainDistance = 185, MaxFillDistance = 230 })
     end
 
-    local mainline = MergeLists(
-        CollectUnassigned(direct, used),
-        CollectUnassigned(aa, used),
-        {}
-    )
+    local mainlineDirect = CollectUnassigned(direct, used)
+    local mainlineAA = CollectUnassigned(aa, used)
+    local mainline = MergeLists(mainlineDirect, {}, {})
+    local offensiveAACap = 0
+    if table.getn(mainlineDirect) > 0 then
+        offensiveAACap = Clamp(table.getn(mainlineDirect) + 1, 1, 6)
+    end
+    while table.getn(mainlineAA) > offensiveAACap do
+        table.insert(baseGuardAA, table.remove(mainlineAA, table.getn(mainlineAA)))
+    end
+    mainline = MergeLists(mainline, mainlineAA, {})
     local reserveScouts = CollectUnassigned(scouts, used)
     for _, scout in reserveScouts do
         table.insert(mainline, scout)
