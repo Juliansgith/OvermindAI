@@ -349,6 +349,28 @@ local function GetGraphAdvanceTarget(runtime, routeName, fallbackPos)
     return fallbackPos
 end
 
+local function ShouldDoEarlyAnchorWork(now, factories, combat, healthRatio, distance, localThreat, homeThreat, underHarass)
+    if now > 420 then
+        return false
+    end
+    if underHarass then
+        return false
+    end
+    if healthRatio < 0.82 then
+        return false
+    end
+    if factories >= 4 and combat >= 20 then
+        return false
+    end
+    if distance > 18 then
+        return false
+    end
+    if localThreat > (homeThreat + 1.6) then
+        return false
+    end
+    return true
+end
+
 function Update(aiBrain, now)
     local runtime = aiBrain.OvermindRuntime
     if not runtime then
@@ -471,7 +493,15 @@ function Update(aiBrain, now)
         return
     end
 
+    local canDoEarlyAnchorWork = ShouldDoEarlyAnchorWork(now, factories, combat, healthRatio, distance, localThreat, homeThreat, underHarass)
+        and not strictLeash
+        and not HasNearbyEnemyArmy(aiBrain, acuPos, 34)
+        and GetQueueLen(acu) <= 0
+
     if roleState.Current == 'retreat' or roleState.Current == 'anchor' then
+        if canDoEarlyAnchorWork and TryExecuteStarterTask(aiBrain, runtime, acu, homePos, director, constraints, now) then
+            return
+        end
         local anchorMaxDistance = math.min(runtime.ACURoleMaxDistance or 18, 16)
         if distance > (anchorMaxDistance + 1.5) then
             local q = acu.GetCommandQueue and acu:GetCommandQueue() or false

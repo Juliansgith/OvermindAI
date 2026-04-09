@@ -778,6 +778,30 @@ Success criteria:
 - escorted ACU can hold a forward defended perimeter without constant retreat loops
 - commander still hard-recalls on true low-health or catastrophic overextend cases
 
+### v107: ACU Early Anchor Work
+
+Status:
+
+- implemented in `v107`
+
+Goals:
+
+- keep the safer `v106` leash behavior
+- stop the ACU from idling in early anchor mode when the base is safe
+- let the commander keep contributing to core bootstrap work in the first `2-4` minutes
+
+Changes:
+
+- extend starter-task execution beyond the strict starter lock into early safe anchor windows
+- allow the ACU to repair or build core power, radar, and nearby mex during early anchor posture
+- only do this when healthy, near home, not under harass, and before the army has fully transitioned
+
+Success criteria:
+
+- fewer idle-anchor periods in the first `2-4` minutes
+- ACU contributes to nearby core bootstrap work instead of standing still
+- no regression into early leash-spam while doing opener work
+
 ### v102: Mainline Commitment
 
 Goals:
