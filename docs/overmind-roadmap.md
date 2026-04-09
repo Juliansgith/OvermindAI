@@ -724,11 +724,17 @@ Success criteria:
 - engineers repair damaged core assets instead of drifting into low-value work
 - no return to one-factory limp mode after the early transition
 
-### v101: ACU Safety Hysteresis
+### v105: ACU Safety Hysteresis And Tech Conversion
+
+Status:
+
+- implemented in `v105`
 
 Goals:
 
 - stop repeated recall spam when the ACU is already near home and escorted
+- allow one safe local `T1 -> T2` mex in tempo mode when map growth is stalled
+- unlock the first land HQ upgrade earlier once stable factory tempo exists
 
 Changes:
 
@@ -736,11 +742,15 @@ Changes:
 - require stronger worsening threat before repeating the same recall
 - separate `hold position` from `hard recall`
 - reduce sensitivity when the ACU is inside defended space with escorts nearby
+- treat `tempo_mode` as a valid local consolidation window for one safe `T1 -> T2` mex
+- relax first land HQ upgrade thresholds so stable `4-6` factory midgames can start teching
 
 Success criteria:
 
 - substantially fewer `panic_leash_recall`, `opening_recall`, `raid_cover_recall`, and `enemy_contact_recall` loops in the `4-10` minute window
 - ACU remains responsive to real danger, but stops wasting time on repeated soft retreats
+- at least one safe local `T1 -> T2` mex can start during tempo mode
+- one land factory can begin upgrading before the game is already decided
 
 ### v102: Mainline Commitment
 

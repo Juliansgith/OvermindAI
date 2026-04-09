@@ -379,18 +379,20 @@ local function CanConsolidateLocalTech2Extractors(aiBrain, radius)
     local mapControl = GetZoneMapControl(aiBrain)
     local localT2 = CountLocalUpgradedExtractors(aiBrain, 'tech2', localRadius + 20)
     local unfinishedLocalT2 = CountLocalUnfinishedUpgradedExtractors(aiBrain, 'tech2', localRadius + 40)
+    local tempoConsolidation = techPlan.ExtractorUpgradeReason == 'tempo_mode'
     local earlyFactoryFloorMet = ((factories.Land or {}).Ready or 0) >= 1
         and (((eco.Power or {}).Ready) or 0) >= 3
-    local safeEconomy = (liveEcon.MassIncome or 0) >= 2.3
-        and (liveEcon.EnergyIncome or 0) >= 28
-        and (liveEcon.EnergyStorageRatio or 0) >= 0.1
-        and (liveEcon.EnergyTrend or 0) >= -4
-        and (liveEcon.MassTrend or 0) >= -0.2
+    local safeEconomy = (liveEcon.MassIncome or 0) >= (tempoConsolidation and 1.8 or 2.3)
+        and (liveEcon.EnergyIncome or 0) >= (tempoConsolidation and 24 or 28)
+        and (liveEcon.EnergyStorageRatio or 0) >= (tempoConsolidation and 0.06 or 0.1)
+        and (liveEcon.EnergyTrend or 0) >= (tempoConsolidation and -8 or -4)
+        and (liveEcon.MassTrend or 0) >= (tempoConsolidation and -0.32 or -0.2)
     local expansionStalled = remoteSafeTech2 <= 0
         or mapControl < 0.4
+        or tempoConsolidation
         or (techPlan.ExtractorUpgradeReason == 'scouting_debt')
         or (confidence.Global or 0) < 0.58
-    local localZoneSecure = localRisk <= 2.6
+    local localZoneSecure = localRisk <= (tempoConsolidation and 3.1 or 2.6)
         and (raid.LastThreatMexPos == nil or (mainPos and Distance2D(mainPos, raid.LastThreatMexPos) > localRadius + 30))
 
     if not earlyFactoryFloorMet or not safeEconomy then
@@ -400,6 +402,9 @@ local function CanConsolidateLocalTech2Extractors(aiBrain, radius)
         return false
     end
     if unfinishedLocalT2 >= 1 then
+        return true
+    end
+    if tempoConsolidation and localZoneSecure then
         return true
     end
     if localT2 >= 1 and not expansionStalled then

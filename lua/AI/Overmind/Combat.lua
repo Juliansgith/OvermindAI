@@ -213,8 +213,13 @@ function EnforceCommanderSafety(aiBrain, now)
     local underEscorted = escortCount < 5 and distance > (openingMaxDistance + 2)
     local hardAnchor = now < 520 and distance > (openingMaxDistance + 4) and escortCount < 10
     local raid = runtime.RaidDefense or {}
-    local raidRecall = (raid.UnderLandHarass or raid.UnderAirHarass) and distance > 12
-    local enemyContactUnsafe = enemyRaiders >= 1 and escortCount < 7 and distance > 10
+    local raidRecall = (raid.UnderLandHarass or raid.UnderAirHarass)
+        and distance > 14
+        and (escortCount < 8 or enemyRaiders > 1 or localThreat > (homeThreat + 3.5))
+    local enemyContactUnsafe = enemyRaiders >= 1
+        and escortCount < 7
+        and distance > 10
+        and (enemyRaiders >= 2 or localThreat > (homeThreat + 2.0))
     local maxDistance = lateMaxDistance
     if now < 720 then
         maxDistance = midMaxDistance
@@ -363,6 +368,51 @@ function EnforceCommanderSafety(aiBrain, now)
         local distanceAfterRecall = runtime.LastAcuRecallDistance or 9999
         local closingToBase = distance <= (distanceAfterRecall - 1.2)
         local settlingNearBase = closingToBase and distance <= math.max(14, maxDistance + 2)
+        local recallAction = 'threat_recall'
+        if catastrophicOverextend then
+            recallAction = 'panic_leash_recall'
+        elseif stuckFar then
+            recallAction = 'stuck_recall'
+        elseif noMansLand then
+            recallAction = 'nml_recall'
+        elseif enemyContactUnsafe then
+            recallAction = 'enemy_contact_recall'
+        elseif raidRecall then
+            recallAction = 'raid_cover_recall'
+        elseif earlyHardLeash then
+            recallAction = 'early_leash_recall'
+        elseif idleFar then
+            recallAction = 'idle_far_recall'
+        elseif openingLock or hardAnchor then
+            recallAction = 'opening_recall'
+        elseif lowHealth then
+            recallAction = 'low_health_recall'
+        end
+        local recallReasonTimes = runtime.AcuRecallReasonTimes or {}
+        runtime.AcuRecallReasonTimes = recallReasonTimes
+        local lastReasonTime = recallReasonTimes[recallAction] or -100
+        local sinceReason = now - lastReasonTime
+        local reasonCooldown = 10.0
+        if recallAction == 'panic_leash_recall' then
+            reasonCooldown = 2.0
+        elseif recallAction == 'low_health_recall' then
+            reasonCooldown = 4.0
+        elseif recallAction == 'enemy_contact_recall' then
+            reasonCooldown = 7.0
+        elseif recallAction == 'raid_cover_recall' then
+            reasonCooldown = 10.0
+        elseif recallAction == 'threat_recall' then
+            reasonCooldown = 12.0
+        elseif recallAction == 'opening_recall' or recallAction == 'idle_far_recall' then
+            reasonCooldown = 16.0
+        elseif recallAction == 'early_leash_recall' then
+            reasonCooldown = 14.0
+        elseif recallAction == 'stuck_recall' then
+            reasonCooldown = 9.0
+        end
+        local worseningThreat = localThreat >= ((runtime.LastAcuRecallLocalThreat or localThreat) + 2.5)
+            or homeThreat >= ((runtime.LastAcuRecallHomeThreat or homeThreat) + 1.5)
+            or enemyRaiders >= ((runtime.LastAcuRecallEnemyRaiders or enemyRaiders) + 1)
         local recallEscalated = catastrophicOverextend
             or (severeDanger and (lowHealth or enemyContactUnsafe or localThreat > (homeThreat + 2.8)))
             or stuckFar
@@ -383,6 +433,10 @@ function EnforceCommanderSafety(aiBrain, now)
             return
         end
         if not recallEscalated and sinceRecall < math.max(recallCooldown, 7.0) then
+            runtime.LastAcuDistanceFromBase = distance
+            return
+        end
+        if not recallEscalated and sinceReason < reasonCooldown and not worseningThreat then
             runtime.LastAcuDistanceFromBase = distance
             return
         end
@@ -430,27 +484,11 @@ function EnforceCommanderSafety(aiBrain, now)
             end
             runtime.LastAcuRecallTime = now
             runtime.LastAcuRecallDistance = distance
-            if catastrophicOverextend then
-                runtime.LastAcuSafetyAction = 'panic_leash_recall'
-            elseif stuckFar then
-                runtime.LastAcuSafetyAction = 'stuck_recall'
-            elseif noMansLand then
-                runtime.LastAcuSafetyAction = 'nml_recall'
-            elseif enemyContactUnsafe then
-                runtime.LastAcuSafetyAction = 'enemy_contact_recall'
-            elseif raidRecall then
-                runtime.LastAcuSafetyAction = 'raid_cover_recall'
-            elseif earlyHardLeash then
-                runtime.LastAcuSafetyAction = 'early_leash_recall'
-            elseif idleFar then
-                runtime.LastAcuSafetyAction = 'idle_far_recall'
-            elseif openingLock or hardAnchor then
-                runtime.LastAcuSafetyAction = 'opening_recall'
-            elseif lowHealth then
-                runtime.LastAcuSafetyAction = 'low_health_recall'
-            else
-                runtime.LastAcuSafetyAction = 'threat_recall'
-            end
+            runtime.LastAcuRecallLocalThreat = localThreat
+            runtime.LastAcuRecallHomeThreat = homeThreat
+            runtime.LastAcuRecallEnemyRaiders = enemyRaiders
+            recallReasonTimes[recallAction] = now
+            runtime.LastAcuSafetyAction = recallAction
             LOG(string.format('*OVERMIND ACU SAFETY A%d action=%s dist=%.1f esc=%d lth=%.1f hth=%.1f hp=%.2f',
                 aiBrain:GetArmyIndex(),
                 runtime.LastAcuSafetyAction or 'unknown',

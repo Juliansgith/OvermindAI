@@ -443,7 +443,7 @@ local function ShouldUpgradeFactory(aiBrain, factory, runtime, eco, qLen)
         and factoryTask.Domain == 'Land'
         and ((factoryTask.AssignedBuilders or 0) < math.max(1, factoryTask.RequiredBuilders or 0))
 
-    if readyLand < 4 or totalLand < 4 then
+    if readyLand < 3 or totalLand < 4 then
         return false, false
     end
     if CountActiveFactoryUpgrades(aiBrain, 'land') > 0 then
@@ -455,22 +455,23 @@ local function ShouldUpgradeFactory(aiBrain, factory, runtime, eco, qLen)
     if completionDebt then
         return false, false
     end
-    if (eco.MassIncome or 0) < 4.2 or (eco.EnergyIncome or 0) < 90 then
+    if (eco.MassIncome or 0) < 3.2 or (eco.EnergyIncome or 0) < 60 then
         return false, false
     end
-    if (eco.MassStorageRatio or 0) < 0.12 or (eco.EnergyStorageRatio or 0) < 0.18 then
+    if (eco.MassStorageRatio or 0) < 0.06 or (eco.EnergyStorageRatio or 0) < 0.12 then
         return false, false
     end
-    if (((ecoCounts.Power or {}).Ready) or 0) < 5 or (((ecoCounts.Mex or {}).Ready) or 0) < 5 then
+    if (((ecoCounts.Power or {}).Ready) or 0) < 4 or (((ecoCounts.Mex or {}).Ready) or 0) < 4 then
         return false, false
     end
-    if (eco.MassTrend or 0) < -0.06 or (eco.EnergyTrend or 0) < 2 then
+    if (eco.MassTrend or 0) < -0.12 or (eco.EnergyTrend or 0) < -2 then
         return false, false
     end
 
     local strategicTechWindow = techPlan.EligibleForTech
         or planner.TradeMapForTech
-        or ((plan.Mode == 'pressure' or plan.Mode == 'expand') and readyLand >= 4 and (eco.MassTrend or 0) >= 0)
+        or planner.ForceAirAnswer
+        or ((plan.Mode == 'pressure' or plan.Mode == 'expand' or plan.Mode == 'air_control') and readyLand >= 4 and (eco.MassTrend or 0) >= -0.05)
     if not strategicTechWindow then
         return false, false
     end
