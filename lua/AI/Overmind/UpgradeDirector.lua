@@ -120,7 +120,39 @@ local function ScoreSafeUpgradeLocation(aiBrain, pos, mainPos, localRadius)
     local threat = aiBrain:GetThreatAtPosition(pos, 1, true, 'AntiSurface') or 0
     local dist = Distance2D(pos, mainPos)
     local localBias = (dist <= localRadius) and 24 or 0
-    return 100 - (risk * 12) - (threat * 20) - (dist * 0.06) + localBias, risk, threat, dist
+    local coreBias = (dist <= 110 and 68)
+        or (dist <= 170 and 34)
+        or (dist <= 240 and 14)
+        or 0
+    return 100 - (risk * 12) - (threat * 20) - (dist * 0.06) + localBias + coreBias, risk, threat, dist
+end
+
+local function ComputeDynamicMexCap(eco, readyLand, totalLand, powerReady, mexReady, surplusSpendWindow, strongSurplusWindow)
+    if readyLand < 2 or totalLand < 3 or powerReady < 3 or mexReady < 4 then
+        return 0
+    end
+
+    local cap = 1
+    if surplusSpendWindow then
+        cap = cap + 1
+    end
+    if strongSurplusWindow then
+        cap = cap + 1
+    end
+    if readyLand >= 5 then
+        cap = cap + 1
+    end
+    if totalLand >= 6 and (eco.MassIncome or 0) >= 10 then
+        cap = cap + 1
+    end
+    if (eco.MassStorageRatio or 0) >= 0.58 and (eco.EnergyStorageRatio or 0) >= 0.44 then
+        cap = cap + 1
+    end
+    if (eco.MassIncome or 0) >= 14 and (eco.EnergyIncome or 0) >= 200 and (eco.MassTrend or 0) >= 0.08 then
+        cap = cap + math.max(0, math.floor(((eco.MassIncome or 0) - 10) / 4))
+    end
+
+    return math.max(1, cap)
 end
 
 local function PickMexTarget(aiBrain, runtime, state)
@@ -142,6 +174,8 @@ local function PickMexTarget(aiBrain, runtime, state)
     local mapControl = zone.MapControl or 0
     local tempoMode = planner.TradeTechForTempo or planner.PunishGreed or techPlan.ExtractorUpgradeReason == 'tempo_mode'
     local scoutingDebt = techPlan.ExtractorUpgradeReason == 'scouting_debt'
+    local surplusSpendWindow = constraints.SurplusSpendWindow == true
+    local strongSurplusWindow = constraints.StrongSurplusWindow == true
 
     state.Managed = true
     state.TargetUnit = false
@@ -161,28 +195,9 @@ local function PickMexTarget(aiBrain, runtime, state)
 
     local activeMexUpgrades = CountActiveMexUpgrades(aiBrain)
     state.InFlight = activeMexUpgrades
-
-    if activeMexUpgrades > 0 then
-        local activeMexes = aiBrain:GetListOfUnits(categories.MASSEXTRACTION * categories.STRUCTURE, false, true) or {}
-        for _, mex in activeMexes do
-            if mex and not mex.Dead and mex:IsUnitState('Upgrading') then
-                local pos = mex.GetPosition and mex:GetPosition() or false
-                local dist = pos and Distance2D(pos, mainPos) or 999
-                state.TargetUnit = mex
-                state.TargetId = GetEntityId(mex)
-                state.TargetTech = GetUnitTechLevel(mex) >= 3 and 'tech3' or 'tech2'
-                state.Scope = (dist <= localRadius) and 'local' or 'remote'
-                state.Enabled = true
-                state.Reason = 'in_flight'
-                state.Cap = math.max(1, math.floor((techPlan.ExtractorUpgradeCap or 1) + 0.5))
-                state.Aggressive = techPlan.AggressiveExtractorUpgrades == true
-                return
-            end
-        end
-    end
-
-    local surplusSpendWindow = constraints.SurplusSpendWindow == true
-    local strongSurplusWindow = constraints.StrongSurplusWindow == true
+    local inflightTarget = false
+    local inflightTargetTech = false
+    local inflightTargetScope = false
 
     local allowLocalT2 = readyLand >= 2
         and totalLand >= 3
@@ -226,6 +241,21 @@ local function PickMexTarget(aiBrain, runtime, state)
         and mapControl >= 0.42
     if strongSurplusWindow and not tempoMode and not scoutingDebt and readyLand >= 5 and powerReady >= 5 and mexReady >= 5 then
         allowTech3 = true
+    end
+    local dynamicT2Cap = ComputeDynamicMexCap(eco, readyLand, totalLand, powerReady, mexReady, surplusSpendWindow, strongSurplusWindow)
+
+    if activeMexUpgrades > 0 then
+        local activeMexes = aiBrain:GetListOfUnits(categories.MASSEXTRACTION * categories.STRUCTURE, false, true) or {}
+        for _, mex in activeMexes do
+            if mex and not mex.Dead and mex:IsUnitState('Upgrading') then
+                local pos = mex.GetPosition and mex:GetPosition() or false
+                local dist = pos and Distance2D(pos, mainPos) or 999
+                inflightTarget = mex
+                inflightTargetTech = GetUnitTechLevel(mex) >= 3 and 'tech3' or 'tech2'
+                inflightTargetScope = (dist <= localRadius) and 'local' or 'remote'
+                break
+            end
+        end
     end
 
     local best = false
@@ -282,7 +312,16 @@ local function PickMexTarget(aiBrain, runtime, state)
             or scoutingDebt and bestTech == 'tech2' and 'scout_safe_consolidation'
             or bestTech == 'tech3' and 'safe_tech3'
             or 'safe_upgrade'
-        state.Cap = (bestTech == 'tech3') and 1 or (((allowGeneralT2 and techPlan.AggressiveExtractorUpgrades) or strongSurplusWindow) and 2 or 1)
+        state.Cap = (bestTech == 'tech3') and 1 or dynamicT2Cap
+        state.Aggressive = state.Cap > 1
+    elseif inflightTarget then
+        state.TargetUnit = inflightTarget
+        state.TargetId = GetEntityId(inflightTarget)
+        state.TargetTech = inflightTargetTech
+        state.Scope = inflightTargetScope
+        state.Enabled = true
+        state.Reason = 'in_flight'
+        state.Cap = (inflightTargetTech == 'tech3') and 1 or dynamicT2Cap
         state.Aggressive = state.Cap > 1
     else
         state.Reason = tempoMode and not surplusSpendWindow and 'tempo_mode'
@@ -359,12 +398,23 @@ local function PickFactoryTarget(aiBrain, runtime, state)
         return
     end
     if constraints.CriticalFactory or constraints.CriticalStructure or constraints.EcoCrash or constraints.QueueStarved or constraints.PowerBufferLow then
-        state.Reason = constraints.CriticalFactory and 'critical_factory'
+        local hqPowerOverride = constraints.PowerBufferLow
+            and readyLand >= 5
+            and totalLand >= 5
+            and powerReady >= 5
+            and mexReady >= 5
+            and (eco.EnergyStorageRatio or 0) >= 0.18
+            and (eco.EnergyTrend or 0) >= 0
+        if hqPowerOverride and not constraints.CriticalFactory and not constraints.CriticalStructure and not constraints.EcoCrash and not constraints.QueueStarved then
+            -- fall through
+        else
+            state.Reason = constraints.CriticalFactory and 'critical_factory'
             or constraints.CriticalStructure and 'critical_structure'
             or constraints.EcoCrash and 'eco_crash'
             or constraints.QueueStarved and 'queue_starved'
             or 'power_buffer_low'
-        return
+            return
+        end
     end
     local surplusSpendWindow = constraints.SurplusSpendWindow == true
     local strongSurplusWindow = constraints.StrongSurplusWindow == true
@@ -385,7 +435,7 @@ local function PickFactoryTarget(aiBrain, runtime, state)
         state.Reason = 'trend_floor'
         return
     end
-    if planner.TradeTechForTempo and readyLand < 6 and not surplusSpendWindow then
+    if planner.TradeTechForTempo and readyLand < 5 and not surplusSpendWindow then
         state.Reason = 'tempo_hold'
         return
     end
@@ -404,7 +454,7 @@ local function PickFactoryTarget(aiBrain, runtime, state)
             if upgradeBp and pos and GetCommandQueueLength(fac) <= 0 then
                 local score, risk, threat, dist = ScoreSafeUpgradeLocation(aiBrain, pos, mainPos, 280)
                 if risk <= 3 and threat <= 1.8 then
-                    local facScore = score + 80 - (dist * 0.04) + (surplusSpendWindow and 18 or 0) + (strongSurplusWindow and 12 or 0)
+                    local facScore = score + 80 - (dist * 0.04) + (surplusSpendWindow and 18 or 0) + (strongSurplusWindow and 12 or 0) + (readyLand >= 5 and 20 or 0)
                     if facScore > bestScore then
                         bestScore = facScore
                         best = fac
@@ -420,7 +470,7 @@ local function PickFactoryTarget(aiBrain, runtime, state)
         state.TargetId = GetEntityId(best)
         state.Enabled = true
         state.Reason = strongSurplusWindow and 'surplus_hq'
-            or readyLand >= 6 and 'midgame_hq'
+            or readyLand >= 5 and 'midgame_hq'
             or 'first_hq'
     else
         state.UpgradeBp = false

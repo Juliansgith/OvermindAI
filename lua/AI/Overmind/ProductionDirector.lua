@@ -1328,9 +1328,36 @@ local function DecideCapacityPlan(runtime, current, constraints, rolePlan)
         and powerReady >= math.max(7, constraints.StarterPowerFloor or 2)
         and engineerUnits >= math.max(10, constraints.StarterEngineerFloor or 6)
 
-    local landTarget = Clamp(math.max(1, math.ceil(landRoleLoad / 9.5), math.ceil(landRoleUnits / 12)), 1, 6)
-    local airTarget = Clamp((((airRoleLoad > 0 or airRoleUnits > 0) and math.max(1, math.ceil(airRoleLoad / 8.5), math.ceil(airRoleUnits / 8))) or 0), 0, 4)
-    local seaTarget = Clamp((((seaRoleLoad > 0 or seaRoleUnits > 0) and math.max(1, math.ceil(seaRoleLoad / 10.5), math.ceil(seaRoleUnits / 8))) or 0), 0, 3)
+    local landCap = math.max(
+        6,
+        current.Factories.Land.Ready + 2,
+        4 + math.max(0, math.floor(((eco.MassIncome or 0) - 6) / 3)),
+        4 + math.max(0, math.floor(((mexReady or 0) - 8) / 2))
+    )
+    local airCap = math.max(
+        4,
+        current.Factories.Air.Ready + 1,
+        2 + math.max(0, math.floor(((eco.EnergyIncome or 0) - 90) / 70))
+    )
+    local seaCap = math.max(
+        3,
+        current.Factories.Navy.Ready + 1,
+        2 + math.max(0, math.floor(((eco.MassIncome or 0) - 10) / 4))
+    )
+    if constraints.SurplusSpendWindow then
+        landCap = landCap + 2
+        airCap = airCap + 1
+        seaCap = seaCap + 1
+    end
+    if constraints.StrongSurplusWindow then
+        landCap = landCap + 2
+        airCap = airCap + 1
+        seaCap = seaCap + 1
+    end
+
+    local landTarget = Clamp(math.max(1, math.ceil(landRoleLoad / 9.5), math.ceil(landRoleUnits / 12)), 1, landCap)
+    local airTarget = Clamp((((airRoleLoad > 0 or airRoleUnits > 0) and math.max(1, math.ceil(airRoleLoad / 8.5), math.ceil(airRoleUnits / 8))) or 0), 0, airCap)
+    local seaTarget = Clamp((((seaRoleLoad > 0 or seaRoleUnits > 0) and math.max(1, math.ceil(seaRoleLoad / 10.5), math.ceil(seaRoleUnits / 8))) or 0), 0, seaCap)
 
     -- Keep the opener grounded: do not scale into a second factory before the first land
     -- factory has produced at least a minimal worker base.
@@ -1362,13 +1389,13 @@ local function DecideCapacityPlan(runtime, current, constraints, rolePlan)
     end
 
     if landRoleGap >= 6 and current.Factories.Land.Ready >= landTarget and not constraints.EcoWeak then
-        landTarget = math.min(6, landTarget + 1)
+        landTarget = math.min(landCap, landTarget + 1)
     end
     if airRoleGap >= 4.5 and current.Factories.Air.Ready >= airTarget and not constraints.EcoWeak then
-        airTarget = math.min(4, airTarget + 1)
+        airTarget = math.min(airCap, airTarget + 1)
     end
     if seaRoleGap >= 4.5 and current.Factories.Navy.Ready >= seaTarget and not constraints.EcoWeak then
-        seaTarget = math.min(3, seaTarget + 1)
+        seaTarget = math.min(seaCap, seaTarget + 1)
     end
 
     local liveCombatWindow = not constraints.EcoCrash
@@ -1574,9 +1601,9 @@ local function DecideCapacityPlan(runtime, current, constraints, rolePlan)
         and not constraints.CriticalFactory
         and not constraints.CriticalStructure
         and not completionLock then
-        landTarget = math.max(landTarget, math.min(6, current.Factories.Land.Total + 1))
+        landTarget = math.max(landTarget, math.min(landCap, current.Factories.Land.Total + 1))
         if current.Factories.Land.Ready >= 6 and not powerBufferLow then
-            airTarget = math.max(airTarget, math.min(2, current.Factories.Air.Total + 1))
+            airTarget = math.max(airTarget, math.min(airCap, current.Factories.Air.Total + 1))
         end
     end
 

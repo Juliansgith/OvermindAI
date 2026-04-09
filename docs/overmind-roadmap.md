@@ -877,6 +877,31 @@ Success criteria:
 - by `8-12` minutes, spare eco should convert into more local mex upgrades, a first land HQ, or more factory count
 - fewer cases where mass and energy float while `mex=0` and `tech=0`
 
+### v118: Dynamic Factory And Upgrade Scaling
+
+Status:
+
+- implemented in `v118`
+
+Goals:
+
+- remove the fixed factory ceiling
+- make spare eco expand consistently instead of flattening out at a static target
+- prefer core/local mex upgrades first and push the first land HQ earlier once the T1 base is established
+
+Changes:
+
+- replaced the fixed `6/4/3` factory target ceiling with surplus-scaled soft caps in `ProductionDirector`
+- mex upgrade concurrency now scales with actual surplus instead of staying effectively pinned at `1`
+- local/core mexes score above local edge mexes
+- first land HQ tech is now preferred earlier once roughly five land factories are online
+
+Success criteria:
+
+- no hard stop at six land factories when eco can clearly support more
+- more than one mex upgrade can run when surplus is real
+- first HQ starts earlier in stable midgame instead of waiting for a perfect tech state
+
 ### v102: Mainline Commitment
 
 Goals:

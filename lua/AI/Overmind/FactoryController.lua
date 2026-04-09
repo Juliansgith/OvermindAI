@@ -489,6 +489,7 @@ local function ShouldUpgradeFactory(aiBrain, factory, runtime, eco, qLen)
         or planner.TradeMapForTech
         or planner.ForceAirAnswer
         or ((plan.Mode == 'pressure' or plan.Mode == 'expand' or plan.Mode == 'air_control') and readyLand >= 4 and (eco.MassTrend or 0) >= -0.05)
+        or (readyLand >= 5 and (eco.EnergyStorageRatio or 0) >= 0.16 and (eco.MassTrend or 0) >= -0.08)
     if not strategicTechWindow then
         return false, false
     end
