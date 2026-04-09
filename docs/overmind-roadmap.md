@@ -937,6 +937,21 @@ Success criteria:
 - reclaim no longer wins over core power recovery in those windows
 - replay logs show `powerRec>0` during those periods
 
+### v120: Capacity Plan Scope Fix
+
+Goals:
+
+- restore clean `ProductionDirector` execution so factory and surplus policy are testable again
+
+Changes:
+
+- fixed missing local `eco` binding inside `DecideCapacityPlan`
+
+Success criteria:
+
+- no repeated `ProductionDirector` runtime error about missing `eco`
+- `FACTCTRL` targets reflect real production policy again instead of broken fallback values
+
 ### Extractor Validation Constraint
 
 Before further tech-policy work:

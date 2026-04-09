@@ -1214,6 +1214,7 @@ end
 local function DecideCapacityPlan(runtime, current, constraints, rolePlan)
     local state = runtime.ProductionDirector or {}
     local planner = runtime.StrategicPlanner or {}
+    local eco = runtime.EcoState or {}
     local now = GetGameTimeSeconds()
     local totalUnfinished = current.Factories.Pending or 0
     local factoryTask = current.FactoryTask or {}
