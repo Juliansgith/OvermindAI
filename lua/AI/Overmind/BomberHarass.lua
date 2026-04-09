@@ -7,7 +7,7 @@ local function Mod(a, b)
 end
 
 local BomberCategory = categories.MOBILE * categories.AIR * categories.BOMBER - categories.SCOUT - categories.TRANSPORTATION - categories.COMMAND
-local FighterCategory = categories.MOBILE * categories.AIR * categories.ANTIAIR * categories.FIGHTER
+local FighterCategory = categories.MOBILE * categories.AIR * categories.ANTIAIR - categories.BOMBER - categories.GROUNDATTACK - categories.SCOUT - categories.TRANSPORTATION - categories.EXPERIMENTAL - categories.COMMAND
 local EnemyMexCategory = categories.STRUCTURE * categories.MASSEXTRACTION
 
 local function Distance2D(a, b)
