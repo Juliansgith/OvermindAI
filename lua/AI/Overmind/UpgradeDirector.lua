@@ -505,6 +505,7 @@ local function PickFactoryTarget(aiBrain, runtime, state)
     state.TargetKind = 'land'
     state.UpgradeBp = false
     state.InFlight = upgradeCount
+    state.PowerRecoveryWanted = false
 
     if upgradeCount > 0 then
         local allFactories = aiBrain:GetListOfUnits(categories.FACTORY * categories.LAND * categories.STRUCTURE, false, true) or {}
@@ -521,17 +522,31 @@ local function PickFactoryTarget(aiBrain, runtime, state)
         state.Reason = 'in_flight'
         return
     end
-    local stableLandFloor = readyLand >= 5 and totalLand <= readyLand and powerReady >= 5 and mexReady >= 5
+    local stableLandFloor = readyLand >= 4
+        and totalLand >= 4
+        and totalLand <= (readyLand + 2)
+        and powerReady >= 4
+        and mexReady >= 4
+    local mandatoryFirstHQ = stableLandFloor
+        and readyLand >= 4
+        and totalLand >= 5
+        and mexReady >= 4
+        and not constraints.CriticalStructure
+        and not constraints.EcoCrash
+    state.PowerRecoveryWanted = constraints.PowerBufferLow and mandatoryFirstHQ
     if constraints.CriticalFactory or constraints.CriticalStructure or constraints.EcoCrash or constraints.QueueStarved or constraints.PowerBufferLow then
         local hqPowerOverride = constraints.PowerBufferLow
-            and stableLandFloor
-            and (eco.EnergyStorageRatio or 0) >= 0.18
-            and (eco.EnergyTrend or 0) >= 0
+            and mandatoryFirstHQ
+            and (eco.EnergyIncome or 0) >= 52
+            and (eco.EnergyStorageRatio or 0) >= 0.08
+            and (eco.EnergyTrend or 0) >= -3
         local hqFactoryOverride = constraints.CriticalFactory
-            and stableLandFloor
+            and mandatoryFirstHQ
             and not constraints.CriticalStructure
             and not constraints.EcoCrash
             and not constraints.QueueStarved
+            and (eco.MassTrend or 0) >= -0.22
+            and (eco.MassStorageRatio or 0) >= 0.03
         if (hqPowerOverride or hqFactoryOverride) and not constraints.CriticalStructure and not constraints.EcoCrash and not constraints.QueueStarved then
             -- fall through
         else
@@ -550,23 +565,23 @@ local function PickFactoryTarget(aiBrain, runtime, state)
         state.Reason = 'factory_floor'
         return
     end
-    if not surplusSpendWindow and ((eco.MassIncome or 0) < 3.2 or (eco.EnergyIncome or 0) < 58) then
+    if not surplusSpendWindow and ((eco.MassIncome or 0) < (mandatoryFirstHQ and 2.8 or 3.2) or (eco.EnergyIncome or 0) < (mandatoryFirstHQ and 48 or 58)) then
         state.Reason = 'income_floor'
         return
     end
-    if not surplusSpendWindow and ((eco.MassStorageRatio or 0) < 0.06 or (eco.EnergyStorageRatio or 0) < 0.12) then
+    if not surplusSpendWindow and ((eco.MassStorageRatio or 0) < (mandatoryFirstHQ and 0.04 or 0.06) or (eco.EnergyStorageRatio or 0) < (mandatoryFirstHQ and 0.08 or 0.12)) then
         state.Reason = 'storage_floor'
         return
     end
-    if not surplusSpendWindow and ((eco.MassTrend or 0) < -0.14 or (eco.EnergyTrend or 0) < -2) then
+    if not surplusSpendWindow and ((eco.MassTrend or 0) < (mandatoryFirstHQ and -0.18 or -0.14) or (eco.EnergyTrend or 0) < (mandatoryFirstHQ and -4 or -2)) then
         state.Reason = 'trend_floor'
         return
     end
-    if planner.TradeTechForTempo and readyLand < 5 and not surplusSpendWindow then
+    if planner.TradeTechForTempo and readyLand < 5 and not surplusSpendWindow and not mandatoryFirstHQ then
         state.Reason = 'tempo_hold'
         return
     end
-    if not strongSurplusWindow and (eco.MassTrend or 0) < -0.08 then
+    if not strongSurplusWindow and not mandatoryFirstHQ and (eco.MassTrend or 0) < -0.08 then
         state.Reason = 'mass_floor'
         return
     end
@@ -581,7 +596,7 @@ local function PickFactoryTarget(aiBrain, runtime, state)
             if upgradeBp and pos and GetCommandQueueLength(fac) <= 0 then
                 local score, risk, threat, dist, _ = ScoreSafeUpgradeLocation(aiBrain, pos, mainPos, factoryClusterPos, 280)
                 if risk <= 3 and threat <= 1.8 then
-                    local facScore = score + 80 - (dist * 0.04) + (surplusSpendWindow and 18 or 0) + (strongSurplusWindow and 12 or 0) + (readyLand >= 5 and 20 or 0)
+                    local facScore = score + 80 - (dist * 0.04) + (surplusSpendWindow and 18 or 0) + (strongSurplusWindow and 12 or 0) + (readyLand >= 5 and 20 or 0) + (mandatoryFirstHQ and 40 or 0)
                     if facScore > bestScore then
                         bestScore = facScore
                         best = fac
@@ -596,7 +611,8 @@ local function PickFactoryTarget(aiBrain, runtime, state)
         state.TargetUnit = best
         state.TargetId = GetEntityId(best)
         state.Enabled = true
-        state.Reason = strongSurplusWindow and 'surplus_hq'
+        state.Reason = mandatoryFirstHQ and 'mandatory_first_hq'
+            or strongSurplusWindow and 'surplus_hq'
             or readyLand >= 5 and 'midgame_hq'
             or 'first_hq'
     else

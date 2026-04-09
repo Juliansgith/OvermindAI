@@ -1916,6 +1916,9 @@ function Update(aiBrain, now)
     local bomberWatch = constraints.BomberWatch == true
     local bomberPanic = ((raid.BomberPanicUntil or -999) > now) or ((raid.LastBomberEnemyCount or 0) >= 1 and raid.UnderAirHarass)
     local radarReservedBuilderIds = GetRadarReservedBuilderIds(runtime, now)
+    local upgradeDirector = runtime.UpgradeDirector or {}
+    local factoryUpgradeState = upgradeDirector.Factory or {}
+    local hqPowerRecoveryWanted = factoryUpgradeState.PowerRecoveryWanted == true
 
     local target, targetPos, fraction, domain, readyFactories = FindBestUnfinishedFactory(aiBrain, runtime, mainPos)
     local factoryTargetObject = target
@@ -2118,7 +2121,7 @@ function Update(aiBrain, now)
                     if (not acted)
                         and isIdle
                         and not constructing
-                        and (constraints.PowerBufferLow == true or ShouldScaleBaseEco(runtime, now))
+                        and (constraints.PowerBufferLow == true or hqPowerRecoveryWanted or ShouldScaleBaseEco(runtime, now))
                         and localThreat < 2.2
                         and dist <= 360 then
                         local powerTarget = GetPriorityPowerRecoveryTarget(aiBrain, runtime, mainPos, structureTargetObject, structureTask)
