@@ -349,6 +349,7 @@ function Module.Update(aiBrain, now)
     local acuPos = acu and acu:GetPosition() or ownPos
     local homeThreat = (runtime.ZoneModel and runtime.ZoneModel.HomeThreat) or 0
     local localAcuThreat = aiBrain:GetThreatAtPosition(acuPos, 2, true, 'AntiSurface') or 0
+    local localAcuEnemyCount = aiBrain:GetNumUnitsAroundPoint(LandPressureCategory, acuPos, 52, 'Enemy') or 0
 
     local direct = aiBrain:GetListOfUnits(LandDirectCategory, false, true) or {}
     local aa = aiBrain:GetListOfUnits(LandAACategory, false, true) or {}
@@ -463,6 +464,28 @@ function Module.Update(aiBrain, now)
         end
     end
     local interceptNeed = interceptDirectNeed + interceptAANeed
+    local acuEmergencyDirectNeed = 0
+    local acuEmergencyAANeed = 0
+    local acuEmergencyPos = false
+    local acuEmergencyThreat = 0
+    if acu and not acu.Dead then
+        acuEmergencyPos = raid.LastThreatPos
+        if raid.LastThreatLabel ~= 'acu' then
+            acuEmergencyPos = false
+        end
+        if not acuEmergencyPos then
+            acuEmergencyPos = approachCluster.StagePos or approachCluster.Pos or acuPos
+        end
+        acuEmergencyThreat = math.max(localAcuThreat, raid.LastThreatAmount or 0)
+        local acuRush = localAcuEnemyCount >= 5
+            or (raid.UnderLandHarass and raid.LastThreatLabel == 'acu' and (raid.LastLandEnemyCount or 0) >= 4)
+            or localAcuThreat >= (homeThreat + 2.2)
+        if acuRush then
+            acuEmergencyDirectNeed = Clamp(5 + math.floor(math.max(0, acuEmergencyThreat) * 0.22) + math.min(4, localAcuEnemyCount), 5, 18)
+            acuEmergencyAANeed = Clamp(((approachAir > 0) and 1 or 0) + ((raid.UnderAirHarass and 1) or 0), 0, 3)
+        end
+    end
+    local acuEmergencyNeed = acuEmergencyDirectNeed + acuEmergencyAANeed
     local splitLandBudget = landCombatTotal - baseGuardDirectNeed - baseGuardAANeed - acuEscortNeed
     if (frontCrisis or assetSiege) and splitLandBudget < 20 then
         interceptDirectNeed = 0
@@ -490,6 +513,9 @@ function Module.Update(aiBrain, now)
                 + (approachClose and 1 or 0),
             3,
             math.max(3, landCombatTotal - 1))
+    end
+    if acuEmergencyNeed > 0 then
+        minimumMainlineCommit = math.max(4, minimumMainlineCommit - 4)
     end
     if minimumMainlineCommit > 0 then
         local maxGuardTotal = landCombatTotal - acuEscortNeed - interceptNeed - minimumMainlineCommit
@@ -662,10 +688,36 @@ function Module.Update(aiBrain, now)
     local acuEscort = MergeLists(acuEscortDirect, acuEscortAA, {})
     local interceptUnits = MergeLists(interceptDirect, interceptAA, {})
     local raiders = MergeLists(raiderDirect, raiderScouts, {})
+    local acuEmergency = {}
+    local function ShiftNamedUnits(source, destination, keepCount, moveCount)
+        local moved = 0
+        while moved < moveCount and table.getn(source) > keepCount do
+            table.insert(destination, table.remove(source, table.getn(source)))
+            moved = moved + 1
+        end
+        return moved
+    end
+    if acuEmergencyNeed > 0 then
+        local need = acuEmergencyDirectNeed
+        if need > 0 then
+            need = need - ShiftNamedUnits(mainline, acuEmergency, math.max(10, minimumMainlineCommit), need)
+        end
+        if need > 0 then
+            need = need - ShiftNamedUnits(raiders, acuEmergency, 0, need)
+        end
+        local aaNeed = acuEmergencyAANeed
+        if aaNeed > 0 then
+            aaNeed = aaNeed - ShiftNamedUnits(baseGuardAA, acuEmergency, math.min(table.getn(baseGuardAA), 1), aaNeed)
+        end
+        if aaNeed > 0 then
+            aaNeed = aaNeed - ShiftNamedUnits(interceptUnits, acuEmergency, 0, aaNeed)
+        end
+    end
 
     state.Groups = {
         BaseGuard = baseGuard,
         ACUEscort = acuEscort,
+        ACUEmergency = acuEmergency,
         Intercept = interceptUnits,
         Raiders = raiders,
         Artillery = artillery,
@@ -677,6 +729,7 @@ function Module.Update(aiBrain, now)
     state.TaskGroups = {
         base_guard = baseGuard,
         acu_escort = acuEscort,
+        acu_emergency_intercept = acuEmergency,
         intercept_cluster = interceptUnits,
         raid = raiders,
         artillery_support = artillery,
@@ -697,6 +750,7 @@ function Module.Update(aiBrain, now)
     end
     Tag(baseGuard, 'base_guard')
     Tag(acuEscort, 'acu_escort')
+    Tag(acuEmergency, 'acu_emergency_intercept')
     Tag(interceptUnits, 'intercept_cluster')
     Tag(raiders, 'raider')
     Tag(artillery, 'artillery')
@@ -710,6 +764,7 @@ function Module.Update(aiBrain, now)
         LandCombat = landCombatTotal,
         BaseGuard = CountUnits(baseGuard),
         ACUEscort = CountUnits(acuEscort),
+        ACUEmergency = CountUnits(acuEmergency),
         Intercept = CountUnits(interceptUnits),
         Raiders = CountUnits(raiders),
         Artillery = CountUnits(artillery),
@@ -723,6 +778,7 @@ function Module.Update(aiBrain, now)
     }
     local baseGuardDesiredStrength = Round((baseGuardDirectNeed * directStrength) + (baseGuardAANeed * aaStrength), 2)
     local acuEscortDesiredStrength = Round((escortDirectNeed * directStrength) + (math.max(0, acuEscortNeed - escortDirectNeed) * aaStrength), 2)
+    local acuEmergencyDesiredStrength = Round((acuEmergencyDirectNeed * directStrength) + (acuEmergencyAANeed * aaStrength), 2)
     local interceptDesiredStrength = Round((interceptDirectNeed * directStrength) + (interceptAANeed * aaStrength), 2)
     local raidDesiredStrength = Round((math.max(0, raiderNeed - raiderScoutNeed) * directStrength) + (raiderScoutNeed * scoutStrength), 2)
     local mainlineDesiredStrength = Round(mainlineNeed * WeightedMean({
@@ -777,6 +833,23 @@ function Module.Update(aiBrain, now)
         CommitRadius = 30,
         RetreatRadius = 14,
         EmptyStatus = 'standby',
+    }, now)
+    UpdateTask(state, 'acu_emergency_intercept', {
+        Role = 'acu_emergency_intercept',
+        Priority = 108 + math.floor(math.max(localAcuThreat, acuEmergencyThreat) * 4) + math.min(10, localAcuEnemyCount * 2),
+        AnchorPos = acuPos,
+        TargetPos = acuEmergencyPos or acuPos,
+        StagingPos = acuPos,
+        AssignedUnits = acuEmergency,
+        DesiredUnits = acuEmergencyNeed,
+        DesiredStrength = acuEmergencyDesiredStrength,
+        Timeout = 26,
+        Objective = 'defend_acu_under_attack',
+        RouteName = 'acu',
+        HoldRadius = 16,
+        CommitRadius = 30,
+        RetreatRadius = 12,
+        EmptyStatus = 'scramble',
     }, now)
     UpdateTask(state, 'intercept_cluster', {
         Role = 'intercept_cluster',
@@ -906,6 +979,7 @@ function Module.Update(aiBrain, now)
     state.RoleDemand = {
         BaseGuard = TaskGap(state.Tasks.base_guard),
         ACUEscort = TaskGap(state.Tasks.acu_escort),
+        ACUEmergency = TaskGap(state.Tasks.acu_emergency_intercept),
         Intercept = TaskGap(state.Tasks.intercept_cluster),
         Raider = TaskGap(state.Tasks.raid),
         MainLine = TaskGap(state.Tasks.front_hold),
@@ -915,6 +989,7 @@ function Module.Update(aiBrain, now)
     state.TaskList = {
         state.Tasks.base_guard,
         state.Tasks.acu_escort,
+        state.Tasks.acu_emergency_intercept,
         state.Tasks.intercept_cluster,
         state.Tasks.raid,
         state.Tasks.artillery_support,
@@ -929,12 +1004,13 @@ function Module.Update(aiBrain, now)
 
     if now - (state.LastLogTime or -999) >= 30 then
         state.LastLogTime = now
-        LOG(string.format('*OVERMIND FORCE A%d t=%.1f land=%d guard=%d acu=%d int=%d raid=%d art=%d main=%d air=%d bomb=%d stale=%d front=%d tasks=%d taskState=%s/%s/%s/%s',
+        LOG(string.format('*OVERMIND FORCE A%d t=%.1f land=%d guard=%d acu=%d acuint=%d int=%d raid=%d art=%d main=%d air=%d bomb=%d stale=%d front=%d tasks=%d taskState=%s/%s/%s/%s/%s',
             aiBrain:GetArmyIndex(),
             now,
             landCombatTotal,
             state.Stats.BaseGuard or 0,
             state.Stats.ACUEscort or 0,
+            state.Stats.ACUEmergency or 0,
             state.Stats.Intercept or 0,
             state.Stats.Raiders or 0,
             state.Stats.Artillery or 0,
@@ -946,6 +1022,7 @@ function Module.Update(aiBrain, now)
             table.getn(state.TaskList or {}),
             (state.Tasks.front_hold and state.Tasks.front_hold.ExecutionState) or 'none',
             (state.Tasks.base_guard and state.Tasks.base_guard.ExecutionState) or 'none',
+            (state.Tasks.acu_emergency_intercept and state.Tasks.acu_emergency_intercept.ExecutionState) or 'none',
             (state.Tasks.intercept_cluster and state.Tasks.intercept_cluster.ExecutionState) or 'none',
             (state.Tasks.raid and state.Tasks.raid.ExecutionState) or 'none'))
     end

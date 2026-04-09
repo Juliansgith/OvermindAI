@@ -662,6 +662,7 @@ function RunPressureCycle(aiBrain, now)
     local artilleryTask = tasks.artillery_support
     local baseTask = tasks.base_guard
     local escortTask = tasks.acu_escort
+    local acuEmergencyTask = tasks.acu_emergency_intercept
     local interceptTask = tasks.intercept_cluster
     local raidTask = tasks.raid
     local homeThreat = (runtime.ZoneModel and runtime.ZoneModel.HomeThreat) or 0
@@ -700,14 +701,26 @@ function RunPressureCycle(aiBrain, now)
     local escortReady = ResolveTaskUnits(escortTask, groups.ACUEscort or {}, math.max(0, baseGuardLimit - table.getn(guardReady)))
     local baseGuardUnits = MergeUnitTables(guardReady, escortReady, {})
     local baseGuardCount = table.getn(baseGuardUnits)
+    local acuEmergencyUnits = ResolveTaskUnits(acuEmergencyTask, groups.ACUEmergency or {}, math.max(5, math.floor(maxUnits * 0.34)))
+    local acuEmergencyCount = table.getn(acuEmergencyUnits)
     local raidUnits = ResolveTaskUnits(raidTask, groups.Raiders or {}, math.max(2, math.floor(maxUnits * 0.24)))
     local raidCount = table.getn(raidUnits)
     local interceptUnits = ResolveTaskUnits(interceptTask, groups.Intercept or {}, math.max(3, math.floor(maxUnits * 0.3)))
     local interceptCount = table.getn(interceptUnits)
     local frontPos = (frontTask and frontTask.TargetPos) or intel.FrontLinePos or (runtime.ZoneModel and runtime.ZoneModel.FrontLinePos) or LerpPos(ownPos, primaryEnemyPos, 0.45)
     local rearGuardPos = (baseTask and (baseTask.TargetPos or baseTask.AnchorPos)) or intel.RearGuardPos or (runtime.ZoneModel and runtime.ZoneModel.RearGuardPos) or ownPos
+    local acuPos = GetOwnACUPos(aiBrain) or ownPos
+    local acuEnemyUnits = aiBrain:GetUnitsAroundPoint(categories.MOBILE - categories.SCOUT, acuPos, 60, 'Enemy')
+    local acuEnemyPos = (acuEmergencyTask and acuEmergencyTask.TargetPos)
+        or (acuEnemyUnits and table.getn(acuEnemyUnits) > 0 and acuEnemyUnits[1] and acuEnemyUnits[1]:GetPosition())
+        or GetStrongestNearbyEnemyPosition(aiBrain, ownPos)
     local raidTarget = (raidTask and raidTask.TargetPos) or intel.BestRaidPos or (runtime.ZoneModel and runtime.ZoneModel.BestRaidPos) or primaryEnemyPos
+    local acuEmergencyActive = acuEnemyPos and acuEmergencyCount > 0
     if pressureCount <= 0 then
+        if acuEmergencyActive and IssueCohesiveLandOrders then
+            IssueCohesiveLandOrders(aiBrain, ownPos, acuEnemyPos, acuEmergencyUnits, true)
+            SetTaskExecution(acuEmergencyTask, now, 'intercepting', 'cohesive-defend', acuEnemyPos, acuPos, acuEmergencyCount)
+        end
         if baseGuardCount > 0 and frontPos and IssueMove then
             IssueMove(baseGuardUnits, rearGuardPos)
             SetTaskExecution(baseTask, now, 'holding', 'move', rearGuardPos, rearGuardPos, baseGuardCount)
@@ -794,6 +807,25 @@ function RunPressureCycle(aiBrain, now)
     local graphAdvance = GetGraphAdvanceTarget(runtime, routeName, selectedTarget)
     local stagingPos = (frontTask and frontTask.StagingPos) or LerpPos(ownPos, graphAdvance or selectedTarget, 0.36)
     local cohortPosture, cohortAnchor = EvaluateLandCohortPosture(aiBrain, ownPos, selectedTarget, pressureUnits, comp, false)
+    if acuEmergencyActive then
+        IssueCohesiveLandOrders(aiBrain, ownPos, acuEnemyPos, acuEmergencyUnits, true)
+        SetTaskExecution(acuEmergencyTask, now, 'intercepting', 'cohesive-defend', acuEnemyPos, acuPos, acuEmergencyCount)
+        if pressureCount >= 8 then
+            local emergencyReinforce = pressureUnits
+            IssueCohesiveLandOrders(aiBrain, ownPos, acuEnemyPos, emergencyReinforce, true)
+            SetTaskExecution(frontTask, now, 'intercepting', 'cohesive-defend', acuEnemyPos, acuPos, pressureCount)
+            SetTaskExecution(artilleryTask, now, 'screening', 'cohesive-defend', acuEnemyPos, acuPos, table.getn(artilleryReady))
+        elseif baseGuardCount > 0 then
+            IssueCohesiveLandOrders(aiBrain, ownPos, acuEnemyPos, baseGuardUnits, true)
+            SetTaskExecution(baseTask, now, 'defending', 'cohesive-defend', acuEnemyPos, rearGuardPos, baseGuardCount)
+        end
+        if raidCount > 0 and IssueCohesiveLandOrders then
+            IssueCohesiveLandOrders(aiBrain, ownPos, acuEnemyPos, raidUnits, true)
+            SetTaskExecution(raidTask, now, 'recalling', 'cohesive-defend', acuEnemyPos, acuPos, raidCount)
+        end
+        runtime.LastPressureOrder = 'ACUEmergencyIntercept'
+        return
+    end
     if cohortPosture == 'regroup' and IssueMove then
         IssueMove(pressureUnits, cohortAnchor or stagingPos)
         runtime.LastPressureOrder = HasIndirectEscortGap(comp) and 'RegroupEscort'

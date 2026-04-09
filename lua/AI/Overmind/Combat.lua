@@ -306,6 +306,12 @@ function EnforceCommanderSafety(aiBrain, now)
     if strictLeashActive then
         maxDistance = math.min(maxDistance, heavilyEscortedForward and 18 or 16)
     end
+    local longRoamUnsafe = distance > math.max(54, maxDistance + 18)
+        and escortCount < 12
+        and healthRatio >= 0.86
+        and enemyRaiders <= 1
+        and localThreat <= (homeThreat + 1.0)
+        and not lowHealth
 
     local catastrophicDistance = math.max(maxDistance + (heavilyEscortedForward and 14 or 8), heavilyEscortedForward and 34 or 24)
     local hardOverextendDistance = distance > catastrophicDistance
@@ -314,6 +320,9 @@ function EnforceCommanderSafety(aiBrain, now)
 
     local shouldRecall = distance > maxDistance and (openingLock or underThreat or lowHealth or underEscorted or hardAnchor or raidRecall or enemyContactUnsafe)
     if earlyHardLeash then
+        shouldRecall = true
+    end
+    if longRoamUnsafe then
         shouldRecall = true
     end
     if hardOverextendDistance then
@@ -497,6 +506,8 @@ function EnforceCommanderSafety(aiBrain, now)
             recallAction = 'early_leash_recall'
         elseif idleFar then
             recallAction = 'idle_far_recall'
+        elseif longRoamUnsafe then
+            recallAction = 'long_roam_recall'
         elseif openingLock or hardAnchor then
             recallAction = 'opening_recall'
         elseif lowHealth then
@@ -519,6 +530,8 @@ function EnforceCommanderSafety(aiBrain, now)
             reasonCooldown = 12.0
         elseif recallAction == 'opening_recall' or recallAction == 'idle_far_recall' then
             reasonCooldown = 16.0
+        elseif recallAction == 'long_roam_recall' then
+            reasonCooldown = 20.0
         elseif recallAction == 'early_leash_recall' then
             reasonCooldown = 14.0
         elseif recallAction == 'stuck_recall' then
