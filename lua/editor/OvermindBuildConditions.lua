@@ -5,6 +5,7 @@ local OvermindAutoTune = import('/mods/OvermindAI/lua/AI/Overmind/AutoTune.lua')
 
 local GetCompletedUnitCount
 local GetMainPos
+local CountSafeRemoteExtractorUpgradeCandidates
 
 local function GetEcon(aiBrain)
     return AIUtils.AIGetEconomyNumbers(aiBrain)
@@ -459,7 +460,7 @@ local function CanUpgradeToTech3Extractors(aiBrain, radius)
     return true
 end
 
-local function CountSafeRemoteExtractorUpgradeCandidates(aiBrain, targetTech, minRadius)
+CountSafeRemoteExtractorUpgradeCandidates = function(aiBrain, targetTech, minRadius)
     local mainPos = GetMainPos(aiBrain, 'MAIN')
     if not mainPos then
         return 0
