@@ -199,6 +199,47 @@ local function FindClosestSafeMex(aiBrain, homePos, maxDistance)
     return best
 end
 
+local function FindSafeMexSequence(aiBrain, homePos, maxDistance, maxCount)
+    local markers = AIUtils.AIGetMarkerLocations(aiBrain, 'Mass') or {}
+    local candidates = {}
+    local limit = math.max(1, math.floor(maxCount or 1))
+    for _, marker in markers do
+        local pos = marker and marker.Position
+        if pos and Distance2D(pos, homePos) <= (maxDistance or 220) and not HasFriendlyMexAtPos(aiBrain, pos) then
+            local threat = aiBrain:GetThreatAtPosition(pos, 1, true, 'AntiSurface') or 0
+            if threat <= 1.0 and not HasNearbyEnemyArmy(aiBrain, pos, 34) then
+                table.insert(candidates, {
+                    Pos = pos,
+                    Dist = Distance2D(pos, homePos),
+                })
+            end
+        end
+    end
+
+    table.sort(candidates, function(a, b)
+        return (a.Dist or 999999) < (b.Dist or 999999)
+    end)
+
+    local picks = {}
+    for _, entry in candidates do
+        local pos = entry.Pos
+        local duplicate = false
+        for _, existing in picks do
+            if Distance2D(existing, pos) <= 4 then
+                duplicate = true
+                break
+            end
+        end
+        if not duplicate then
+            table.insert(picks, pos)
+            if table.getn(picks) >= limit then
+                break
+            end
+        end
+    end
+    return picks
+end
+
 local function GetStarterFactoryAnchor(aiBrain, homePos)
     local factories = aiBrain:GetListOfUnits(categories.FACTORY * categories.LAND * categories.STRUCTURE, false, true) or {}
     local best = homePos
@@ -251,8 +292,21 @@ local function TryExecuteStarterTask(aiBrain, runtime, acu, homePos, director, c
     local criticalPowerNeeded = powerReady <= 0
     local starterMexRush = readyLandFactories >= 1
         and powerReady >= 1
-        and mexReady < math.min(mexFloor, 2)
+        and mexReady < mexFloor
     local mexPreferred = starterMexRush and not criticalPowerNeeded
+
+    if mexPreferred and IssueBuildMobile then
+        local bp = PickBuildableBlueprint(acu, StarterMexCategory)
+        local mexQueue = bp and FindSafeMexSequence(aiBrain, homePos, 220, math.min(4, math.max(2, mexFloor - mexReady)))
+        if bp and mexQueue and table.getn(mexQueue) > 0 then
+            for _, mexPos in mexQueue do
+                IssueBuildMobile({ acu }, mexPos, bp, {})
+            end
+            runtime.ACUSafetyLockUntil = math.max(runtime.ACUSafetyLockUntil or -999, now + 6)
+            runtime.ACUHardBuildLockUntil = math.max(runtime.ACUHardBuildLockUntil or -999, now + 18)
+            return true
+        end
+    end
 
     local repairTarget = FindNearbyStarterStructure(aiBrain, homePos, powerNeeded, radarNeeded, mexPreferred)
     if repairTarget and IssueRepair then
@@ -260,17 +314,6 @@ local function TryExecuteStarterTask(aiBrain, runtime, acu, homePos, director, c
         runtime.ACUSafetyLockUntil = math.max(runtime.ACUSafetyLockUntil or -999, now + 6)
         runtime.ACUHardBuildLockUntil = math.max(runtime.ACUHardBuildLockUntil or -999, now + 10)
         return true
-    end
-
-    if mexPreferred and IssueBuildMobile then
-        local bp = PickBuildableBlueprint(acu, StarterMexCategory)
-        local mexPos = bp and FindClosestSafeMex(aiBrain, homePos, 220)
-        if bp and mexPos then
-            IssueBuildMobile({ acu }, mexPos, bp, {})
-            runtime.ACUSafetyLockUntil = math.max(runtime.ACUSafetyLockUntil or -999, now + 6)
-            runtime.ACUHardBuildLockUntil = math.max(runtime.ACUHardBuildLockUntil or -999, now + 10)
-            return true
-        end
     end
 
     if powerNeeded and IssueBuildMobile then
