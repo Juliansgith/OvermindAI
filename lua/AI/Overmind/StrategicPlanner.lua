@@ -51,6 +51,7 @@ local function BuildSignals(aiBrain, runtime, now)
     local macro = runtime.MacroController or {}
     local macroObjective = macro.Phase or ((runtime.ProductionDirector or {}).MacroObjective) or 'land_factory_floor'
     local transitionLocked = macro.TransitionLocked == true
+    local acuCrisisActive = now < (runtime.ACUCrisisUntil or -999)
 
     local bestExpansionNode = GetNode(graph, intel.BestExpansionZoneKey or graph.BestExpansionNodeKey)
     local bestRaidNode = GetNode(graph, intel.BestRaidZoneKey or graph.BestRaidNodeKey)
@@ -168,10 +169,11 @@ local function BuildSignals(aiBrain, runtime, now)
             and ((forceStats.MainLine or 0) + (forceStats.Artillery or 0) >= math.max(16, (forceStats.BaseGuard or 0) + 6))
         ) and true or false,
         DesperationCounterstrike = (
-            (((raid.UnderLandHarass == true) or approachClose or ((homeTheater.PressureEMA or homeTheater.Pressure or 0) >= 4.0)))
+            (acuCrisisActive or (((raid.UnderLandHarass == true) or approachClose or ((homeTheater.PressureEMA or homeTheater.Pressure or 0) >= 4.0))))
             and ((forceStats.MainLine or 0) + (forceStats.Artillery or 0) >= math.max(14, (forceStats.BaseGuard or 0) + 4))
             and (relativePower <= 1.08 or opp.Posture == 'land_push' or opp.T2Push == true or (homeTheater.Confidence or 0) < 0.45)
         ) and true or false,
+        ACUCrisisActive = acuCrisisActive,
         PrioritizeProduction = prioritizeProduction,
         ContestMapMode = contestMapMode,
         PreferTempoFromSurplus = preferTempoFromSurplus,
@@ -213,6 +215,7 @@ local function ScoreTheaters(signals)
         + ((signals.UnderLandHarass or signals.UnderAirHarass) and 2.0 or 0)
         + (signals.RecoveryActive and 1.6 or 0)
         + (signals.EcoWeak and 0.8 or 0)
+        + (signals.ACUCrisisActive and 5.0 or 0)
 
     scores.Front =
         (signals.FrontPressure * 0.8)
@@ -220,6 +223,7 @@ local function ScoreTheaters(signals)
         + (signals.PushWindow and 1.4 or 0)
         + ((signals.ApproachReal and not signals.ApproachClose) and 0.9 or 0)
         + ((signals.MainlineUnits <= math.max(2, signals.BaseGuardUnits - 1)) and 0.9 or 0)
+        - (signals.ACUCrisisActive and 1.2 or 0)
 
     scores.Enemy =
         (signals.BestRaidScore * 0.08)
@@ -229,6 +233,7 @@ local function ScoreTheaters(signals)
         + math.max(0, signals.RelativePower - 0.96) * 1.2
         - (signals.ApproachClose and 1.4 or 0)
         - (signals.RecoveryActive and 0.8 or 0)
+        - (signals.ACUCrisisActive and 1.6 or 0)
 
     scores.Navy =
         ((signals.NavalActive and (signals.NavyPressure * 0.75)) or -0.2)
@@ -312,6 +317,14 @@ local function ScoreDirectives(signals, primaryTheater)
         scores.punish_greed = scores.punish_greed + 1.0
         scores.trade_tech_for_tempo = scores.trade_tech_for_tempo + 1.5
     end
+    if signals.ACUCrisisActive then
+        scores.stabilize = scores.stabilize + 0.8
+        scores.expand = scores.expand - 0.6
+        scores.force_air_answer = scores.force_air_answer - 4.0
+        scores.trade_map_for_tech = scores.trade_map_for_tech - 1.2
+        scores.trade_tech_for_tempo = scores.trade_tech_for_tempo + 0.9
+        scores.punish_greed = scores.punish_greed + 0.4
+    end
     if signals.TransitionLocked and not signals.DesperationCounterstrike then
         scores.force_air_answer = scores.force_air_answer - 2.0
         scores.expand = scores.expand - 0.8
@@ -365,6 +378,7 @@ local function BuildDirectiveState(signals, primaryTheater, directive)
     local forceAirAnswer = (directive == 'force_air_answer' or signals.ForceAirAnswerCandidate)
         and not (signals.MacroObjective == 'first_land_hq' or signals.MacroObjective == 'first_t2_engineer')
         and not signals.TransitionLocked
+        and not signals.ACUCrisisActive
         and (not signals.PrioritizeProduction or signals.ApproachClose or signals.HomePressure >= 4.5 or signals.FrontPressure >= 5.0)
 
     local raidCentrality = Clamp(

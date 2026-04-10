@@ -354,6 +354,9 @@ function Module.Update(aiBrain, now)
     local raidPos = intel.BestRaidPos or runtime.PrimaryEnemyPos or frontPos
     local acu = GetACU(aiBrain)
     local acuPos = acu and acu:GetPosition() or ownPos
+    local acuCrisisActive = now < (runtime.ACUCrisisUntil or -999)
+    local acuCrisisEscalated = now < (runtime.ACUCrisisEscalatedUntil or -999)
+    local acuCrisisEnemyPos = runtime.ACUCrisisEnemyPos or false
     local homeThreat = (runtime.ZoneModel and runtime.ZoneModel.HomeThreat) or 0
     local localAcuThreat = aiBrain:GetThreatAtPosition(acuPos, 2, true, 'AntiSurface') or 0
     local localAcuEnemyCount = aiBrain:GetNumUnitsAroundPoint(LandPressureCategory, acuPos, 52, 'Enemy') or 0
@@ -389,6 +392,7 @@ function Module.Update(aiBrain, now)
         or (approachCluster.MemoryThreat or 0) >= 1.25
         or approachConfidence >= 0.46
     local approachClose = approachConfirmed and approachDistance < 260 and approachThreat >= 4.5
+    local approachTowardHome = approachConfirmed and approachDistance < 170 and approachThreat >= 5.0
     local assetSiege = raid.UnderLandHarass
         and ((raid.LastThreatLabel == 'asset') or (raid.LastThreatLabel == 'acu') or (raid.LastThreatLabel == 'main'))
         and ((raid.LastLandEnemyCount or 0) >= 4)
@@ -487,27 +491,34 @@ function Module.Update(aiBrain, now)
     local previousAcuEmergencyCount = previousAcuEmergencyTask and (previousAcuEmergencyTask.CurrentUnits or 0) or 0
     state.ACUEmergencyHoldUntil = state.ACUEmergencyHoldUntil or -999
     if acu and not acu.Dead then
-        acuEmergencyPos = raid.LastThreatPos
-        if raid.LastThreatLabel ~= 'acu' then
+        acuEmergencyPos = acuCrisisEnemyPos or raid.LastThreatPos
+        if not acuCrisisEnemyPos and raid.LastThreatLabel ~= 'acu' then
             acuEmergencyPos = false
         end
         if not acuEmergencyPos then
-            acuEmergencyPos = approachCluster.StagePos or approachCluster.Pos or acuPos
+            acuEmergencyPos = acuCrisisEnemyPos or approachCluster.StagePos or approachCluster.Pos or acuPos
         end
         acuEmergencyThreat = math.max(localAcuThreat, raid.LastThreatAmount or 0)
         local acuDamageRecent = (runtime.LastAcuDamageTime or -999) >= (now - 24)
         local acuEmergencySticky = state.ACUEmergencyHoldUntil > now
         local acuRush = localAcuEnemyCount >= 2
             or (raid.UnderLandHarass and raid.LastThreatLabel == 'acu' and (raid.LastLandEnemyCount or 0) >= 2)
+            or (raid.UnderLandHarass and (raid.LastThreatLabel == 'main' or raid.LastThreatLabel == 'asset') and (raid.LastLandEnemyCount or 0) >= 3)
             or localAcuThreat >= (homeThreat + 1.0)
             or (acuDist > 18 and localAcuEnemyCount >= 1)
             or (localAcuEnemyCount >= 1 and (raid.UnderLandHarass or localAcuThreat >= math.max(1.5, homeThreat - 0.5) or acuDist > 10))
+            or approachTowardHome
+            or acuCrisisActive
             or acuDamageRecent
             or (acuEmergencySticky and (localAcuEnemyCount >= 1 or localAcuThreat > math.max(1.2, homeThreat - 1.4)))
         if acuRush then
-            state.ACUEmergencyHoldUntil = now + (acuDamageRecent and 30 or 22)
+            state.ACUEmergencyHoldUntil = now + ((acuDamageRecent or acuCrisisEscalated) and 36 or (acuCrisisActive and 30 or 22))
             acuEmergencyDirectNeed = Clamp(10 + math.floor(math.max(0, acuEmergencyThreat) * 0.34) + math.min(10, localAcuEnemyCount * 2) + (acuDamageRecent and 6 or 0) + ((previousAcuEmergencyCount > 0) and 3 or 0), 10, 30)
             acuEmergencyAANeed = Clamp(((approachAir > 0) and 1 or 0) + ((raid.UnderAirHarass and 1) or 0) + ((acuDamageRecent and approachAir > 0) and 1 or 0), 0, 4)
+            if acuCrisisActive then
+                acuEmergencyDirectNeed = Clamp(math.max(acuEmergencyDirectNeed, math.floor(landCombatTotal * (acuCrisisEscalated and 0.72 or 0.58)) + 4), 12, 40)
+                acuEmergencyAANeed = Clamp(math.max(acuEmergencyAANeed, (approachAir > 0 and 2 or 1)), 1, 4)
+            end
         elseif previousAcuEmergencyCount <= 0 and localAcuEnemyCount <= 0 and localAcuThreat <= (homeThreat + 0.4) then
             state.ACUEmergencyHoldUntil = now - 1
         end
@@ -541,8 +552,10 @@ function Module.Update(aiBrain, now)
             3,
             math.max(3, landCombatTotal - 1))
     end
-    if acuEmergencyNeed > 0 then
-        minimumMainlineCommit = math.max(4, minimumMainlineCommit - 4)
+    if acuCrisisActive then
+        minimumMainlineCommit = 0
+    elseif acuEmergencyNeed > 0 then
+        minimumMainlineCommit = math.max(2, minimumMainlineCommit - 6)
     end
     if minimumMainlineCommit > 0 then
         local maxGuardTotal = landCombatTotal - acuEscortNeed - interceptNeed - minimumMainlineCommit
@@ -752,6 +765,9 @@ function Module.Update(aiBrain, now)
         if aaNeed > 0 then
             aaNeed = aaNeed - ShiftNamedUnits(mainline, acuEmergency, math.max(2, minimumMainlineCommit - 10), aaNeed)
         end
+        if acuCrisisActive and need > 0 then
+            need = need - ShiftNamedUnits(artillery, acuEmergency, 1, need)
+        end
     end
 
     state.Groups = {
@@ -876,7 +892,7 @@ function Module.Update(aiBrain, now)
     }, now)
     UpdateTask(state, 'acu_emergency_intercept', {
         Role = 'acu_emergency_intercept',
-        Priority = 108 + math.floor(math.max(localAcuThreat, acuEmergencyThreat) * 4) + math.min(10, localAcuEnemyCount * 2),
+        Priority = 108 + math.floor(math.max(localAcuThreat, acuEmergencyThreat) * 4) + math.min(10, localAcuEnemyCount * 2) + (acuCrisisActive and 18 or 0),
         AnchorPos = acuPos,
         TargetPos = acuEmergencyPos or acuPos,
         StagingPos = acuPos,
@@ -887,7 +903,7 @@ function Module.Update(aiBrain, now)
         Objective = 'defend_acu_under_attack',
         RouteName = 'acu',
         HoldRadius = 16,
-        CommitRadius = 30,
+        CommitRadius = acuCrisisActive and 42 or 30,
         RetreatRadius = 12,
         EmptyStatus = 'scramble',
     }, now)

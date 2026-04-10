@@ -308,6 +308,55 @@ function EnforceCommanderSafety(aiBrain, now)
     local explicitPush = runtime.ACURole == 'push' and escortCount >= 12 and localThreat < (homeThreat + 1.6)
     local earlyHardLeash = now < 380 and distance > 16 and escortCount < 8 and not explicitPush
     local strictLeashActive = now < (runtime.ACUStrictLeashUntil or -999)
+    local clusterState = runtime.EnemyClusterTracker or {}
+    local approachCluster = clusterState.ApproachCluster or {}
+    local approachThreat = approachCluster.TotalThreat or 0
+    local approachDistance = approachCluster.HomeDistance or 999
+    local approachConfidence = approachCluster.ContactConfidence or 0
+    local approachConfirmed = ((approachCluster.ConfirmedUnits or 0) > 0)
+        or ((approachCluster.MemoryThreat or 0) >= 1.25)
+        or approachConfidence >= 0.46
+    local recentDamage = (runtime.LastAcuDamageTime or -999) >= (now - 20)
+    runtime.ACUCrisisUntil = runtime.ACUCrisisUntil or -999
+    runtime.ACUCrisisEscalatedUntil = runtime.ACUCrisisEscalatedUntil or -999
+    local raidLabel = raid.LastThreatLabel or 'none'
+    local raidLandCount = raid.LastLandEnemyCount or 0
+    local crisisEnemyPos = runtime.ACUCrisisEnemyPos
+        or raid.LastThreatPos
+        or approachCluster.StagePos
+        or approachCluster.Pos
+        or runtime.PrimaryEnemyPos
+        or homePos
+    local approachTowardHome = approachConfirmed and approachDistance < 150 and approachThreat >= 5.0
+    local acuZoneAttack = (raidLabel == 'acu' or raidLabel == 'main') and raidLandCount >= 2
+    local preemptiveCrisis = acuZoneAttack
+        or (raid.UnderLandHarass and raidLandCount >= 3 and distance > 8)
+        or (approachTowardHome and distance > 10)
+        or (localThreat > math.max(homeThreat + 2.6, 7.0) and distance > 8)
+        or (recentDamage and localThreat > math.max(homeThreat + 1.4, 4.0))
+    if preemptiveCrisis then
+        runtime.ACUCrisisEnemyPos = crisisEnemyPos
+        runtime.ACUCrisisRearPos = RetreatFromEnemy(homePos, crisisEnemyPos, recentDamage and 0.62 or 0.48)
+        runtime.ACUCrisisUntil = math.max(runtime.ACUCrisisUntil, now + (recentDamage and 42 or 28))
+        if recentDamage or localThreat > math.max(homeThreat + 4.0, 10.0) or raidLandCount >= 5 then
+            runtime.ACUCrisisEscalatedUntil = math.max(runtime.ACUCrisisEscalatedUntil, now + 34)
+        end
+        runtime.ACUStrictLeashUntil = math.max(runtime.ACUStrictLeashUntil or -999, now + (recentDamage and 80 or 48))
+        runtime.ACUSafetyLockUntil = math.max(runtime.ACUSafetyLockUntil or -999, now + 10)
+    elseif runtime.ACUCrisisUntil <= now
+        and healthRatio >= 0.96
+        and localThreat <= (homeThreat + 0.4)
+        and enemyRaiders <= 0
+        and not raid.UnderLandHarass
+        and not raid.UnderAirHarass then
+        runtime.ACUCrisisUntil = now - 1
+        runtime.ACUCrisisEscalatedUntil = now - 1
+    end
+    local acuCrisisActive = runtime.ACUCrisisUntil > now
+    local acuCrisisEscalated = runtime.ACUCrisisEscalatedUntil > now
+    if acuCrisisActive then
+        maxDistance = math.min(maxDistance, acuCrisisEscalated and 8 or 10)
+    end
     if strictLeashActive then
         maxDistance = math.min(maxDistance, heavilyEscortedForward and 18 or 16)
     end
@@ -373,20 +422,20 @@ function EnforceCommanderSafety(aiBrain, now)
         and (escortCount >= 4 or (forceStats.BaseGuard or 0) >= 5)
         and localThreat <= (homeThreat + 1.8)
         and enemyRaiders <= 1
-    if insideDefendedSpace and not lowHealth and not catastrophicOverextend and not enemyContactUnsafe and not raidRecall then
+    if insideDefendedSpace and not lowHealth and not catastrophicOverextend and not enemyContactUnsafe and not raidRecall and not acuCrisisActive then
         shouldRecall = false
         earlyHardLeash = false
         noMansLand = false
         stuckFar = false
     end
-    if starterSafeLeash and not lowHealth and not catastrophicOverextend and not enemyContactUnsafe and not raidRecall then
+    if starterSafeLeash and not lowHealth and not catastrophicOverextend and not enemyContactUnsafe and not raidRecall and not acuCrisisActive then
         shouldRecall = false
         earlyHardLeash = false
         idleFar = false
         noMansLand = false
         stuckFar = false
     end
-    if defendedButStatic and not lowHealth and not catastrophicOverextend and not enemyContactUnsafe and not raidRecall then
+    if defendedButStatic and not lowHealth and not catastrophicOverextend and not enemyContactUnsafe and not raidRecall and not acuCrisisActive then
         stuckFar = false
     end
     local alreadySafeAtHome = insideDefendedSpace
@@ -448,14 +497,14 @@ function EnforceCommanderSafety(aiBrain, now)
         and not enemyContactUnsafe
         and not raidRecall
         and not noMansLand
-    if stableEscortedPerimeter and not enemyContactUnsafe and not noMansLand then
+    if stableEscortedPerimeter and not enemyContactUnsafe and not noMansLand and not acuCrisisActive then
         shouldRecall = false
         idleFar = false
         stuckFar = false
         earlyHardLeash = false
         raidRecall = false
     end
-    if heavilyEscortedNearHome and not enemyContactUnsafe and not noMansLand then
+    if heavilyEscortedNearHome and not enemyContactUnsafe and not noMansLand and not acuCrisisActive then
         shouldRecall = false
         idleFar = false
         stuckFar = false
@@ -463,13 +512,13 @@ function EnforceCommanderSafety(aiBrain, now)
         raidRecall = false
         enemyContactUnsafe = false
     end
-    if moderateEscortedLeash and not enemyContactUnsafe and not noMansLand and not raidRecall then
+    if moderateEscortedLeash and not enemyContactUnsafe and not noMansLand and not raidRecall and not acuCrisisActive then
         shouldRecall = false
         idleFar = false
         stuckFar = false
         earlyHardLeash = false
     end
-    if secureEscortedPosture then
+    if secureEscortedPosture and not acuCrisisActive then
         shouldRecall = false
         idleFar = false
         stuckFar = false
@@ -486,7 +535,7 @@ function EnforceCommanderSafety(aiBrain, now)
         and (runtime.LastAcuDamageTime or -999) < (now - 10)
         and distance <= math.max(22, maxDistance + 8)
         and localThreat <= (homeThreat + 1.5)
-    if earlyTransitionAnchor then
+    if earlyTransitionAnchor and not acuCrisisActive then
         shouldRecall = false
         idleFar = false
         stuckFar = false
@@ -505,7 +554,7 @@ function EnforceCommanderSafety(aiBrain, now)
         and not enemyContactUnsafe
         and not raidRecall
         and (runtime.LastAcuDamageTime or -999) < (now - 8)
-    if techAnchorPosture then
+    if techAnchorPosture and not acuCrisisActive then
         shouldRecall = false
         idleFar = false
         stuckFar = false
@@ -524,7 +573,7 @@ function EnforceCommanderSafety(aiBrain, now)
         return
     end
 
-    if shouldRecall or idleFar or stuckFar or noMansLand or enemyContactUnsafe or raidRecall or leashReposition then
+    if acuCrisisActive or shouldRecall or idleFar or stuckFar or noMansLand or enemyContactUnsafe or raidRecall or leashReposition then
         local lastRecall = runtime.LastAcuRecallTime or -100
         local recallCooldown = 4.0
         if raidRecall or enemyContactUnsafe then
@@ -533,7 +582,7 @@ function EnforceCommanderSafety(aiBrain, now)
         if catastrophicOverextend then
             recallCooldown = 1.4
         end
-        local severeDanger = lowHealth or localThreat > (homeThreat + 2.2) or enemyContactUnsafe or raidRecall or noMansLand or catastrophicOverextend
+        local severeDanger = acuCrisisActive or lowHealth or localThreat > (homeThreat + 2.2) or enemyContactUnsafe or raidRecall or noMansLand or catastrophicOverextend
         local sinceRecall = now - lastRecall
         local distanceAfterRecall = runtime.LastAcuRecallDistance or 9999
         local closingToBase = distance <= (distanceAfterRecall - 1.2)
@@ -545,7 +594,9 @@ function EnforceCommanderSafety(aiBrain, now)
             and healthRatio >= 0.82
             and localThreat <= ((runtime.LastAcuRecallLocalThreat or localThreat) + 4.0)
         local recallAction = 'threat_recall'
-        if (sustainedCombatRetreat or combatRetreatSticky) and (underThreat or raidRecall or enemyContactUnsafe or shouldRecall or localThreat > math.max(2.5, homeThreat - 1.2)) then
+        if acuCrisisActive then
+            recallAction = acuCrisisEscalated and 'combat_retreat' or 'crisis_retreat'
+        elseif (sustainedCombatRetreat or combatRetreatSticky) and (underThreat or raidRecall or enemyContactUnsafe or shouldRecall or localThreat > math.max(2.5, homeThreat - 1.2)) then
             recallAction = 'combat_retreat'
         elseif catastrophicOverextend then
             recallAction = 'panic_leash_recall'
@@ -577,7 +628,7 @@ function EnforceCommanderSafety(aiBrain, now)
         local reasonCooldown = 10.0
         if recallAction == 'panic_leash_recall' then
             reasonCooldown = 6.0
-        elseif recallAction == 'combat_retreat' then
+        elseif recallAction == 'combat_retreat' or recallAction == 'crisis_retreat' then
             reasonCooldown = 5.0
         elseif recallAction == 'low_health_recall' then
             reasonCooldown = 4.0
@@ -601,7 +652,8 @@ function EnforceCommanderSafety(aiBrain, now)
         local worseningThreat = localThreat >= ((runtime.LastAcuRecallLocalThreat or localThreat) + 2.5)
             or homeThreat >= ((runtime.LastAcuRecallHomeThreat or homeThreat) + 1.5)
             or enemyRaiders >= ((runtime.LastAcuRecallEnemyRaiders or enemyRaiders) + 1)
-        local recallEscalated = catastrophicOverextend
+        local recallEscalated = acuCrisisActive
+            or catastrophicOverextend
             or (severeDanger and (lowHealth or enemyContactUnsafe or localThreat > (homeThreat + 2.8)))
             or stuckFar
             or recallAction == 'combat_retreat'
@@ -692,7 +744,13 @@ function EnforceCommanderSafety(aiBrain, now)
         end
         if (now - lastRecall) > recallCooldown then
             local recallPos = GetSafeRetreatTarget(aiBrain, acuPos, homePos, runtime.PrimaryEnemyPos, localThreat, forceStats, aiBrain:GetArmyIndex())
-            if severeDanger then
+            if acuCrisisActive then
+                local rearBias = runtime.ACUCrisisRearPos
+                    or RetreatFromEnemy(homePos, runtime.ACUCrisisEnemyPos or runtime.PrimaryEnemyPos, acuCrisisEscalated and 0.65 or 0.52)
+                    or homePos
+                recallPos = GetSafeRetreatTarget(aiBrain, acuPos, rearBias, runtime.ACUCrisisEnemyPos or runtime.PrimaryEnemyPos, localThreat, forceStats, aiBrain:GetArmyIndex()) or rearBias
+                runtime.ACUSafetyLockUntil = math.max(runtime.ACUSafetyLockUntil or -999, now + 18)
+            elseif severeDanger then
                 recallPos = GetSafeRetreatTarget(aiBrain, acuPos, RetreatFromEnemy(homePos, runtime.PrimaryEnemyPos, 0.42) or homePos, runtime.PrimaryEnemyPos, localThreat, forceStats, aiBrain:GetArmyIndex())
                 runtime.ACUSafetyLockUntil = math.max(runtime.ACUSafetyLockUntil or -999, now + 24)
             elseif recallAction == 'leash_reposition' then
@@ -700,17 +758,24 @@ function EnforceCommanderSafety(aiBrain, now)
             elseif earlyHardLeash or openingLock or hardAnchor then
                 runtime.ACUSafetyLockUntil = math.max(runtime.ACUSafetyLockUntil or -999, now + 12)
             end
-            if catastrophicOverextend then
+            if acuCrisisActive then
+                runtime.ACUStrictLeashUntil = math.max(runtime.ACUStrictLeashUntil or -999, now + (acuCrisisEscalated and 95 or 70))
+            elseif catastrophicOverextend then
                 runtime.ACUStrictLeashUntil = math.max(runtime.ACUStrictLeashUntil or -999, now + 100)
             elseif severeDanger then
                 runtime.ACUStrictLeashUntil = math.max(runtime.ACUStrictLeashUntil or -999, now + 45)
             end
 
-            if severeDanger and recallAction ~= 'leash_reposition' and IssueClearCommands then
+            if (acuCrisisActive or severeDanger) and recallAction ~= 'leash_reposition' and IssueClearCommands then
                 IssueClearCommands({ acu })
             end
             if IssueMove then
-                if catastrophicOverextend then
+                if acuCrisisActive then
+                    local crisisStage = LerpPos(acuPos, recallPos, 0.45)
+                    if crisisStage then
+                        IssueMove({ acu }, crisisStage)
+                    end
+                elseif catastrophicOverextend then
                     local stage = LerpPos(acuPos, homePos, 0.5)
                     if stage then
                         IssueMove({ acu }, stage)
