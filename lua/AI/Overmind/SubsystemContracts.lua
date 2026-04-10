@@ -34,14 +34,14 @@ local function ResolveModuleFn(moduleRef, fieldName)
         return false, 'module-not-table'
     end
 
-    local fn = rawget(moduleRef, fieldName)
+    local fn = moduleRef[fieldName]
     if type(fn) == 'function' then
         return fn, false
     end
 
-    local nested = rawget(moduleRef, 'Module')
+    local nested = moduleRef.Module
     if type(nested) == 'table' then
-        local nestedRaw = rawget(nested, fieldName)
+        local nestedRaw = nested[fieldName]
         if type(nestedRaw) == 'function' then
             return nestedRaw, false
         end

@@ -290,10 +290,49 @@ local function TryExecuteStarterTask(aiBrain, runtime, acu, homePos, director, c
     local radarNeeded = constraints.StarterRadarRequired == true and radarReady <= 0 and powerReady >= math.max(1, powerFloor - 1)
     local powerNeeded = powerReady < powerFloor
     local criticalPowerNeeded = powerReady <= 0
+    local starterPowerCount = 0
+    local starterPowers = aiBrain:GetListOfUnits(StarterPowerCategory, false, true) or {}
+    for _, unit in starterPowers do
+        if unit and not unit.Dead then
+            starterPowerCount = starterPowerCount + 1
+        end
+    end
     local starterMexRush = readyLandFactories >= 1
         and powerReady >= 1
         and mexReady < mexFloor
     local mexPreferred = starterMexRush and not criticalPowerNeeded
+
+    if readyLandFactories >= 1 and IssueBuildMobile then
+        local issuedStarterQueue = false
+        local anchor = GetStarterFactoryAnchor(aiBrain, homePos)
+
+        if starterPowerCount <= 0 then
+            local powerBp = PickBuildableBlueprint(acu, StarterPowerCategory)
+            local powerPos = powerBp and FindStarterBuildPos(aiBrain, anchor, StarterPowerCategory, categories.FACTORY * categories.STRUCTURE)
+            if powerBp and powerPos then
+                IssueBuildMobile({ acu }, powerPos, powerBp, {})
+                issuedStarterQueue = true
+            end
+        end
+
+        if mexReady < mexFloor then
+            local mexBp = PickBuildableBlueprint(acu, StarterMexCategory)
+            local neededMexes = math.min(4, math.max(2, mexFloor - mexReady))
+            local mexQueue = mexBp and FindSafeMexSequence(aiBrain, homePos, 220, neededMexes)
+            if mexBp and mexQueue and table.getn(mexQueue) > 0 then
+                for _, mexPos in mexQueue do
+                    IssueBuildMobile({ acu }, mexPos, mexBp, {})
+                end
+                issuedStarterQueue = true
+            end
+        end
+
+        if issuedStarterQueue then
+            runtime.ACUSafetyLockUntil = math.max(runtime.ACUSafetyLockUntil or -999, now + 6)
+            runtime.ACUHardBuildLockUntil = math.max(runtime.ACUHardBuildLockUntil or -999, now + 20)
+            return true
+        end
+    end
 
     if mexPreferred and IssueBuildMobile then
         local bp = PickBuildableBlueprint(acu, StarterMexCategory)
