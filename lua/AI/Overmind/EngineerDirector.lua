@@ -1,6 +1,6 @@
 local AIUtils = import('/lua/ai/aiutilities.lua')
 local OvermindMemory = import('/mods/OvermindAI/lua/AI/Overmind/Memory.lua')
-local Module = {}
+Module = {}
 
 local T1MexCategory = categories.STRUCTURE * categories.MASSEXTRACTION * categories.TECH1
 local EnemyMexCategory = categories.STRUCTURE * categories.MASSEXTRACTION
