@@ -2423,8 +2423,13 @@ local function UpdateDirector(aiBrain, now)
 end
 
 Module.Update = UpdateDirector
+Module.Run = UpdateDirector
 
 function Update(aiBrain, now)
+    return UpdateDirector(aiBrain, now)
+end
+
+function Run(aiBrain, now)
     return UpdateDirector(aiBrain, now)
 end
 
