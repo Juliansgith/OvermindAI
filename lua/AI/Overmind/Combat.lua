@@ -337,6 +337,7 @@ function EnforceCommanderSafety(aiBrain, now)
     local q = acu.GetCommandQueue and acu:GetCommandQueue() or false
     local isIdle = (not q or table.getn(q) == 0)
     local isConstructing = acu:IsUnitState('Building') or acu:IsUnitState('Upgrading')
+    local macroObjective = ((runtime.ProductionDirector or {}).MacroObjective) or 'land_factory_floor'
     local idleFar = isIdle and distance > math.max(15, maxDistance + 3)
     local constraints = ((runtime.ProductionDirector or {}).ConstraintState) or {}
     local starterSafeLeash = constraints.StarterPhase
@@ -475,6 +476,23 @@ function EnforceCommanderSafety(aiBrain, now)
         enemyContactUnsafe = false
         raidRecall = false
         underThreat = false
+    end
+    local techAnchorPosture = (macroObjective == 'first_land_hq' or macroObjective == 'first_t2_engineer' or macroObjective == 'first_t2_power')
+        and distance <= math.max(34, maxDistance + 18)
+        and escortCount >= 6
+        and healthRatio >= 0.85
+        and localThreat <= (homeThreat + 4.2)
+        and enemyRaiders <= 2
+        and not lowHealth
+        and not enemyContactUnsafe
+        and not raidRecall
+        and (runtime.LastAcuDamageTime or -999) < (now - 8)
+    if techAnchorPosture then
+        shouldRecall = false
+        idleFar = false
+        stuckFar = false
+        earlyHardLeash = false
+        noMansLand = false
     end
 
     local canInterruptConstruction = catastrophicOverextend

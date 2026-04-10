@@ -518,6 +518,7 @@ function Update(aiBrain, now)
     local underHarass = raid.UnderLandHarass or raid.UnderAirHarass
     local director = runtime.ProductionDirector or {}
     local constraints = director.ConstraintState or {}
+    local macroObjective = director.MacroObjective or 'land_factory_floor'
     local forceStats = ((runtime.ForceDirector or {}).Stats) or {}
     local strictLeash = now < (runtime.ACUStrictLeashUntil or -999)
     local engState = runtime.EngineerState or {}
@@ -544,6 +545,8 @@ function Update(aiBrain, now)
     if openingFactoryFloor then
         desired = 'anchor'
     elseif starterPhaseLock then
+        desired = 'anchor'
+    elseif macroObjective == 'first_land_hq' or macroObjective == 'first_t2_engineer' or macroObjective == 'first_t2_power' then
         desired = 'anchor'
     elseif insideDefendedSpace and desired == 'retreat' and healthRatio >= 0.8 and not underHarass and localThreat <= (homeThreat + 1.8) then
         desired = 'anchor'
@@ -575,6 +578,9 @@ function Update(aiBrain, now)
     runtime.ACURoleState = roleState
     runtime.ACURole = roleState.Current
     runtime.ACURoleMaxDistance = RoleDistance(roleState.Current)
+    if macroObjective == 'first_land_hq' or macroObjective == 'first_t2_engineer' or macroObjective == 'first_t2_power' then
+        runtime.ACURoleMaxDistance = math.min(runtime.ACURoleMaxDistance, 12)
+    end
     if strictLeash then
         runtime.ACURoleMaxDistance = math.min(runtime.ACURoleMaxDistance, 16)
     end

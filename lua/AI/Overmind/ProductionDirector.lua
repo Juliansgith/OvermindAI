@@ -856,7 +856,7 @@ local function BuildDemandLedger(runtime, current, constraints, trends, confiden
     }
 end
 
-local function DecideDomainBudget(mode, constraints, demand, confidence)
+local function DecideDomainBudget(mode, constraints, demand, confidence, macroObjective)
     local raw = BaseDomainBudget(mode)
 
     raw.Land = raw.Land + (demand.FrontPressure * 0.14) + (demand.BasePressure * 0.09) + (demand.EscortPressure * 0.06)
@@ -907,6 +907,20 @@ local function DecideDomainBudget(mode, constraints, demand, confidence)
         raw.Intel = raw.Intel + 0.05
         raw.Tech = raw.Tech - 0.03
         raw.Air = raw.Air - 0.01
+    end
+    if macroObjective == 'first_land_hq' then
+        raw.Land = raw.Land + 0.08
+        raw.Eco = raw.Eco + 0.05
+        raw.Tech = raw.Tech + 0.16
+        raw.Air = raw.Air - (constraints.ConfirmedHarass and 0.05 or 0.14)
+        raw.Defense = raw.Defense - (constraints.ConfirmedHarass and 0.03 or 0.10)
+        raw.Intel = raw.Intel - 0.03
+    elseif macroObjective == 'first_t2_engineer' or macroObjective == 'first_t2_power' then
+        raw.Land = raw.Land + 0.06
+        raw.Eco = raw.Eco + 0.04
+        raw.Tech = raw.Tech + 0.14
+        raw.Air = raw.Air - (constraints.ConfirmedHarass and 0.04 or 0.10)
+        raw.Defense = raw.Defense - (constraints.ConfirmedHarass and 0.02 or 0.08)
     end
     if constraints.CounterAirWindow then
         raw.Air = raw.Air + 0.11
@@ -2042,12 +2056,12 @@ function Module.Update(aiBrain, now)
     local constraints = BuildConstraints(runtime, current, confidence, scoutingDebt, navalActive, now)
     local scores = ScoreModes(now, runtime, current, constraints, trends, confidence)
     local mode, bestScore, previousMode, previousScore = PickMode(state, scores, now)
-    local demand = BuildDemandLedger(runtime, current, constraints, trends, confidence, mode)
-    local budget = DecideDomainBudget(mode, constraints, demand, confidence)
-    local rolePlan = DecideRolePlan(runtime, current, constraints, demand, budget, confidence, mode, trends)
     local techPlan = DecideTechPlan(runtime, current, constraints, confidence, mode)
     local structurePlan = DecideStructurePlan(runtime, current, constraints, confidence, mode, now)
     local macroObjective = DecideMacroObjective(aiBrain, runtime, current, constraints, techPlan, mode, now)
+    local demand = BuildDemandLedger(runtime, current, constraints, trends, confidence, mode)
+    local budget = DecideDomainBudget(mode, constraints, demand, confidence, macroObjective.Name)
+    local rolePlan = DecideRolePlan(runtime, current, constraints, demand, budget, confidence, mode, trends)
     state.MacroObjective = macroObjective.Name
     state.MacroObjectiveReason = macroObjective.Reason
     local capacityPlan = DecideCapacityPlan(runtime, current, constraints, rolePlan)

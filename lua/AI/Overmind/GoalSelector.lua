@@ -194,7 +194,7 @@ local function GetGoalUtilities(signals)
         + math.max(0, signals.Momentum) * 1.9
         + math.max(0, signals.RelativePower - 0.95) * 1.2
         + (signals.AttackWindow and 1.6 or 0)
-        + (signals.DesperationCounterstrike and 1.0 or 0)
+        + (signals.DesperationCounterstrike and 2.2 or 0)
         + ((signals.CounterAirWindow or (signals.EnemyLowAirThreat and (signals.EnemyIndirectHeavy or signals.EnemyT2Push))) and 0.8 or 0)
         - (signals.RaidThreat * 0.18)
         - (signals.RaidAirThreat * 0.28)
@@ -214,7 +214,7 @@ local function GetGoalUtilities(signals)
         + math.max(0, signals.Momentum) * 2.2
         + math.max(0, signals.MapControl - 0.85) * 1.3
         + (signals.AttackWindow and 2.1 or 0)
-        + (signals.DesperationCounterstrike and 2.4 or 0)
+        + (signals.DesperationCounterstrike and 4.2 or 0)
         + ((signals.EnemyLowAirThreat and signals.EnemyT2Push) and 0.8 or 0)
         - (signals.ApproachClose and 1.4 or 0)
         - (signals.StallingMass and 1.6 or 0)
@@ -294,9 +294,15 @@ local function GetGoalUtilities(signals)
         util.expand = util.expand - 0.4
     end
     if signals.DesperationCounterstrike then
-        util.hold = util.hold - 1.0
+        util.hold = util.hold - 2.0
         util.expand = util.expand - 0.6
         util.tech = util.tech - 0.8
+    end
+    if planner.MacroObjective == 'first_land_hq'
+        or planner.MacroObjective == 'first_t2_engineer'
+        or planner.MacroObjective == 'first_t2_power' then
+        util.tech = util.tech + 0.9
+        util.hold = util.hold - 0.5
     end
 
     if signals.Time < 240 then

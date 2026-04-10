@@ -593,9 +593,22 @@ local function PickFactoryTarget(aiBrain, runtime, state)
             and not constraints.QueueStarved
         local hqPowerOverride = constraints.PowerBufferLow
             and mandatoryFirstHQ
-            and (eco.EnergyIncome or 0) >= 44
-            and (eco.EnergyStorageRatio or 0) >= 0.04
-            and (eco.EnergyTrend or 0) >= -6
+            and (
+                powerReady >= 6
+                or (
+                    (eco.EnergyIncome or 0) >= 10
+                    and (eco.EnergyStorageRatio or 0) >= 0.00
+                    and (eco.EnergyTrend or 0) >= -10
+                    and readyLand >= 4
+                    and mexReady >= 4
+                )
+                or (
+                    airFactoryDebt
+                    and powerReady >= 5
+                    and (eco.EnergyIncome or 0) >= 8
+                    and (eco.EnergyTrend or 0) >= -12
+                )
+            )
         local hqFactoryOverride = ignoreAirFactoryDebt or (constraints.CriticalFactory
             and mandatoryFirstHQ
             and (not landFactoryDebt or airFactoryDebt)
@@ -617,12 +630,12 @@ local function PickFactoryTarget(aiBrain, runtime, state)
     end
     local surplusSpendWindow = constraints.SurplusSpendWindow == true
     local strongSurplusWindow = constraints.StrongSurplusWindow == true
-    local firstHQMassIncomeFloor = mandatoryFirstHQ and ((airFactoryDebt and 1.8) or 2.0) or 3.2
-    local firstHQEnergyIncomeFloor = mandatoryFirstHQ and ((airFactoryDebt and 28) or 34) or 58
+    local firstHQMassIncomeFloor = mandatoryFirstHQ and ((airFactoryDebt and 1.5) or 1.7) or 3.2
+    local firstHQEnergyIncomeFloor = mandatoryFirstHQ and ((airFactoryDebt and 8) or 10) or 58
     local firstHQMassStorageFloor = mandatoryFirstHQ and ((airFactoryDebt and 0.00) or 0.01) or 0.06
-    local firstHQEnergyStorageFloor = mandatoryFirstHQ and ((airFactoryDebt and 0.00) or 0.02) or 0.12
-    local firstHQMassTrendFloor = mandatoryFirstHQ and ((airFactoryDebt and -0.55) or -0.40) or -0.14
-    local firstHQEnergyTrendFloor = mandatoryFirstHQ and ((airFactoryDebt and -16) or -12) or -2
+    local firstHQEnergyStorageFloor = mandatoryFirstHQ and 0.00 or 0.12
+    local firstHQMassTrendFloor = mandatoryFirstHQ and ((airFactoryDebt and -0.70) or -0.55) or -0.14
+    local firstHQEnergyTrendFloor = mandatoryFirstHQ and ((airFactoryDebt and -18) or -14) or -2
 
     if readyLand < 3 or totalLand < 3 or powerReady < 3 or mexReady < 3 then
         state.Reason = 'factory_floor'
@@ -658,7 +671,9 @@ local function PickFactoryTarget(aiBrain, runtime, state)
             local pos = fac.GetPosition and fac:GetPosition() or false
             if upgradeBp and pos and GetCommandQueueLength(fac) <= 0 then
                 local score, risk, threat, dist, _ = ScoreSafeUpgradeLocation(aiBrain, pos, mainPos, factoryClusterPos, 280)
-                if risk <= 3 and threat <= 1.8 then
+                local riskLimit = mandatoryFirstHQ and 4.2 or 3
+                local threatLimit = mandatoryFirstHQ and 2.6 or 1.8
+                if risk <= riskLimit and threat <= threatLimit then
                     local facScore = score + 80 - (dist * 0.04) + (surplusSpendWindow and 18 or 0) + (strongSurplusWindow and 12 or 0) + (readyLand >= 5 and 20 or 0) + (mandatoryFirstHQ and 40 or 0)
                     if facScore > bestScore then
                         bestScore = facScore
