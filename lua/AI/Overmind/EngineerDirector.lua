@@ -1,5 +1,6 @@
 local AIUtils = import('/lua/ai/aiutilities.lua')
 local OvermindMemory = import('/mods/OvermindAI/lua/AI/Overmind/Memory.lua')
+local Module = {}
 
 local T1MexCategory = categories.STRUCTURE * categories.MASSEXTRACTION * categories.TECH1
 local EnemyMexCategory = categories.STRUCTURE * categories.MASSEXTRACTION
@@ -2420,3 +2421,7 @@ function Update(aiBrain, now)
             sz))
     end
 end
+
+Module.Update = Update
+
+return Module
