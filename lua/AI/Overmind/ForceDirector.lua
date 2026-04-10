@@ -338,6 +338,7 @@ function Module.Update(aiBrain, now)
     local planner = runtime.StrategicPlanner or {}
     local primaryTheater = planner.PrimaryTheater or 'Front'
     local directive = planner.Directive or 'stabilize'
+    local attackWindow = planner.AttackWindow == true or runtime.StrategyGoal == 'all_in'
     local raidCentrality = planner.RaidCentrality or 0
     local forceAirAnswer = planner.ForceAirAnswer == true
     local punishGreed = planner.PunishGreed == true
@@ -455,6 +456,12 @@ function Module.Update(aiBrain, now)
     end
     if raidCentrality >= 0.62 and not (frontCrisis or assetSiege) then
         raiderNeed = Clamp(raiderNeed + 2, 0, 10)
+    end
+    if attackWindow and not (frontCrisis or assetSiege or raid.UnderLandHarass) then
+        raiderNeed = Clamp(math.max(raiderNeed, 5 + math.floor(raidCentrality * 4)), 4, 12)
+        mainlineNeed = Clamp(mainlineNeed + 4, 10, 44)
+        baseGuardDirectNeed = Clamp(baseGuardDirectNeed - 1, 3, 12)
+        baseGuardAANeed = Clamp(baseGuardAANeed - 1, 1, 6)
     end
     local interceptDirectNeed = 0
     local interceptAANeed = 0

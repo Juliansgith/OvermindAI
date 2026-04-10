@@ -150,6 +150,15 @@ local function BuildSignals(aiBrain, runtime, now)
         EscortUnits = forceStats.ACUEscort or 0,
         UnderLandHarass = raid.UnderLandHarass == true,
         UnderAirHarass = raid.UnderAirHarass == true,
+        AttackWindow = (
+            relativePower >= 1.04
+            and mapControl >= 0.34
+            and not ecoWeak
+            and not recoveryActive
+            and not approachClose
+            and ((frontTheater.PressureEMA or frontTheater.Pressure or 0) >= 1.6)
+            and ((forceStats.MainLine or 0) + (forceStats.Artillery or 0) >= math.max(18, (forceStats.BaseGuard or 0) + 8))
+        ) and true or false,
     }
 end
 
@@ -239,6 +248,7 @@ local function ScoreDirectives(signals, primaryTheater)
         (signals.GreedWindow and 2.0 or 0)
         + (signals.BestRaidScore * 0.06)
         + math.max(0, signals.RelativePower - 0.92) * 1.1
+        + (signals.AttackWindow and 1.1 or 0)
         + ((primaryTheater == 'Enemy') and 0.8 or 0)
         - (signals.ApproachClose and 0.8 or 0)
         - (signals.RecoveryActive and 1.0 or 0)
@@ -264,11 +274,17 @@ local function ScoreDirectives(signals, primaryTheater)
         (signals.GreedWindow and 1.2 or 0)
         + (signals.PushWindow and 0.8 or 0)
         + math.max(0, signals.RelativePower - 0.96) * 1.0
+        + (signals.AttackWindow and 1.3 or 0)
         + (signals.BestRaidScore * 0.04)
         + ((primaryTheater == 'Front') and 0.5 or 0)
         + ((primaryTheater == 'Enemy') and 0.4 or 0)
         - (signals.DurableSurplus and 0.4 or 0)
         - (signals.RecoveryActive and 1.2 or 0)
+
+    if signals.AttackWindow then
+        scores.stabilize = scores.stabilize - 0.9
+        scores.expand = scores.expand - 0.4
+    end
 
     return scores
 end
@@ -329,6 +345,7 @@ local function BuildDirectiveState(signals, primaryTheater, directive)
         ForceAirAnswer = forceAirAnswer and true or false,
         TradeMapForTech = tradeMapForTech and true or false,
         TradeTechForTempo = tradeTechForTempo and true or false,
+        AttackWindow = signals.AttackWindow and true or false,
         RaidCentrality = raidCentrality,
         RaidDirective = (raidCentrality >= 0.58) and 'central' or 'opportunistic',
         TempoMode = tempoMode,
@@ -395,6 +412,11 @@ local function BuildGoalBiases(primaryTheater, directiveState, directive)
     bias.raid = bias.raid + (directiveState.RaidCentrality * 1.3)
     bias.tech = bias.tech + (directiveState.TechBias * 1.2)
     bias.all_in = bias.all_in + math.max(0, directiveState.TempoBias - 0.25) * 0.8
+    if directiveState.AttackWindow then
+        bias.raid = bias.raid + 0.9
+        bias.all_in = bias.all_in + 1.4
+        bias.hold = bias.hold - 0.7
+    end
 
     return bias
 end
