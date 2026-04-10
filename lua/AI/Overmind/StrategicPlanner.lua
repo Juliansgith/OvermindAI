@@ -44,6 +44,9 @@ local function BuildSignals(aiBrain, runtime, now)
     local force = runtime.ForceDirector or runtime.ForceManager or {}
     local policy = runtime.EcoPolicy or {}
     local phase = runtime.MacroPhase or policy.MacroPhase or 'consolidate'
+    local prioritizeProduction = policy.PrioritizeProduction == true
+    local contestMapMode = policy.ContestMapMode == true
+    local preferTempoFromSurplus = policy.PreferTempoFromSurplus == true
     local macro = runtime.MacroController or {}
     local macroObjective = macro.Phase or ((runtime.ProductionDirector or {}).MacroObjective) or 'land_factory_floor'
     local transitionLocked = macro.TransitionLocked == true
@@ -168,6 +171,9 @@ local function BuildSignals(aiBrain, runtime, now)
             and ((forceStats.MainLine or 0) + (forceStats.Artillery or 0) >= math.max(14, (forceStats.BaseGuard or 0) + 4))
             and (relativePower <= 1.08 or opp.Posture == 'land_push' or opp.T2Push == true or (homeTheater.Confidence or 0) < 0.45)
         ) and true or false,
+        PrioritizeProduction = prioritizeProduction,
+        ContestMapMode = contestMapMode,
+        PreferTempoFromSurplus = preferTempoFromSurplus,
         MacroObjective = macroObjective,
         TransitionLocked = transitionLocked,
     }
@@ -319,18 +325,40 @@ local function ScoreDirectives(signals, primaryTheater)
         scores.trade_tech_for_tempo = scores.trade_tech_for_tempo + 0.9
         scores.trade_map_for_tech = scores.trade_map_for_tech + 0.6
     end
+    if signals.PrioritizeProduction then
+        scores.trade_tech_for_tempo = scores.trade_tech_for_tempo + 1.2
+        scores.punish_greed = scores.punish_greed + 0.5
+        scores.trade_map_for_tech = scores.trade_map_for_tech - 1.2
+        scores.expand = scores.expand - 0.4
+        scores.stabilize = scores.stabilize - 0.3
+    end
+    if signals.ContestMapMode then
+        scores.trade_tech_for_tempo = scores.trade_tech_for_tempo + 0.7
+        scores.punish_greed = scores.punish_greed + 0.3
+        scores.force_air_answer = scores.force_air_answer - (signals.ApproachClose and 0.0 or 0.8)
+        scores.trade_map_for_tech = scores.trade_map_for_tech - 0.7
+    end
+    if signals.PreferTempoFromSurplus then
+        scores.trade_tech_for_tempo = scores.trade_tech_for_tempo + 0.5
+        scores.trade_map_for_tech = scores.trade_map_for_tech - 0.4
+    end
 
     return scores
 end
 
 local function BuildDirectiveState(signals, primaryTheater, directive)
-    local punishGreed = directive == 'punish_greed' or signals.GreedWindow
+    local punishGreed = directive == 'punish_greed'
+        or signals.GreedWindow
+        or (signals.PrioritizeProduction and signals.AttackWindow)
     local tradeMapForTech = directive == 'trade_map_for_tech'
+        and not signals.PrioritizeProduction
     local tradeTechForTempo = directive == 'trade_tech_for_tempo'
         or (directive == 'punish_greed' and not signals.DurableSurplus)
+        or signals.PrioritizeProduction
     local forceAirAnswer = (directive == 'force_air_answer' or signals.ForceAirAnswerCandidate)
         and not (signals.MacroObjective == 'first_land_hq' or signals.MacroObjective == 'first_t2_engineer')
         and not signals.TransitionLocked
+        and (not signals.PrioritizeProduction or signals.ApproachClose or signals.HomePressure >= 4.5 or signals.FrontPressure >= 5.0)
 
     local raidCentrality = Clamp(
         (signals.BestRaidScore * 0.04)
@@ -357,8 +385,8 @@ local function BuildDirectiveState(signals, primaryTheater, directive)
         techBias = -0.35
     elseif tradeTechForTempo or punishGreed then
         tempoMode = 'tempo'
-        tempoBias = 0.55
-        techBias = -0.45
+        tempoBias = signals.PrioritizeProduction and 0.68 or 0.55
+        techBias = signals.PrioritizeProduction and -0.58 or -0.45
     elseif directive == 'expand' then
         tempoMode = 'balanced'
         tempoBias = 0.18

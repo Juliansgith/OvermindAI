@@ -100,6 +100,10 @@ local function DetermineDesiredPhase(aiBrain, runtime, now)
     local eco = runtime.EcoState or {}
     local recovery = runtime.Recovery or {}
     local raid = runtime.RaidDefense or {}
+    local opp = runtime.OpponentModel or {}
+    local intel = runtime.IntelModel or {}
+    local graph = runtime.ZoneGraph or {}
+    local zone = runtime.ZoneModel or {}
     local readyLand = CountReadyUnits(aiBrain, categories.FACTORY * categories.LAND * categories.STRUCTURE)
     local totalLand = CountUnits(aiBrain, categories.FACTORY * categories.LAND * categories.STRUCTURE)
     local readyMex = CountReadyUnits(aiBrain, categories.MASSEXTRACTION * categories.STRUCTURE)
@@ -114,6 +118,16 @@ local function DetermineDesiredPhase(aiBrain, runtime, now)
         or recovery.EcoCrash == true
     local underHarass = raid.UnderLandHarass == true or raid.UnderAirHarass == true
     local massBudget = ComputeMassBudget(eco)
+    local contestedZones = intel.ContestedZones or graph.ContestedZones or 0
+    local mapControl = intel.MapControl or graph.MapControl or zone.MapControl or 0
+    local zoneCount = table.getn(graph.Nodes or {})
+    local navMarkerCount = zone.NavMarkerCount or graph.WaterZones or 0
+    local contestTempoMap = navMarkerCount < 3
+        and zoneCount >= 6
+        and contestedZones >= 2
+        and now < 840
+        and mapControl <= 0.62
+        and (opp.RelativePower or 1) <= 1.08
 
     local facts = {
         ReadyLandFactories = readyLand,
@@ -128,6 +142,7 @@ local function DetermineDesiredPhase(aiBrain, runtime, now)
         CriticalLandFactoryDebt = criticalFactoryDebt,
         EcoCrash = ecoCrash,
         UnderHarass = underHarass,
+        ContestTempoMap = contestTempoMap,
         MassBudget = massBudget,
         EnergyTrend = eco.EnergyTrend or 0,
         MassTrend = eco.MassTrend or 0,
@@ -149,6 +164,15 @@ local function DetermineDesiredPhase(aiBrain, runtime, now)
         if readyLand >= 3 and readyMex >= 4 and readyPower >= 3 then
             if activeLandFactoryUpgrades > 0 then
                 return 'first_land_hq', 'hq_in_flight', facts
+            end
+            if contestTempoMap
+                and readyLand < 5
+                and readyMex >= 5
+                and readyPower >= 4
+                and massBudget >= 6.0
+                and not ecoCrash
+                and not underHarass then
+                return 'mass_consolidation', 'contest_mode_tempo', facts
             end
             if massBudget >= 7.0 and not ecoCrash then
                 return 'first_land_hq', 'phase_owned_hq', facts

@@ -169,6 +169,44 @@ local function ClassifyMexScope(distMain, distAnchor)
     return 'remote'
 end
 
+local function CountActiveMexUpgradeScopes(aiBrain, mainPos, anchorPos, localRadius)
+    local mexes = aiBrain:GetListOfUnits(categories.MASSEXTRACTION * categories.STRUCTURE, false, true) or {}
+    local counts = {
+        Total = 0,
+        Core = 0,
+        InnerLocal = 0,
+        OuterLocal = 0,
+        Remote = 0,
+        Local = 0,
+    }
+    for _, mex in mexes do
+        if mex and not mex.Dead and mex:IsUnitState('Upgrading') then
+            local pos = mex.GetPosition and mex:GetPosition() or false
+            if pos then
+                local distMain = Distance2D(pos, mainPos)
+                local distAnchor = anchorPos and Distance2D(pos, anchorPos) or distMain
+                local scope = ClassifyMexScope(distMain, distAnchor)
+                counts.Total = counts.Total + 1
+                if scope == 'core' then
+                    counts.Core = counts.Core + 1
+                    counts.Local = counts.Local + 1
+                elseif scope == 'inner_local' then
+                    counts.InnerLocal = counts.InnerLocal + 1
+                    counts.Local = counts.Local + 1
+                elseif scope == 'outer_local' then
+                    counts.OuterLocal = counts.OuterLocal + 1
+                    if distMain <= localRadius then
+                        counts.Local = counts.Local + 1
+                    end
+                else
+                    counts.Remote = counts.Remote + 1
+                end
+            end
+        end
+    end
+    return counts
+end
+
 local function ComputeDynamicMexCap(eco, readyLand, totalLand, powerReady, mexReady, surplusSpendWindow, strongSurplusWindow)
     if readyLand < 2 or totalLand < 3 or powerReady < 3 or mexReady < 4 then
         return 0
@@ -244,6 +282,7 @@ local function PickMexTarget(aiBrain, runtime, state)
     local current = director.Current or {}
     local techPlan = director.TechPlan or {}
     local constraints = director.ConstraintState or {}
+    local policy = runtime.EcoPolicy or {}
     local planner = runtime.StrategicPlanner or {}
     local eco = runtime.EcoState or {}
     local confidence = director.Confidence or {}
@@ -258,12 +297,17 @@ local function PickMexTarget(aiBrain, runtime, state)
     local mexReady = (((current.Eco or {}).Mex or {}).Ready) or 0
     local mapControl = zone.MapControl or 0
     local tempoMode = planner.TradeTechForTempo or planner.PunishGreed or techPlan.ExtractorUpgradeReason == 'tempo_mode'
+    local prioritizeProduction = policy.PrioritizeProduction == true
+    local contestMapMode = policy.ContestMapMode == true
+    local localMexOnly = policy.LocalMexUpgradeOnly == true
+    local localMexConcurrentCap = math.max(1, policy.LocalMexUpgradeMaxConcurrent or 2)
     local scoutingDebt = techPlan.ExtractorUpgradeReason == 'scouting_debt'
     local surplusSpendWindow = constraints.SurplusSpendWindow == true
     local strongSurplusWindow = constraints.StrongSurplusWindow == true
     local macroObjective = GetMacroObjective(runtime)
     local mexBudget, budgetT2Cap = ComputeEarlyMexUpgradeBudget(eco, readyLand, totalLand, powerReady, mexReady)
     local activeMexUpgrades = CountActiveMexUpgrades(aiBrain)
+    local activeUpgradeScopes = CountActiveMexUpgradeScopes(aiBrain, mainPos, factoryClusterPos, localRadius)
     local stableFactoryFloor = readyLand >= 2
         and totalLand <= (readyLand + 1)
         and powerReady >= 3
@@ -296,6 +340,8 @@ local function PickMexTarget(aiBrain, runtime, state)
     end
 
     state.InFlight = activeMexUpgrades
+    state.LocalInFlight = activeUpgradeScopes.Local or 0
+    state.RemoteInFlight = activeUpgradeScopes.Remote or 0
     local inflightTarget = false
     local inflightTargetTech = false
     local inflightTargetScope = false
@@ -330,6 +376,9 @@ local function PickMexTarget(aiBrain, runtime, state)
     if surplusSpendWindow and readyLand >= 4 and powerReady >= 4 and mexReady >= 5 and not constraints.LandPanic and not constraints.AirPanic then
         allowGeneralT2 = true
     end
+    if localMexOnly and not strongSurplusWindow then
+        allowGeneralT2 = false
+    end
 
     local allowTech3 = techPlan.UpgradeExtractors == true
         and not tempoMode
@@ -348,11 +397,17 @@ local function PickMexTarget(aiBrain, runtime, state)
     if strongSurplusWindow and not tempoMode and not scoutingDebt and readyLand >= 5 and powerReady >= 5 and mexReady >= 5 then
         allowTech3 = true
     end
+    if contestMapMode then
+        allowTech3 = false
+    end
     local dynamicT2Cap = math.max(budgetT2Cap, ComputeDynamicMexCap(eco, readyLand, totalLand, powerReady, mexReady, surplusSpendWindow, strongSurplusWindow))
     if macroObjective == 'mass_consolidation' then
         dynamicT2Cap = math.max(dynamicT2Cap, math.max(1, budgetT2Cap))
     elseif macroObjective == 'first_land_hq' or macroObjective == 'first_t2_engineer' or macroObjective == 'first_t2_power' then
         dynamicT2Cap = math.min(dynamicT2Cap, 1)
+    end
+    if localMexOnly then
+        dynamicT2Cap = math.min(dynamicT2Cap, localMexConcurrentCap)
     end
 
     if activeMexUpgrades > 0 then
@@ -400,9 +455,10 @@ local function PickMexTarget(aiBrain, runtime, state)
                 end
                 local isLocal = distMain <= localRadius
                 local scopeClass = ClassifyMexScope(distMain, distAnchor)
+                local localScopeEligible = scopeClass == 'core' or scopeClass == 'inner_local' or ((not localMexOnly) and scopeClass == 'outer_local')
                 local localRiskCap = (budgetT2Cap >= 1) and 3.8 or 3.2
                 local localThreatCap = (budgetT2Cap >= 1) and 2.2 or 1.8
-                if tech == 1 and allowLocalT2 and isLocal and risk <= localRiskCap and threat <= localThreatCap then
+                if tech == 1 and allowLocalT2 and isLocal and localScopeEligible and risk <= localRiskCap and threat <= localThreatCap then
                     local localScore = score
                         + 90
                         + (tempoMode and 55 or 20)
@@ -424,7 +480,7 @@ local function PickMexTarget(aiBrain, runtime, state)
                         bestTech = 'tech2'
                         bestScope = scopeClass == 'core' and 'core' or 'local'
                     end
-                elseif tech == 1 and allowGeneralT2 and risk <= (isLocal and 3.4 or 2.4) and threat <= (isLocal and 1.9 or 1.1) then
+                elseif tech == 1 and allowGeneralT2 and not localMexOnly and risk <= (isLocal and 3.4 or 2.4) and threat <= (isLocal and 1.9 or 1.1) then
                     local generalScore = score + (isLocal and 70 or 28) + ((mapControl >= 0.5) and 10 or 0) + (surplusSpendWindow and 18 or 0) + (tempoMode and 18 or 0) + (scoutingDebt and 12 or 0)
                         + (scopeClass == 'core' and 120 or 0)
                         + (scopeClass == 'inner_local' and 45 or 0)
@@ -460,6 +516,7 @@ local function PickMexTarget(aiBrain, runtime, state)
         state.Scope = bestScope
         state.Enabled = true
         state.Reason = macroObjective == 'mass_consolidation' and bestTech == 'tech2' and 'objective_mass_consolidation'
+            or localMexOnly and bestTech == 'tech2' and 'local_tempo_consolidation'
             or budgetT2Cap >= 1 and bestTech == 'tech2' and 'budget_consolidation'
             or tempoMode and bestTech == 'tech2' and 'tempo_consolidation'
             or surplusSpendWindow and bestTech == 'tech2' and 'surplus_consolidation'
@@ -478,7 +535,8 @@ local function PickMexTarget(aiBrain, runtime, state)
         state.Cap = (inflightTargetTech == 'tech3') and 1 or dynamicT2Cap
         state.Aggressive = state.Cap > 1
     else
-        state.Reason = budgetT2Cap >= 1 and 'budget_wait'
+        state.Reason = (localMexOnly and activeUpgradeScopes.Local >= localMexConcurrentCap) and 'local_concurrency'
+            or budgetT2Cap >= 1 and 'budget_wait'
             or tempoMode and not surplusSpendWindow and 'tempo_mode'
             or scoutingDebt and not surplusSpendWindow and 'safe_wait'
             or surplusSpendWindow and 'surplus_wait'

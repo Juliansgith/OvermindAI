@@ -10,6 +10,10 @@ local function Clamp(v, minV, maxV)
     return v
 end
 
+local function TableCount(t)
+    return t and table.getn(t) or 0
+end
+
 local function GetUnitCount(aiBrain, category)
     if not aiBrain or not category then
         return 0
@@ -18,6 +22,9 @@ local function GetUnitCount(aiBrain, category)
 end
 
 local function DetermineMacroPhase(aiBrain, runtime, eco, opp, recovery, now)
+    local intel = runtime.IntelModel or {}
+    local graph = runtime.ZoneGraph or {}
+    local zone = runtime.ZoneModel or {}
     local mexCount = GetUnitCount(aiBrain, categories.MASSEXTRACTION * categories.STRUCTURE)
     local landFactories = GetUnitCount(aiBrain, categories.FACTORY * categories.LAND * categories.STRUCTURE)
     local airFactories = GetUnitCount(aiBrain, categories.FACTORY * categories.AIR * categories.STRUCTURE)
@@ -40,12 +47,22 @@ local function DetermineMacroPhase(aiBrain, runtime, eco, opp, recovery, now)
     local energyRatio = eco.EnergyStorageRatio or 0
     local massTrend = eco.MassTrend or 0
     local energyTrend = eco.EnergyTrend or 0
-    local mapControl = (runtime.IntelModel and runtime.IntelModel.MapControl)
-        or (runtime.ZoneGraph and runtime.ZoneGraph.MapControl)
-        or (runtime.ZoneModel and runtime.ZoneModel.MapControl)
+    local mapControl = intel.MapControl
+        or graph.MapControl
+        or zone.MapControl
         or 0
+    local contestedZones = intel.ContestedZones or graph.ContestedZones or 0
+    local zoneCount = TableCount(graph.Nodes or {})
+    local navMarkerCount = zone.NavMarkerCount or graph.WaterZones or 0
     local relativePower = opp.RelativePower or 1
     local stagnation = recovery.StagnationTime or 0
+    local landContestMap = navMarkerCount < 3 and zoneCount >= 6
+    local contestTempoWindow = landContestMap
+        and contestedZones >= 2
+        and now >= 180
+        and now <= 1020
+        and mapControl <= 0.66
+        and relativePower <= 1.08
 
     local weakMass = massIncome < 2.8 or (massRatio <= 0.07 and massTrend <= -0.06)
     local weakEnergy = energyIncome < 28 or (energyRatio <= 0.08 and energyTrend <= -6)
@@ -84,6 +101,14 @@ local function DetermineMacroPhase(aiBrain, runtime, eco, opp, recovery, now)
         return 'pressure', counts
     end
 
+    if contestTempoWindow and stableFactoryFeed and mexCount >= 5 and landFactories >= 2 then
+        return 'pressure', counts
+    end
+
+    if stableFactoryFeed and contestedZones >= 2 and landFactories >= 2 and now < 900 then
+        return 'pressure', counts
+    end
+
     return 'consolidate', counts
 end
 
@@ -95,6 +120,9 @@ function UpdatePolicy(aiBrain, now)
     local eco = runtime.EcoState or {}
     local opp = runtime.OpponentModel or {}
     local planner = runtime.StrategicPlanner or {}
+    local intel = runtime.IntelModel or {}
+    local graph = runtime.ZoneGraph or {}
+    local zone = runtime.ZoneModel or {}
     local recovery = runtime.Recovery or {}
     local goal = runtime.StrategyGoal or 'hold'
     local aggression = (runtime.Aggression or 1) + (runtime.GoalAggressionModifier or 0)
@@ -114,10 +142,48 @@ function UpdatePolicy(aiBrain, now)
     runtime.MacroPhase = phase
     runtime.MacroCounts = macroCounts
 
+    local mapControl = intel.MapControl or graph.MapControl or zone.MapControl or 0
+    local contestedZones = intel.ContestedZones or graph.ContestedZones or 0
+    local zoneCount = TableCount(graph.Nodes or {})
+    local navMarkerCount = zone.NavMarkerCount or graph.WaterZones or 0
+    local landContestMap = navMarkerCount < 3 and zoneCount >= 6
+    local stableTempoEco = (eco.MassIncome or 0) >= 3.6
+        and (eco.EnergyIncome or 0) >= 50
+        and massTrend >= -0.08
+        and energyTrend >= -4
+        and not energyStall
+    local contestMapMode = landContestMap
+        and contestedZones >= 2
+        and now >= 150
+        and now <= 1200
+        and phase ~= 'bootstrap'
+        and phase ~= 'recover'
+    local productionFirstWindow = contestMapMode
+        and stableTempoEco
+        and mapControl <= 0.68
+        and (opp.RelativePower or 1) <= 1.08
+    local prioritizeProduction = planner.TradeTechForTempo
+        or planner.PunishGreed
+        or goal == 'all_in'
+        or goal == 'raid'
+        or productionFirstWindow
+        or (stableTempoEco and phase == 'pressure' and contestedZones >= 2 and now < 900 and mapControl < 0.55)
+    local preferTempoFromSurplus = prioritizeProduction
+        and stableTempoEco
+        and not enemyPressure
+
     local policy = runtime.EcoPolicy or {}
     runtime.EcoPolicy = policy
 
     policy.MacroPhase = phase
+    policy.PrioritizeProduction = false
+    policy.ContestMapMode = false
+    policy.PreferTempoFromSurplus = false
+    policy.LocalMexUpgradeOnly = false
+    policy.LocalMexUpgradeMaxConcurrent = 2
+    policy.RelaxedFactoryTempo = false
+    policy.SuppressEarlyAir = false
+    policy.ProductionTempoBias = 0
     policy.EnergyNeedRatio = 0.42
     policy.EnergyNeedTrend = -3
     policy.SafeEnergyRatio = 0.3
@@ -172,6 +238,15 @@ function UpdatePolicy(aiBrain, now)
     policy.AcuOpeningMaxDistance = math.min(tune.ACUOpeningMaxDistance or 20, 16)
     policy.AcuMidMaxDistance = math.min(tune.ACUMidMaxDistance or 36, 24)
     policy.AcuLateMaxDistance = math.min(tune.ACULateMaxDistance or 60, 38)
+
+    policy.ContestMapMode = contestMapMode and true or false
+    policy.PrioritizeProduction = prioritizeProduction and true or false
+    policy.PreferTempoFromSurplus = preferTempoFromSurplus and true or false
+    policy.LocalMexUpgradeOnly = (contestMapMode or prioritizeProduction) and true or false
+    policy.LocalMexUpgradeMaxConcurrent = (contestMapMode or prioritizeProduction) and 1 or 2
+    policy.RelaxedFactoryTempo = (contestMapMode or prioritizeProduction) and true or false
+    policy.SuppressEarlyAir = (contestMapMode or prioritizeProduction) and true or false
+    policy.ProductionTempoBias = (contestMapMode and 0.28) or (prioritizeProduction and 0.16) or 0
 
     if now < 420 then
         policy.EngineerReserveMin = 5
@@ -382,6 +457,42 @@ function UpdatePolicy(aiBrain, now)
         policy.AirFactoryMinEnergyIncome = math.max(18, policy.AirFactoryMinEnergyIncome - 6)
         policy.RadarDesiredCap = policy.RadarDesiredCap + 1
         policy.MaxAirBomberShare = policy.MaxAirBomberShare + 0.06
+    end
+
+    if prioritizeProduction then
+        policy.FactoryMassIncome = math.max(2.9, policy.FactoryMassIncome - 0.9)
+        policy.FactoryEnergyIncome = math.max(46, policy.FactoryEnergyIncome - 16)
+        policy.FactoryMassRatio = math.min(policy.FactoryMassRatio, 0.3)
+        policy.FactoryEnergyRatio = math.min(policy.FactoryEnergyRatio, 0.28)
+        policy.FactoryMinMassTrend = math.min(policy.FactoryMinMassTrend, -0.06)
+        policy.FactoryMinEnergyTrend = math.min(policy.FactoryMinEnergyTrend, -2)
+        policy.FactoryMassPerFactory = math.max(0.95, policy.FactoryMassPerFactory - 0.12)
+        policy.FactoryToMexCap = math.max(policy.FactoryToMexCap, 1.06)
+        policy.T2MexMinTime = policy.T2MexMinTime + 75
+        policy.UpgradeMassIncome = policy.UpgradeMassIncome + 1.2
+        policy.UpgradeEnergyIncome = policy.UpgradeEnergyIncome + 14
+        policy.PrimaryFactorySoftCap = policy.PrimaryFactorySoftCap + 1
+        policy.AirFactoryMinMex = policy.AirFactoryMinMex + 1
+        policy.AirFactoryMinTime = policy.AirFactoryMinTime + 90
+        policy.AirFactoryMinEnergyIncome = policy.AirFactoryMinEnergyIncome + 10
+        policy.MaxAirBomberShare = math.max(0.15, policy.MaxAirBomberShare - 0.08)
+    end
+
+    if contestMapMode then
+        policy.FactoryMassIncome = math.max(2.6, policy.FactoryMassIncome - 0.7)
+        policy.FactoryEnergyIncome = math.max(42, policy.FactoryEnergyIncome - 12)
+        policy.FactoryMassRatio = math.min(policy.FactoryMassRatio, 0.28)
+        policy.FactoryEnergyRatio = math.min(policy.FactoryEnergyRatio, 0.26)
+        policy.FactoryMassPerFactory = math.max(0.92, policy.FactoryMassPerFactory - 0.1)
+        policy.FactoryToMexCap = math.max(policy.FactoryToMexCap, 1.1)
+        policy.EngineerFactoryRatio = math.max(0.82, policy.EngineerFactoryRatio - 0.05)
+        policy.T2MexMinTime = policy.T2MexMinTime + 45
+        policy.UpgradeMassIncome = policy.UpgradeMassIncome + 0.6
+        policy.UpgradeEnergyIncome = policy.UpgradeEnergyIncome + 8
+        policy.AirFactoryMinMex = policy.AirFactoryMinMex + 1
+        policy.AirFactoryMinTime = policy.AirFactoryMinTime + 60
+        policy.AirFactoryMinEnergyIncome = policy.AirFactoryMinEnergyIncome + 6
+        policy.PrimaryFactorySoftCap = policy.PrimaryFactorySoftCap + 1
     end
 
     policy.FactoryMassRatio = Clamp(policy.FactoryMassRatio, 0.18, 0.5)

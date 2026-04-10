@@ -856,7 +856,11 @@ local function BuildDemandLedger(runtime, current, constraints, trends, confiden
     }
 end
 
-local function DecideDomainBudget(mode, constraints, demand, confidence, macroObjective)
+local function DecideDomainBudget(runtime, mode, constraints, demand, confidence, macroObjective)
+    local policy = runtime.EcoPolicy or {}
+    local prioritizeProduction = policy.PrioritizeProduction == true
+    local contestMapMode = policy.ContestMapMode == true
+    local preferTempoFromSurplus = policy.PreferTempoFromSurplus == true
     local raw = BaseDomainBudget(mode)
 
     raw.Land = raw.Land + (demand.FrontPressure * 0.14) + (demand.BasePressure * 0.09) + (demand.EscortPressure * 0.06)
@@ -951,6 +955,24 @@ local function DecideDomainBudget(mode, constraints, demand, confidence, macroOb
         raw.Air = raw.Air - (constraints.ConfirmedHarass and 0.04 or 0.10)
         raw.Defense = raw.Defense - (constraints.ConfirmedHarass and 0.02 or 0.08)
     end
+    if prioritizeProduction then
+        raw.Land = raw.Land + 0.12 + (policy.ProductionTempoBias or 0)
+        raw.Eco = raw.Eco - 0.06
+        raw.Tech = raw.Tech - 0.12
+        raw.Air = raw.Air - (constraints.CounterAirWindow and 0.02 or 0.10)
+        raw.Defense = raw.Defense - (constraints.ConfirmedHarass and 0.01 or 0.04)
+    end
+    if contestMapMode then
+        raw.Land = raw.Land + 0.08
+        raw.Eco = raw.Eco - 0.04
+        raw.Tech = raw.Tech - 0.08
+        raw.Air = raw.Air - (constraints.CounterAirWindow and 0.01 or 0.08)
+    end
+    if preferTempoFromSurplus and constraints.SurplusSpendWindow then
+        raw.Land = raw.Land + 0.10
+        raw.Eco = raw.Eco - 0.04
+        raw.Tech = raw.Tech - 0.08
+    end
     if constraints.CounterAirWindow then
         raw.Air = raw.Air + 0.11
         raw.Land = raw.Land + 0.02
@@ -1023,6 +1045,8 @@ local function DecideRolePlan(runtime, current, constraints, demand, budget, con
     local policy = runtime.EcoPolicy or {}
     local opp = runtime.OpponentModel or {}
     local powerReady = (((current.Eco or {}).Power or {}).Ready) or 0
+    local prioritizeProduction = policy.PrioritizeProduction == true
+    local contestMapMode = policy.ContestMapMode == true
 
     local landTotal = 8
         + (constraints.FrontPressure * 12)
@@ -1040,6 +1064,12 @@ local function DecideRolePlan(runtime, current, constraints, demand, budget, con
     end
     if constraints.StarterPhase and not constraints.LandPanic and not constraints.AirPanic and not constraints.ConfirmedHarass then
         landTotal = Clamp(1 + (constraints.FrontPressure * 3) + (constraints.BasePressure * 2) + (constraints.EscortPressure * 2), 0, 6)
+    end
+    if prioritizeProduction then
+        landTotal = landTotal + 4 + math.floor((policy.ProductionTempoBias or 0) * 12)
+    end
+    if contestMapMode then
+        landTotal = landTotal + 3
     end
     landTotal = Clamp(landTotal, ((constraints.EconBootstrap or constraints.StarterPhase) and 0) or 6, 72)
 
@@ -1103,6 +1133,14 @@ local function DecideRolePlan(runtime, current, constraints, demand, budget, con
         or ((((constraints.BomberWatch and not constraints.StarterPhase) or constraints.BomberPanic or constraints.ExposedMexAirRaid) and powerReady > 0 and current.Factories.Land.Ready >= 1) and true or false)
         or (constraints.CounterAirWindow and powerReady >= 2 and current.Factories.Land.Ready >= 2)
     if constraints.StarterPhase and not constraints.AirPanic and not constraints.ConfirmedHarass then
+        airEnabled = false
+    end
+    if (prioritizeProduction or contestMapMode)
+        and current.Factories.Land.Ready < 4
+        and not constraints.AirPanic
+        and not constraints.BomberPanic
+        and not constraints.ExposedMexAirRaid
+        and not constraints.CounterAirWindow then
         airEnabled = false
     end
     if (constraints.BomberWatch or constraints.BomberPanic or constraints.ExposedMexAirRaid) and powerReady > 0 and current.Factories.Land.Ready >= 1 then
@@ -1260,6 +1298,7 @@ end
 local function DecideCapacityPlan(runtime, current, constraints, rolePlan)
     local state = runtime.ProductionDirector or {}
     local planner = runtime.StrategicPlanner or {}
+    local policy = runtime.EcoPolicy or {}
     local eco = runtime.EcoState or {}
     local upgradeDirector = runtime.UpgradeDirector or {}
     local factoryUpgrade = upgradeDirector.Factory or {}
@@ -1396,6 +1435,10 @@ local function DecideCapacityPlan(runtime, current, constraints, rolePlan)
         or macroObjective == 'first_t2_power'
     local objectiveStarterClamp = macroObjective == 'starter_mex_claim'
         or macroObjective == 'land_factory_floor'
+    local prioritizeProduction = policy.PrioritizeProduction == true
+    local contestMapMode = policy.ContestMapMode == true
+    local relaxedFactoryTempo = policy.RelaxedFactoryTempo == true
+    local suppressEarlyAir = policy.SuppressEarlyAir == true
 
     local landCap = math.max(
         6,
@@ -1505,6 +1548,9 @@ local function DecideCapacityPlan(runtime, current, constraints, rolePlan)
     if secondLandLatched and not constraints.StarterPhase and not constraints.EconBootstrap then
         landTarget = math.max(landTarget, 2)
     end
+    if prioritizeProduction and secondLandLatched and not constraints.EcoCrash and not constraints.CriticalFactory and not constraints.CriticalStructure then
+        landTarget = math.max(landTarget, 3)
+    end
     if (planner.TradeTechForTempo or planner.PunishGreed) and secondLandLatched and current.Factories.Land.Ready >= 2 then
         landTarget = math.max(landTarget, 3)
     end
@@ -1528,6 +1574,14 @@ local function DecideCapacityPlan(runtime, current, constraints, rolePlan)
     end
     if current.Factories.Land.Ready >= 4
         and current.Factories.Total >= 4
+        and not constraints.EcoCrash
+        and not constraints.QueueStarved
+        and not constraints.CriticalFactory
+        and not constraints.CriticalStructure then
+        landTarget = math.max(landTarget, 4)
+    end
+    if contestMapMode
+        and current.Factories.Land.Ready >= 3
         and not constraints.EcoCrash
         and not constraints.QueueStarved
         and not constraints.CriticalFactory
@@ -1573,6 +1627,13 @@ local function DecideCapacityPlan(runtime, current, constraints, rolePlan)
         and not lowAirCounterWindow then
         airTarget = math.min(airTarget, math.min(1, current.Factories.Air.Total))
     end
+    if suppressEarlyAir and not preserveAirWindow then
+        if current.Factories.Land.Ready < 4 then
+            airTarget = 0
+        else
+            airTarget = math.min(airTarget, math.min(current.Factories.Air.Total, 1))
+        end
+    end
 
     if constraints.NavyLowValue then
         seaTarget = 0
@@ -1612,6 +1673,18 @@ local function DecideCapacityPlan(runtime, current, constraints, rolePlan)
         pauseGrowth = false
     end
     if tempoRecoveryWindow and totalUnfinished <= 0 and not constraints.CriticalStructure and not powerBufferLow then
+        pauseGrowth = false
+    end
+    if relaxedFactoryTempo
+        and secondLandLatched
+        and totalUnfinished <= 0
+        and not constraints.EcoCrash
+        and not constraints.QueueStarved
+        and not constraints.CriticalFactory
+        and not constraints.CriticalStructure
+        and not powerBufferLow
+        and mexReady >= 5
+        and powerReady >= 4 then
         pauseGrowth = false
     end
     if secondLandEcoReady
@@ -1690,6 +1763,9 @@ local function DecideCapacityPlan(runtime, current, constraints, rolePlan)
     elseif objectivePreHQ and not preserveAirWindow then
         airTarget = math.min(airTarget, math.min(current.Factories.Air.Total, 1))
     end
+    if prioritizeProduction and not preserveAirWindow then
+        airTarget = math.min(airTarget, math.min(current.Factories.Air.Total, (current.Factories.Land.Ready >= 4) and 1 or 0))
+    end
     if macroObjective == 'first_land_hq' and current.Factories.Land.Ready >= 4 and not completionLock then
         landTarget = math.min(landTarget, math.max(current.Factories.Land.Total, current.Factories.Land.Ready))
     end
@@ -1727,6 +1803,11 @@ local function DecideTechPlan(runtime, current, constraints, confidence, mode)
     local opp = runtime.OpponentModel or {}
     local eco = runtime.EcoState or {}
     local planner = runtime.StrategicPlanner or {}
+    local policy = runtime.EcoPolicy or {}
+    local prioritizeProduction = policy.PrioritizeProduction == true
+    local contestMapMode = policy.ContestMapMode == true
+    local preferTempoFromSurplus = policy.PreferTempoFromSurplus == true
+    local readyLand = (((current.Factories or {}).Land or {}).Ready) or 0
     local frontCovered = constraints.FrontPressure <= 0.18 and constraints.BasePressure <= 0.14 and constraints.AirGuardPressure <= 0.16
     local scoutClean = constraints.StaleZones <= 2 and constraints.ScoutPressure <= 0.25 and confidence.Global >= 0.55
     local eligible = constraints.DurableSurplus and frontCovered and scoutClean and (not constraints.TechBlocked)
@@ -1772,6 +1853,19 @@ local function DecideTechPlan(runtime, current, constraints, confidence, mode)
         ecoBias = ecoBias + 0.1
         landBias = landBias + 0.04
     end
+    if prioritizeProduction then
+        landBias = landBias + 0.16 + (policy.ProductionTempoBias or 0)
+        ecoBias = ecoBias - 0.2
+        airBias = airBias - 0.03
+    end
+    if contestMapMode then
+        landBias = landBias + 0.08
+        ecoBias = ecoBias - 0.08
+    end
+    if preferTempoFromSurplus and constraints.SurplusSpendWindow then
+        landBias = landBias + 0.08
+        ecoBias = ecoBias - 0.06
+    end
 
     local overflowWindow = (eco.MassStorageRatio or 0) >= 0.78
         and (eco.MassTrend or 0) >= 0.12
@@ -1804,6 +1898,13 @@ local function DecideTechPlan(runtime, current, constraints, confidence, mode)
         extractorReason = 'eco_crash'
     elseif constraints.QueueStarved and not overflowWindow then
         extractorReason = 'queue_starved'
+    elseif (prioritizeProduction or contestMapMode)
+        and not overflowWindow
+        and not constraints.StrongSurplusWindow
+        and readyLand < 5 then
+        upgradeExtractors = false
+        aggressiveExtractors = false
+        extractorReason = contestMapMode and 'contest_mode' or 'prioritize_production'
     elseif overflowWindow and (eco.EnergyStorageRatio or 0) >= 0.25 and (eco.EnergyTrend or 0) >= 0 then
         upgradeExtractors = true
         aggressiveExtractors = true
@@ -1836,6 +1937,11 @@ local function DecideTechPlan(runtime, current, constraints, confidence, mode)
         extractorReason = 'tempo_mode'
     elseif (planner.TradeTechForTempo or planner.PunishGreed) and constraints.SurplusSpendWindow and upgradeExtractors then
         extractorReason = 'tempo_surplus'
+    end
+    if preferTempoFromSurplus and upgradeExtractors and not overflowWindow and not constraints.StrongSurplusWindow then
+        upgradeExtractors = false
+        aggressiveExtractors = false
+        extractorReason = 'surplus_to_tempo'
     end
 
     return {
@@ -2104,7 +2210,7 @@ function Module.Update(aiBrain, now)
     local techPlan = DecideTechPlan(runtime, current, constraints, confidence, mode)
     local structurePlan = DecideStructurePlan(runtime, current, constraints, confidence, mode, now)
     local demand = BuildDemandLedger(runtime, current, constraints, trends, confidence, mode)
-    local budget = DecideDomainBudget(mode, constraints, demand, confidence, macroObjective.Name)
+    local budget = DecideDomainBudget(runtime, mode, constraints, demand, confidence, macroObjective.Name)
     local rolePlan = DecideRolePlan(runtime, current, constraints, demand, budget, confidence, mode, trends)
     state.MacroObjective = macroObjective.Name
     state.MacroObjectiveReason = macroObjective.Reason
