@@ -301,10 +301,22 @@ local function PickMexTarget(aiBrain, runtime, state)
     local contestMapMode = policy.ContestMapMode == true
     local localMexOnly = policy.LocalMexUpgradeOnly == true
     local localMexConcurrentCap = math.max(1, policy.LocalMexUpgradeMaxConcurrent or 2)
+    local frontSecure = policy.FrontSecure == true
+    local outerMexShare = policy.OuterMexShare or 0
+    local outerHoldShare = policy.OuterHoldShare or 0
+    local safeForwardMexCount = policy.SafeForwardMexCount or 0
+    local contestableZoneCount = policy.ContestableZoneCount or 0
     local scoutingDebt = techPlan.ExtractorUpgradeReason == 'scouting_debt'
     local surplusSpendWindow = constraints.SurplusSpendWindow == true
     local strongSurplusWindow = constraints.StrongSurplusWindow == true
     local macroObjective = GetMacroObjective(runtime)
+    local frontUnsettled = contestMapMode
+        and not frontSecure
+        and (safeForwardMexCount >= 2 or outerMexShare >= 0.32 or contestableZoneCount >= 3)
+    local frontUpgradeReopen = frontSecure
+        and mapControl >= 0.44
+        and contestableZoneCount <= 2
+        and outerHoldShare >= 0.48
     local mexBudget, budgetT2Cap = ComputeEarlyMexUpgradeBudget(eco, readyLand, totalLand, powerReady, mexReady)
     local activeMexUpgrades = CountActiveMexUpgrades(aiBrain)
     local activeUpgradeScopes = CountActiveMexUpgradeScopes(aiBrain, mainPos, factoryClusterPos, localRadius)
@@ -378,6 +390,10 @@ local function PickMexTarget(aiBrain, runtime, state)
     end
     if localMexOnly and not strongSurplusWindow then
         allowGeneralT2 = false
+    elseif frontUnsettled and not surplusSpendWindow and not strongSurplusWindow then
+        allowGeneralT2 = false
+    elseif frontUpgradeReopen and budgetT2Cap >= 1 then
+        allowGeneralT2 = true
     end
 
     local allowTech3 = techPlan.UpgradeExtractors == true
@@ -408,6 +424,9 @@ local function PickMexTarget(aiBrain, runtime, state)
     end
     if localMexOnly then
         dynamicT2Cap = math.min(dynamicT2Cap, localMexConcurrentCap)
+    end
+    if frontUnsettled and not strongSurplusWindow then
+        dynamicT2Cap = math.min(dynamicT2Cap, 1)
     end
 
     if activeMexUpgrades > 0 then
@@ -470,8 +489,10 @@ local function PickMexTarget(aiBrain, runtime, state)
                         + (distAnchor <= 135 and 18 or 0)
                         + (scopeClass == 'core' and 160 or 0)
                         + (scopeClass == 'inner_local' and 70 or 0)
+                        + (frontUpgradeReopen and scopeClass == 'outer_local' and 20 or 0)
                         - (scopeClass == 'outer_local' and 80 or 0)
                         - (scopeClass == 'remote' and 220 or 0)
+                        - (frontUnsettled and scopeClass == 'outer_local' and 18 or 0)
                         - (distMain > 210 and 45 or 0)
                         - (distAnchor > 160 and 55 or 0)
                     if localScore > bestScore then
@@ -484,8 +505,11 @@ local function PickMexTarget(aiBrain, runtime, state)
                     local generalScore = score + (isLocal and 70 or 28) + ((mapControl >= 0.5) and 10 or 0) + (surplusSpendWindow and 18 or 0) + (tempoMode and 18 or 0) + (scoutingDebt and 12 or 0)
                         + (scopeClass == 'core' and 120 or 0)
                         + (scopeClass == 'inner_local' and 45 or 0)
+                        + (frontUpgradeReopen and scopeClass == 'outer_local' and 28 or 0)
                         - (scopeClass == 'outer_local' and 45 or 0)
                         - (scopeClass == 'remote' and 120 or 0)
+                        - (frontUnsettled and scopeClass == 'outer_local' and 40 or 0)
+                        - (frontUnsettled and scopeClass == 'remote' and 80 or 0)
                     if generalScore > bestScore then
                         bestScore = generalScore
                         best = mex

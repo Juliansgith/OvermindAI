@@ -1439,6 +1439,19 @@ local function DecideCapacityPlan(runtime, current, constraints, rolePlan)
     local contestMapMode = policy.ContestMapMode == true
     local relaxedFactoryTempo = policy.RelaxedFactoryTempo == true
     local suppressEarlyAir = policy.SuppressEarlyAir == true
+    local frontSecure = policy.FrontSecure == true
+    local outerMexShare = policy.OuterMexShare or 0
+    local safeForwardMexCount = policy.SafeForwardMexCount or 0
+    local contestScoutAirWindow = (contestMapMode or prioritizeProduction)
+        and current.Factories.Land.Ready >= 3
+        and mexReady >= 5
+        and powerReady >= 4
+        and not constraints.EcoCrash
+        and not constraints.QueueStarved
+        and not constraints.CriticalFactory
+        and not constraints.CriticalStructure
+        and (frontSecure or safeForwardMexCount >= 3 or outerMexShare >= 0.34)
+    local contestScoutAirFloor = contestScoutAirWindow and 1 or 0
 
     local landCap = math.max(
         6,
@@ -1491,7 +1504,7 @@ local function DecideCapacityPlan(runtime, current, constraints, rolePlan)
     end
     if secondLandLatched and not constraints.EcoCrash then
         landTarget = math.max(landTarget, 2)
-        if not (watchAirFactory or threatenedAirUnlock or emergencyAirFactory or counterAirFactory) and current.Factories.Air.Total <= 0 then
+        if not (watchAirFactory or threatenedAirUnlock or emergencyAirFactory or counterAirFactory) and current.Factories.Air.Total <= 0 and not contestScoutAirWindow then
             airTarget = 0
         end
     end
@@ -1499,7 +1512,8 @@ local function DecideCapacityPlan(runtime, current, constraints, rolePlan)
         and not landCoreOnline
         and not emergencyAirFactory
         and not threatenedAirUnlock
-        and not counterAirFactory then
+        and not counterAirFactory
+        and not contestScoutAirWindow then
         airTarget = 0
     end
 
@@ -1628,10 +1642,10 @@ local function DecideCapacityPlan(runtime, current, constraints, rolePlan)
         airTarget = math.min(airTarget, math.min(1, current.Factories.Air.Total))
     end
     if suppressEarlyAir and not preserveAirWindow then
-        if current.Factories.Land.Ready < 4 then
+        if current.Factories.Land.Ready < 4 and not contestScoutAirWindow then
             airTarget = 0
         else
-            airTarget = math.min(airTarget, math.min(current.Factories.Air.Total, 1))
+            airTarget = math.min(airTarget, math.max(contestScoutAirFloor, math.min(current.Factories.Air.Total, 1)))
         end
     end
 
@@ -1741,6 +1755,7 @@ local function DecideCapacityPlan(runtime, current, constraints, rolePlan)
     if liveCombatWindow and current.Factories.Air.Ready >= 1 and current.Factories.Air.Total > 0 and not powerBufferLow then
         airTarget = math.max(airTarget, 1)
     end
+    local completionLock = unstaffedFactoryShell or (landFactoryCompletionDebt and current.Factories.Land.Total >= 2)
     if constraints.SurplusSpendWindow
         and current.Factories.Land.Ready >= 4
         and not constraints.CriticalFactory
@@ -1757,14 +1772,16 @@ local function DecideCapacityPlan(runtime, current, constraints, rolePlan)
             airTarget = math.min(airTarget, 1)
         end
     end
-    local completionLock = unstaffedFactoryShell or (landFactoryCompletionDebt and current.Factories.Land.Total >= 2)
     if objectiveStarterClamp and not preserveAirWindow then
-        airTarget = math.min(airTarget, 0)
+        airTarget = math.min(airTarget, contestScoutAirFloor)
     elseif objectivePreHQ and not preserveAirWindow then
-        airTarget = math.min(airTarget, math.min(current.Factories.Air.Total, 1))
+        airTarget = math.min(airTarget, math.max(contestScoutAirFloor, math.min(current.Factories.Air.Total, 1)))
     end
     if prioritizeProduction and not preserveAirWindow then
-        airTarget = math.min(airTarget, math.min(current.Factories.Air.Total, (current.Factories.Land.Ready >= 4) and 1 or 0))
+        airTarget = math.min(airTarget, math.min(math.max(current.Factories.Air.Total, contestScoutAirFloor), (current.Factories.Land.Ready >= 4) and 1 or contestScoutAirFloor))
+    end
+    if contestScoutAirWindow and not preserveAirWindow then
+        airTarget = math.max(airTarget, 1)
     end
     if macroObjective == 'first_land_hq' and current.Factories.Land.Ready >= 4 and not completionLock then
         landTarget = math.min(landTarget, math.max(current.Factories.Land.Total, current.Factories.Land.Ready))

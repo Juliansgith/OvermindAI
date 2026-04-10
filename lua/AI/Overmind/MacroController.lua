@@ -79,6 +79,74 @@ local function ComputeMassBudget(eco)
         + math.max(0, ((eco.MassStorageRatio or 0) - 0.04) * 10)
 end
 
+local function ComputeContestMapStructure(runtime)
+    local graph = runtime.ZoneGraph or {}
+    local zone = runtime.ZoneModel or {}
+    local nodes = graph.Nodes or {}
+    local navMarkerCount = zone.NavMarkerCount or graph.WaterZones or 0
+    local metrics = {
+        NavMarkerCount = navMarkerCount or 0,
+        OuterMexShare = 0,
+        SafeForwardMexCount = 0,
+        ContestableZoneCount = 0,
+        LandRouteDepth = 0,
+        StructuralContestMap = false,
+    }
+
+    if navMarkerCount >= 3 then
+        return metrics
+    end
+
+    local totalMass = 0
+    local outerMass = 0
+    local depthTotal = 0
+    local depthCount = 0
+    local landZones = 0
+    for _, node in nodes do
+        if node and node.Medium == 'land' then
+            landZones = landZones + 1
+            local class = node.Classification or 'rear'
+            local massCount = node.MassCount or 0
+            local expansionCount = node.ExpansionCount or 0
+            local enemyMex = node.EnemyMex or 0
+            local routeRisk = node.RouteRisk or 0
+            local threat = node.Threat or 0
+            local enemyStructures = node.EnemyStructures or 0
+            local hopHome = node.HopHome or 999
+            local outsideHome = class == 'front' or class == 'contested' or class == 'enemy_side'
+
+            totalMass = totalMass + massCount
+            if outsideHome then
+                outerMass = outerMass + massCount
+            end
+            if outsideHome and ((massCount + expansionCount + enemyMex) > 0) then
+                metrics.ContestableZoneCount = metrics.ContestableZoneCount + 1
+            end
+            if (class == 'front' or class == 'contested')
+                and (massCount > 0 or enemyMex > 0)
+                and routeRisk <= 3.6
+                and threat <= 2.6
+                and enemyStructures <= 2 then
+                metrics.SafeForwardMexCount = metrics.SafeForwardMexCount + math.max(1, massCount)
+            end
+            if class == 'front' or class == 'contested' then
+                depthTotal = depthTotal + math.min(6, hopHome)
+                depthCount = depthCount + 1
+            end
+        end
+    end
+
+    metrics.OuterMexShare = (totalMass > 0) and (outerMass / totalMass) or 0
+    metrics.LandRouteDepth = (depthCount > 0) and (depthTotal / depthCount) or 0
+    metrics.StructuralContestMap =
+        landZones >= 6 and (
+            metrics.OuterMexShare >= 0.36
+            or metrics.SafeForwardMexCount >= 4
+            or (metrics.ContestableZoneCount >= 3 and metrics.LandRouteDepth >= 1.7)
+        )
+    return metrics
+end
+
 local function HasCriticalLandFactoryDebt(runtime, readyLand)
     local task = ((runtime.EngineerState or {}).UnfinishedFactoryTask) or {}
     if not task.Active or task.Domain ~= 'Land' then
@@ -120,11 +188,9 @@ local function DetermineDesiredPhase(aiBrain, runtime, now)
     local massBudget = ComputeMassBudget(eco)
     local contestedZones = intel.ContestedZones or graph.ContestedZones or 0
     local mapControl = intel.MapControl or graph.MapControl or zone.MapControl or 0
-    local zoneCount = table.getn(graph.Nodes or {})
-    local navMarkerCount = zone.NavMarkerCount or graph.WaterZones or 0
-    local contestTempoMap = navMarkerCount < 3
-        and zoneCount >= 6
-        and contestedZones >= 2
+    local structure = ComputeContestMapStructure(runtime)
+    local contestTempoMap = structure.StructuralContestMap
+        and (contestedZones >= 2 or structure.ContestableZoneCount >= 3)
         and now < 840
         and mapControl <= 0.62
         and (opp.RelativePower or 1) <= 1.08
@@ -143,6 +209,10 @@ local function DetermineDesiredPhase(aiBrain, runtime, now)
         EcoCrash = ecoCrash,
         UnderHarass = underHarass,
         ContestTempoMap = contestTempoMap,
+        OuterMexShare = structure.OuterMexShare or 0,
+        SafeForwardMexCount = structure.SafeForwardMexCount or 0,
+        ContestableZoneCount = structure.ContestableZoneCount or 0,
+        LandRouteDepth = structure.LandRouteDepth or 0,
         MassBudget = massBudget,
         EnergyTrend = eco.EnergyTrend or 0,
         MassTrend = eco.MassTrend or 0,
@@ -277,7 +347,7 @@ function Module.Update(aiBrain, now)
     if now - (state.LastLogTime or -999) >= 24 then
         state.LastLogTime = now
         LOG(string.format(
-            '*OVERMIND MACROCTRL A%d t=%.1f phase=%s reason=%s lock=%d land=%d/%d mex=%d pwr=%d hq=%d t2eng=%d t2pwr=%d budget=%.1f debt=%d',
+            '*OVERMIND MACROCTRL A%d t=%.1f phase=%s reason=%s lock=%d land=%d/%d mex=%d pwr=%d hq=%d t2eng=%d t2pwr=%d budget=%.1f debt=%d outer=%.2f sfwd=%d contest=%d depth=%.1f',
             aiBrain:GetArmyIndex(),
             now,
             phase,
@@ -291,7 +361,11 @@ function Module.Update(aiBrain, now)
             facts.TechEngineers or 0,
             facts.TechPower or 0,
             facts.MassBudget or 0,
-            facts.CriticalLandFactoryDebt and 1 or 0))
+            facts.CriticalLandFactoryDebt and 1 or 0,
+            facts.OuterMexShare or 0,
+            facts.SafeForwardMexCount or 0,
+            facts.ContestableZoneCount or 0,
+            facts.LandRouteDepth or 0))
     end
 end
 

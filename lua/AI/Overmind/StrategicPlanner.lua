@@ -47,6 +47,7 @@ local function BuildSignals(aiBrain, runtime, now)
     local prioritizeProduction = policy.PrioritizeProduction == true
     local contestMapMode = policy.ContestMapMode == true
     local preferTempoFromSurplus = policy.PreferTempoFromSurplus == true
+    local structuralContestMap = policy.StructuralContestMap == true
     local macro = runtime.MacroController or {}
     local macroObjective = macro.Phase or ((runtime.ProductionDirector or {}).MacroObjective) or 'land_factory_floor'
     local transitionLocked = macro.TransitionLocked == true
@@ -174,6 +175,7 @@ local function BuildSignals(aiBrain, runtime, now)
         PrioritizeProduction = prioritizeProduction,
         ContestMapMode = contestMapMode,
         PreferTempoFromSurplus = preferTempoFromSurplus,
+        StructuralContestMap = structuralContestMap,
         MacroObjective = macroObjective,
         TransitionLocked = transitionLocked,
     }
@@ -337,6 +339,11 @@ local function ScoreDirectives(signals, primaryTheater)
         scores.punish_greed = scores.punish_greed + 0.3
         scores.force_air_answer = scores.force_air_answer - (signals.ApproachClose and 0.0 or 0.8)
         scores.trade_map_for_tech = scores.trade_map_for_tech - 0.7
+    end
+    if signals.StructuralContestMap then
+        scores.trade_tech_for_tempo = scores.trade_tech_for_tempo + 0.4
+        scores.punish_greed = scores.punish_greed + 0.2
+        scores.expand = scores.expand - 0.2
     end
     if signals.PreferTempoFromSurplus then
         scores.trade_tech_for_tempo = scores.trade_tech_for_tempo + 0.5

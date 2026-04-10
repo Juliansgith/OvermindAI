@@ -14,6 +14,100 @@ local function TableCount(t)
     return t and table.getn(t) or 0
 end
 
+local function ComputeContestMapStructure(runtime)
+    local graph = runtime.ZoneGraph or {}
+    local zone = runtime.ZoneModel or {}
+    local nodes = graph.Nodes or {}
+    local navMarkerCount = zone.NavMarkerCount or graph.WaterZones or 0
+    local metrics = {
+        NavMarkerCount = navMarkerCount or 0,
+        TotalLandZones = 0,
+        TotalMass = 0,
+        OuterMass = 0,
+        ForwardOwnedMass = 0,
+        OuterMexShare = 0,
+        OuterHoldShare = 0,
+        SafeForwardMexCount = 0,
+        ContestableZoneCount = 0,
+        LandRouteDepth = 0,
+        FrontSecure = false,
+        StructuralContestMap = false,
+    }
+
+    if navMarkerCount >= 3 then
+        return metrics
+    end
+
+    local depthTotal = 0
+    local depthCount = 0
+    for _, node in nodes do
+        if node and node.Medium == 'land' then
+            metrics.TotalLandZones = metrics.TotalLandZones + 1
+
+            local class = node.Classification or 'rear'
+            local massCount = node.MassCount or 0
+            local expansionCount = node.ExpansionCount or 0
+            local enemyMex = node.EnemyMex or 0
+            local threat = node.Threat or 0
+            local routeRisk = node.RouteRisk or 0
+            local friendlyLand = node.FriendlyLand or 0
+            local enemyLand = node.EnemyLand or 0
+            local friendlyStructures = node.FriendlyStructures or 0
+            local enemyStructures = node.EnemyStructures or 0
+            local hopHome = node.HopHome or 999
+            local outsideHome = class == 'front' or class == 'contested' or class == 'enemy_side'
+            local contestable = outsideHome and ((massCount + expansionCount + enemyMex) > 0)
+            local safeForward = (class == 'front' or class == 'contested')
+                and (massCount > 0 or enemyMex > 0)
+                and routeRisk <= 3.6
+                and threat <= 2.6
+                and enemyStructures <= 2
+            local heldForward = outsideHome
+                and class ~= 'enemy_side'
+                and (
+                    (class == 'front' and (friendlyLand >= enemyLand or (enemyLand <= 0 and friendlyStructures >= 1)))
+                    or (class == 'contested' and friendlyLand >= math.max(1, enemyLand) and routeRisk <= 3.2 and threat <= 2.2 and enemyStructures <= 1)
+                )
+
+            metrics.TotalMass = metrics.TotalMass + massCount
+            if outsideHome then
+                metrics.OuterMass = metrics.OuterMass + massCount
+            end
+            if heldForward then
+                metrics.ForwardOwnedMass = metrics.ForwardOwnedMass + math.max(1, massCount)
+            end
+            if contestable then
+                metrics.ContestableZoneCount = metrics.ContestableZoneCount + 1
+            end
+            if safeForward then
+                metrics.SafeForwardMexCount = metrics.SafeForwardMexCount + math.max(1, massCount)
+            end
+            if class == 'front' or class == 'contested' then
+                depthTotal = depthTotal + math.min(6, hopHome)
+                depthCount = depthCount + 1
+            end
+        end
+    end
+
+    metrics.OuterMexShare = (metrics.TotalMass > 0) and (metrics.OuterMass / metrics.TotalMass) or 0
+    metrics.OuterHoldShare = (metrics.OuterMass > 0) and (metrics.ForwardOwnedMass / metrics.OuterMass) or 0
+    metrics.LandRouteDepth = (depthCount > 0) and (depthTotal / depthCount) or 0
+    metrics.FrontSecure =
+        metrics.OuterMass <= 0
+        or (
+            metrics.OuterHoldShare >= 0.52
+            and (metrics.SafeForwardMexCount >= 2 or metrics.ContestableZoneCount <= 2)
+        )
+    metrics.StructuralContestMap =
+        metrics.TotalLandZones >= 6 and (
+            metrics.OuterMexShare >= 0.36
+            or metrics.SafeForwardMexCount >= 4
+            or (metrics.ContestableZoneCount >= 3 and metrics.LandRouteDepth >= 1.7)
+        )
+
+    return metrics
+end
+
 local function GetUnitCount(aiBrain, category)
     if not aiBrain or not category then
         return 0
@@ -25,6 +119,7 @@ local function DetermineMacroPhase(aiBrain, runtime, eco, opp, recovery, now)
     local intel = runtime.IntelModel or {}
     local graph = runtime.ZoneGraph or {}
     local zone = runtime.ZoneModel or {}
+    local structure = ComputeContestMapStructure(runtime)
     local mexCount = GetUnitCount(aiBrain, categories.MASSEXTRACTION * categories.STRUCTURE)
     local landFactories = GetUnitCount(aiBrain, categories.FACTORY * categories.LAND * categories.STRUCTURE)
     local airFactories = GetUnitCount(aiBrain, categories.FACTORY * categories.AIR * categories.STRUCTURE)
@@ -53,10 +148,10 @@ local function DetermineMacroPhase(aiBrain, runtime, eco, opp, recovery, now)
         or 0
     local contestedZones = intel.ContestedZones or graph.ContestedZones or 0
     local zoneCount = TableCount(graph.Nodes or {})
-    local navMarkerCount = zone.NavMarkerCount or graph.WaterZones or 0
+    local navMarkerCount = structure.NavMarkerCount or zone.NavMarkerCount or graph.WaterZones or 0
     local relativePower = opp.RelativePower or 1
     local stagnation = recovery.StagnationTime or 0
-    local landContestMap = navMarkerCount < 3 and zoneCount >= 6
+    local landContestMap = structure.StructuralContestMap or (navMarkerCount < 3 and zoneCount >= 6)
     local contestTempoWindow = landContestMap
         and contestedZones >= 2
         and now >= 180
@@ -109,6 +204,20 @@ local function DetermineMacroPhase(aiBrain, runtime, eco, opp, recovery, now)
         return 'pressure', counts
     end
 
+    if landContestMap
+        and stableFactoryFeed
+        and landFactories >= 2
+        and now < 1200
+        and relativePower <= 1.12
+        and mapControl <= 0.78
+        and (
+            structure.OuterMexShare >= 0.32
+            or structure.SafeForwardMexCount >= 3
+            or (structure.ContestableZoneCount >= 2 and not structure.FrontSecure)
+        ) then
+        return 'pressure', counts
+    end
+
     return 'consolidate', counts
 end
 
@@ -142,18 +251,19 @@ function UpdatePolicy(aiBrain, now)
     runtime.MacroPhase = phase
     runtime.MacroCounts = macroCounts
 
+    local structure = ComputeContestMapStructure(runtime)
     local mapControl = intel.MapControl or graph.MapControl or zone.MapControl or 0
     local contestedZones = intel.ContestedZones or graph.ContestedZones or 0
     local zoneCount = TableCount(graph.Nodes or {})
-    local navMarkerCount = zone.NavMarkerCount or graph.WaterZones or 0
-    local landContestMap = navMarkerCount < 3 and zoneCount >= 6
+    local navMarkerCount = structure.NavMarkerCount or zone.NavMarkerCount or graph.WaterZones or 0
+    local landContestMap = structure.StructuralContestMap or (navMarkerCount < 3 and zoneCount >= 6)
     local stableTempoEco = (eco.MassIncome or 0) >= 3.6
         and (eco.EnergyIncome or 0) >= 50
         and massTrend >= -0.08
         and energyTrend >= -4
         and not energyStall
     local contestMapMode = landContestMap
-        and contestedZones >= 2
+        and (contestedZones >= 2 or structure.ContestableZoneCount >= 3)
         and now >= 150
         and now <= 1200
         and phase ~= 'bootstrap'
@@ -162,6 +272,11 @@ function UpdatePolicy(aiBrain, now)
         and stableTempoEco
         and mapControl <= 0.68
         and (opp.RelativePower or 1) <= 1.08
+    local frontSecureUpgradeWindow = landContestMap
+        and structure.FrontSecure
+        and stableTempoEco
+        and mapControl >= 0.44
+        and contestedZones <= 1
     local prioritizeProduction = planner.TradeTechForTempo
         or planner.PunishGreed
         or goal == 'all_in'
@@ -184,6 +299,13 @@ function UpdatePolicy(aiBrain, now)
     policy.RelaxedFactoryTempo = false
     policy.SuppressEarlyAir = false
     policy.ProductionTempoBias = 0
+    policy.OuterMexShare = structure.OuterMexShare or 0
+    policy.OuterHoldShare = structure.OuterHoldShare or 0
+    policy.SafeForwardMexCount = structure.SafeForwardMexCount or 0
+    policy.ContestableZoneCount = structure.ContestableZoneCount or 0
+    policy.LandRouteDepth = structure.LandRouteDepth or 0
+    policy.FrontSecure = structure.FrontSecure and true or false
+    policy.StructuralContestMap = structure.StructuralContestMap and true or false
     policy.EnergyNeedRatio = 0.42
     policy.EnergyNeedTrend = -3
     policy.SafeEnergyRatio = 0.3
@@ -242,8 +364,8 @@ function UpdatePolicy(aiBrain, now)
     policy.ContestMapMode = contestMapMode and true or false
     policy.PrioritizeProduction = prioritizeProduction and true or false
     policy.PreferTempoFromSurplus = preferTempoFromSurplus and true or false
-    policy.LocalMexUpgradeOnly = (contestMapMode or prioritizeProduction) and true or false
-    policy.LocalMexUpgradeMaxConcurrent = (contestMapMode or prioritizeProduction) and 1 or 2
+    policy.LocalMexUpgradeOnly = ((contestMapMode or prioritizeProduction) and not frontSecureUpgradeWindow) and true or false
+    policy.LocalMexUpgradeMaxConcurrent = ((contestMapMode or prioritizeProduction) and not frontSecureUpgradeWindow) and 1 or 2
     policy.RelaxedFactoryTempo = (contestMapMode or prioritizeProduction) and true or false
     policy.SuppressEarlyAir = (contestMapMode or prioritizeProduction) and true or false
     policy.ProductionTempoBias = (contestMapMode and 0.28) or (prioritizeProduction and 0.16) or 0
