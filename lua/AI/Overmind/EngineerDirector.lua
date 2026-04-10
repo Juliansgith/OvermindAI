@@ -1001,16 +1001,25 @@ local function TryOpenPowerRecoveryBuild(aiBrain, runtime, eng, mainPos, now)
     return true
 end
 
+local function GetMacroObjective(runtime)
+    local director = runtime and runtime.ProductionDirector or {}
+    return director.MacroObjective or 'land_factory_floor'
+end
+
 local function ShouldScaleBaseEco(runtime, now)
     local director = runtime and runtime.ProductionDirector or {}
     local constraints = director.ConstraintState or {}
     local current = director.Current or {}
     local eco = runtime and runtime.EcoState or {}
+    local macroObjective = GetMacroObjective(runtime)
     local factories = current.Factories or {}
     local readyLand = ((factories.Land or {}).Ready) or 0
     local powerReady = (((current.Eco or {}).Power or {}).Ready) or 0
     local mexReady = (((current.Eco or {}).Mex or {}).Ready) or 0
 
+    if macroObjective == 'starter_mex_claim' or macroObjective == 'land_factory_floor' then
+        return false
+    end
     if now < 240 or constraints.EcoCrash or constraints.QueueStarved or constraints.CriticalFactory or constraints.CriticalStructure then
         return false
     end
@@ -1019,6 +1028,9 @@ local function ShouldScaleBaseEco(runtime, now)
     end
     if (eco.MassStorageRatio or 0) < 0.14 or (eco.MassTrend or 0) < -0.12 then
         return false
+    end
+    if macroObjective == 'first_land_hq' or macroObjective == 'first_t2_power' then
+        return powerReady <= (mexReady + 1) or (eco.EnergyStorageRatio or 0) < 0.62 or (eco.EnergyTrend or 0) < 12
     end
     if (eco.EnergyStorageRatio or 0) >= 0.72 and powerReady >= (mexReady + 1) then
         return false
@@ -1045,12 +1057,16 @@ local function ShouldPersistentSurplusSpend(runtime, now)
     local constraints = director.ConstraintState or {}
     local current = director.Current or {}
     local eco = runtime and runtime.EcoState or {}
+    local macroObjective = GetMacroObjective(runtime)
     local factories = current.Factories or {}
     local readyLand = ((factories.Land or {}).Ready) or 0
     local totalLand = ((factories.Land or {}).Total) or 0
     local powerReady = (((current.Eco or {}).Power or {}).Ready) or 0
     local mexReady = (((current.Eco or {}).Mex or {}).Ready) or 0
 
+    if macroObjective == 'starter_mex_claim' or macroObjective == 'land_factory_floor' then
+        return false
+    end
     if now < 210 or constraints.EcoCrash or constraints.QueueStarved or constraints.CriticalStructure then
         return false
     end
@@ -1068,6 +1084,9 @@ local function ShouldPersistentSurplusSpend(runtime, now)
     end
     if (eco.EnergyStorageRatio or 0) < 0.08 or (eco.EnergyTrend or 0) < -12 then
         return false
+    end
+    if macroObjective == 'mass_consolidation' or macroObjective == 'first_land_hq' or macroObjective == 'first_t2_engineer' or macroObjective == 'first_t2_power' then
+        return true
     end
     return true
 end
@@ -1684,6 +1703,7 @@ local function GetPriorityUpgradeAssistTarget(aiBrain, runtime, mainPos)
     local best = false
     local bestScore = -999999
     local isUpgradeTarget = false
+    local macroObjective = GetMacroObjective(runtime)
     local candidates = aiBrain:GetListOfUnits(categories.STRUCTURE + categories.FACTORY, false, true) or {}
     for _, unit in candidates do
         if unit and not unit.Dead and unit:IsUnitState('Upgrading') then
@@ -1700,6 +1720,13 @@ local function GetPriorityUpgradeAssistTarget(aiBrain, runtime, mainPos)
                         score = score + 180
                     else
                         score = score + 120
+                    end
+                    if macroObjective == 'first_land_hq' and EntityCategoryContains(categories.FACTORY * categories.LAND, unit) then
+                        score = score + 120
+                    elseif macroObjective == 'mass_consolidation' and EntityCategoryContains(categories.MASSEXTRACTION, unit) then
+                        score = score + 120
+                    elseif macroObjective == 'first_t2_power' and EntityCategoryContains(categories.ENERGYPRODUCTION, unit) then
+                        score = score + 90
                     end
                     score = score - dist
                     if score > bestScore then
@@ -1765,6 +1792,7 @@ local function GetPriorityBuildAssistTarget(aiBrain, runtime, mainPos)
 
     local best = false
     local bestScore = -999999
+    local macroObjective = GetMacroObjective(runtime)
     local candidates = aiBrain:GetListOfUnits(categories.STRUCTURE + categories.FACTORY, false, true) or {}
     for _, unit in candidates do
         if unit and not unit.Dead and unit:IsUnitState('BeingBuilt') and not unit:IsUnitState('Upgrading') then
@@ -1785,6 +1813,29 @@ local function GetPriorityBuildAssistTarget(aiBrain, runtime, mainPos)
                         score = score + 150
                     else
                         score = score + 100
+                    end
+                    if macroObjective == 'starter_mex_claim' or macroObjective == 'mass_consolidation' then
+                        if EntityCategoryContains(categories.MASSEXTRACTION, unit) then
+                            score = score + 140
+                        elseif EntityCategoryContains(categories.ENERGYPRODUCTION, unit) then
+                            score = score - 30
+                        end
+                    elseif macroObjective == 'first_land_hq' then
+                        if EntityCategoryContains(categories.FACTORY * categories.LAND, unit) then
+                            score = score + 150
+                        elseif EntityCategoryContains(categories.ENERGYPRODUCTION, unit) then
+                            score = score + 60
+                        elseif EntityCategoryContains(categories.MASSEXTRACTION, unit) then
+                            score = score - 20
+                        end
+                    elseif macroObjective == 'first_t2_power' then
+                        if EntityCategoryContains(categories.ENERGYPRODUCTION, unit) then
+                            score = score + 160
+                        elseif EntityCategoryContains(categories.FACTORY * categories.LAND, unit) then
+                            score = score + 40
+                        end
+                    elseif macroObjective == 'first_t2_engineer' and EntityCategoryContains(categories.FACTORY * categories.LAND, unit) then
+                        score = score + 120
                     end
                     score = score + ((1 - GetFraction(unit)) * 80)
                     score = score - dist
@@ -1914,6 +1965,7 @@ function Update(aiBrain, now)
     local radarCritical = NeedsCriticalRadar(runtime)
     local raid = runtime.RaidDefense or {}
     local constraints = ((runtime.ProductionDirector or {}).ConstraintState or {})
+    local macroObjective = GetMacroObjective(runtime)
     local currentRadar = ((((runtime.ProductionDirector or {}).Current or {}).Structures or {}).Radar) or 0
     local bomberWatch = constraints.BomberWatch == true
     local bomberPanic = ((raid.BomberPanicUntil or -999) > now) or ((raid.LastBomberEnemyCount or 0) >= 1 and raid.UnderAirHarass)
@@ -2123,7 +2175,7 @@ function Update(aiBrain, now)
                     if (not acted)
                         and isIdle
                         and not constructing
-                        and (constraints.PowerBufferLow == true or hqPowerRecoveryWanted or ShouldScaleBaseEco(runtime, now))
+                        and (constraints.PowerBufferLow == true or hqPowerRecoveryWanted or macroObjective == 'first_t2_power' or ShouldScaleBaseEco(runtime, now))
                         and localThreat < 2.2
                         and dist <= 360 then
                         local powerTarget = GetPriorityPowerRecoveryTarget(aiBrain, runtime, mainPos, structureTargetObject, structureTask)
@@ -2198,7 +2250,7 @@ function Update(aiBrain, now)
                     if (not acted)
                         and isIdle
                         and not constructing
-                        and (ShouldPersistentSurplusSpend(runtime, now) or ShouldScaleBaseEco(runtime, now))
+                        and (macroObjective == 'starter_mex_claim' or ShouldPersistentSurplusSpend(runtime, now) or ShouldScaleBaseEco(runtime, now))
                         and localThreat < 2.0
                         and dist <= 360 then
                         local buildAssistTarget = GetPriorityBuildAssistTarget(aiBrain, runtime, mainPos)
@@ -2218,7 +2270,7 @@ function Update(aiBrain, now)
                     if (not acted)
                         and isIdle
                         and not constructing
-                        and ShouldPersistentSurplusSpend(runtime, now)
+                        and (macroObjective == 'starter_mex_claim' or ShouldPersistentSurplusSpend(runtime, now))
                         and localThreat < 1.8
                         and dist <= 260 then
                         if TryOpenSurplusExpansionBuild(aiBrain, runtime, eng, mainPos, enemyPos, safeExpandDistance, now) then
@@ -2339,9 +2391,10 @@ function Update(aiBrain, now)
             sz = structureTask.TargetPos[3] or 0
             structureNearby = aiBrain:GetNumUnitsAroundPoint(categories.ENGINEER * categories.MOBILE, structureTask.TargetPos, 18, 'Ally') or 0
         end
-        LOG(string.format('*OVERMIND ENGDIR A%d t=%.1f recover=%d threat=%d facRec=%d powerRec=%d surp=%d expand=%d baseNeed=%d facTask=%d:%s frac=%.2f stall=%.1f asn=%d/%d structTask=%d:%s:%s frac=%.2f stall=%.1f asn=%d/%d near=%d pos=%.1f,%.1f',
+        LOG(string.format('*OVERMIND ENGDIR A%d t=%.1f obj=%s recover=%d threat=%d facRec=%d powerRec=%d surp=%d expand=%d baseNeed=%d facTask=%d:%s frac=%.2f stall=%.1f asn=%d/%d structTask=%d:%s:%s frac=%.2f stall=%.1f asn=%d/%d near=%d pos=%.1f,%.1f',
             aiBrain:GetArmyIndex(),
             now,
+            macroObjective,
             recoverCount,
             threatenedCount,
             forcedFactoryRecover,

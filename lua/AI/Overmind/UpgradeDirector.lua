@@ -230,6 +230,11 @@ local function ComputeEarlyMexUpgradeBudget(eco, readyLand, totalLand, powerRead
     return effectiveBudget, cap
 end
 
+local function GetMacroObjective(runtime)
+    local director = runtime and runtime.ProductionDirector or {}
+    return director.MacroObjective or 'land_factory_floor'
+end
+
 local function PickMexTarget(aiBrain, runtime, state)
     local director = runtime.ProductionDirector or {}
     local current = director.Current or {}
@@ -252,6 +257,7 @@ local function PickMexTarget(aiBrain, runtime, state)
     local scoutingDebt = techPlan.ExtractorUpgradeReason == 'scouting_debt'
     local surplusSpendWindow = constraints.SurplusSpendWindow == true
     local strongSurplusWindow = constraints.StrongSurplusWindow == true
+    local macroObjective = GetMacroObjective(runtime)
     local mexBudget, budgetT2Cap = ComputeEarlyMexUpgradeBudget(eco, readyLand, totalLand, powerReady, mexReady)
     local activeMexUpgrades = CountActiveMexUpgrades(aiBrain)
     local stableFactoryFloor = readyLand >= 2
@@ -339,6 +345,11 @@ local function PickMexTarget(aiBrain, runtime, state)
         allowTech3 = true
     end
     local dynamicT2Cap = math.max(budgetT2Cap, ComputeDynamicMexCap(eco, readyLand, totalLand, powerReady, mexReady, surplusSpendWindow, strongSurplusWindow))
+    if macroObjective == 'mass_consolidation' then
+        dynamicT2Cap = math.max(dynamicT2Cap, math.max(1, budgetT2Cap))
+    elseif macroObjective == 'first_land_hq' or macroObjective == 'first_t2_engineer' or macroObjective == 'first_t2_power' then
+        dynamicT2Cap = math.min(dynamicT2Cap, 1)
+    end
 
     if activeMexUpgrades > 0 then
         local activeMexes = aiBrain:GetListOfUnits(categories.MASSEXTRACTION * categories.STRUCTURE, false, true) or {}
@@ -354,6 +365,16 @@ local function PickMexTarget(aiBrain, runtime, state)
         end
     end
 
+    if activeMexUpgrades <= 0 and (macroObjective == 'starter_mex_claim'
+        or macroObjective == 'land_factory_floor'
+        or macroObjective == 'first_land_hq'
+        or macroObjective == 'first_t2_engineer'
+        or macroObjective == 'first_t2_power') then
+        state.Reason = 'objective_hold'
+        state.Cap = 0
+        return
+    end
+
     local best = false
     local bestTech = false
     local bestScope = false
@@ -367,6 +388,11 @@ local function PickMexTarget(aiBrain, runtime, state)
             local upgradeBp = GetUpgradeBlueprintId(mex)
             if pos and upgradeBp then
                 local score, risk, threat, distMain, distAnchor = ScoreSafeUpgradeLocation(aiBrain, pos, mainPos, factoryClusterPos, localRadius)
+                if macroObjective == 'mass_consolidation' then
+                    score = score + 38
+                elseif macroObjective == 'surplus_scale' then
+                    score = score + 10
+                end
                 local isLocal = distMain <= localRadius
                 local scopeClass = ClassifyMexScope(distMain, distAnchor)
                 local localRiskCap = (budgetT2Cap >= 1) and 3.8 or 3.2
@@ -428,7 +454,8 @@ local function PickMexTarget(aiBrain, runtime, state)
         state.TargetTech = bestTech
         state.Scope = bestScope
         state.Enabled = true
-        state.Reason = budgetT2Cap >= 1 and bestTech == 'tech2' and 'budget_consolidation'
+        state.Reason = macroObjective == 'mass_consolidation' and bestTech == 'tech2' and 'objective_mass_consolidation'
+            or budgetT2Cap >= 1 and bestTech == 'tech2' and 'budget_consolidation'
             or tempoMode and bestTech == 'tech2' and 'tempo_consolidation'
             or surplusSpendWindow and bestTech == 'tech2' and 'surplus_consolidation'
             or scoutingDebt and bestTech == 'tech2' and 'scout_safe_consolidation'
@@ -487,6 +514,7 @@ local function PickFactoryTarget(aiBrain, runtime, state)
     local constraints = director.ConstraintState or {}
     local planner = runtime.StrategicPlanner or {}
     local eco = runtime.EcoState or {}
+    local macroObjective = GetMacroObjective(runtime)
     local mainPos = GetMainPos(aiBrain, runtime)
     local factoryClusterPos = GetFactoryClusterPos(aiBrain, mainPos)
     local factories = current.Factories or {}
@@ -537,6 +565,10 @@ local function PickFactoryTarget(aiBrain, runtime, state)
         and powerReady >= 3
         and mexReady >= 3
     local stillNeedsFirstHQ = t2LandFactories <= 0 and upgradeCount <= 0
+    local macroWantsHQ = macroObjective == 'first_land_hq'
+        or macroObjective == 'first_t2_engineer'
+        or macroObjective == 'first_t2_power'
+        or macroObjective == 'surplus_scale'
     local mandatoryFirstHQ = stillNeedsFirstHQ
         and (stableLandFloor or (readyLand >= 4 and totalLand >= 4 and mexReady >= 3 and powerReady >= 3))
         and readyLand >= 3
@@ -544,6 +576,9 @@ local function PickFactoryTarget(aiBrain, runtime, state)
         and mexReady >= 3
         and not constraints.CriticalStructure
         and not constraints.EcoCrash
+    if stillNeedsFirstHQ and macroWantsHQ and readyLand >= 3 and totalLand >= 3 and mexReady >= 4 and powerReady >= 3 then
+        mandatoryFirstHQ = true
+    end
     state.NeedsFirstLandHQ = stillNeedsFirstHQ and true or false
     state.Mandatory = mandatoryFirstHQ and true or false
     local landFactoryDebt = factoryTask.Active and factoryTask.Domain == 'Land'
@@ -593,19 +628,19 @@ local function PickFactoryTarget(aiBrain, runtime, state)
         state.Reason = 'factory_floor'
         return
     end
-    if not surplusSpendWindow and ((eco.MassIncome or 0) < firstHQMassIncomeFloor or (eco.EnergyIncome or 0) < firstHQEnergyIncomeFloor) then
+    if not surplusSpendWindow and not macroWantsHQ and ((eco.MassIncome or 0) < firstHQMassIncomeFloor or (eco.EnergyIncome or 0) < firstHQEnergyIncomeFloor) then
         state.Reason = 'income_floor'
         return
     end
-    if not surplusSpendWindow and ((eco.MassStorageRatio or 0) < firstHQMassStorageFloor or (eco.EnergyStorageRatio or 0) < firstHQEnergyStorageFloor) then
+    if not surplusSpendWindow and not macroWantsHQ and ((eco.MassStorageRatio or 0) < firstHQMassStorageFloor or (eco.EnergyStorageRatio or 0) < firstHQEnergyStorageFloor) then
         state.Reason = 'storage_floor'
         return
     end
-    if not surplusSpendWindow and ((eco.MassTrend or 0) < firstHQMassTrendFloor or (eco.EnergyTrend or 0) < firstHQEnergyTrendFloor) then
+    if not surplusSpendWindow and not macroWantsHQ and ((eco.MassTrend or 0) < firstHQMassTrendFloor or (eco.EnergyTrend or 0) < firstHQEnergyTrendFloor) then
         state.Reason = 'trend_floor'
         return
     end
-    if planner.TradeTechForTempo and readyLand < 4 and not surplusSpendWindow and not mandatoryFirstHQ then
+    if planner.TradeTechForTempo and readyLand < 4 and not surplusSpendWindow and not mandatoryFirstHQ and not macroWantsHQ then
         state.Reason = 'tempo_hold'
         return
     end
@@ -639,7 +674,8 @@ local function PickFactoryTarget(aiBrain, runtime, state)
         state.TargetUnit = best
         state.TargetId = GetEntityId(best)
         state.Enabled = true
-        state.Reason = mandatoryFirstHQ and 'mandatory_first_hq'
+        state.Reason = macroObjective == 'first_land_hq' and 'objective_first_land_hq'
+            or mandatoryFirstHQ and 'mandatory_first_hq'
             or strongSurplusWindow and 'surplus_hq'
             or readyLand >= 5 and 'midgame_hq'
             or 'first_hq'
@@ -668,9 +704,10 @@ local function UpdateDirector(aiBrain, now)
 
     if (now - (state.LastLogTime or -999)) >= 20 then
         state.LastLogTime = now
-        LOG(string.format('*OVERMIND UPGDIR A%d t=%.1f mex=%s:%s/%s cap=%d inflight=%d fac=%s:%s',
+        LOG(string.format('*OVERMIND UPGDIR A%d t=%.1f obj=%s mex=%s:%s/%s cap=%d inflight=%d fac=%s:%s',
             aiBrain:GetArmyIndex(),
             now,
+            GetMacroObjective(runtime),
             tostring(state.Extractor.TargetTech or 'none'),
             tostring(state.Extractor.Scope or 'none'),
             tostring(state.Extractor.Reason or 'none'),

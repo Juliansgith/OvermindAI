@@ -18,6 +18,9 @@ local NavalDefenseCategory = categories.STRUCTURE * categories.DEFENSE * categor
 local MexCategory = categories.STRUCTURE * categories.MASSEXTRACTION
 local PowerCategory = categories.STRUCTURE * categories.ENERGYPRODUCTION
 local MobileUnitCategory = categories.MOBILE - categories.COMMAND
+local TechLandFactoryCategory = categories.FACTORY * categories.LAND * categories.STRUCTURE * (categories.TECH2 + categories.TECH3)
+local TechEngineerCategory = categories.ENGINEER * categories.MOBILE * (categories.TECH2 + categories.TECH3)
+local TechPowerCategory = categories.STRUCTURE * categories.ENERGYPRODUCTION * (categories.TECH2 + categories.TECH3)
 
 local function Clamp(v, minV, maxV)
     if v < minV then
@@ -1217,6 +1220,7 @@ local function DecideCapacityPlan(runtime, current, constraints, rolePlan)
     local eco = runtime.EcoState or {}
     local upgradeDirector = runtime.UpgradeDirector or {}
     local factoryUpgrade = upgradeDirector.Factory or {}
+    local macroObjective = state.MacroObjective or 'land_factory_floor'
     local now = GetGameTimeSeconds()
     local totalUnfinished = current.Factories.Pending or 0
     local factoryTask = current.FactoryTask or {}
@@ -1343,6 +1347,12 @@ local function DecideCapacityPlan(runtime, current, constraints, rolePlan)
     local preHQAirClamp = needsFirstLandHQ
         and current.Factories.Land.Ready >= 4
         and not preserveAirWindow
+    local objectivePreHQ = macroObjective == 'mass_consolidation'
+        or macroObjective == 'first_land_hq'
+        or macroObjective == 'first_t2_engineer'
+        or macroObjective == 'first_t2_power'
+    local objectiveStarterClamp = macroObjective == 'starter_mex_claim'
+        or macroObjective == 'land_factory_floor'
 
     local landCap = math.max(
         6,
@@ -1631,8 +1641,15 @@ local function DecideCapacityPlan(runtime, current, constraints, rolePlan)
             airTarget = math.min(airTarget, 1)
         end
     end
-
     local completionLock = unstaffedFactoryShell or (landFactoryCompletionDebt and current.Factories.Land.Total >= 2)
+    if objectiveStarterClamp and not preserveAirWindow then
+        airTarget = math.min(airTarget, 0)
+    elseif objectivePreHQ and not preserveAirWindow then
+        airTarget = math.min(airTarget, math.min(current.Factories.Air.Total, 1))
+    end
+    if macroObjective == 'first_land_hq' and current.Factories.Land.Ready >= 4 and not completionLock then
+        landTarget = math.min(landTarget, math.max(current.Factories.Land.Total, current.Factories.Land.Ready))
+    end
     local landFactoryAllowed = (not pauseGrowth) and (not completionLock) and (current.Factories.Land.Total < landTarget)
     local nonLandFactoryAllowed = (not pauseGrowth) and (not completionLock or emergencyAirFactory or threatenedAirUnlock or counterAirFactory)
 
@@ -1888,6 +1905,110 @@ local function DecideStructurePlan(runtime, current, constraints, confidence, mo
         NavalDefense = navalDefenseDesired,
     }
 end
+
+local function DecideMacroObjective(aiBrain, runtime, current, constraints, techPlan, mode, now)
+    local eco = runtime.EcoState or {}
+    local factories = current.Factories or {}
+    local landFactories = factories.Land or {}
+    local readyLand = landFactories.Ready or 0
+    local totalLand = landFactories.Total or 0
+    local powerReady = (((current.Eco or {}).Power or {}).Ready) or 0
+    local mexReady = (((current.Eco or {}).Mex or {}).Ready) or 0
+    local t2LandFactories = CountCategory(aiBrain, TechLandFactoryCategory)
+    local techEngineers = CountCategory(aiBrain, TechEngineerCategory)
+    local techPower = CountCategory(aiBrain, TechPowerCategory)
+    local factoryTask = current.FactoryTask or {}
+    local landFactoryDebt = factoryTask.Active
+        and factoryTask.Domain == 'Land'
+        and ((factoryTask.AssignedBuilders or 0) < math.max(1, factoryTask.RequiredBuilders or 0)
+            or (factoryTask.ReadyFactories or 0) < 2
+            or (factoryTask.StallTime or 0) >= 8)
+    local earlyMassBudget = (eco.MassIncome or 0)
+        + math.max(0, (eco.MassTrend or 0) * 8)
+        + math.max(0, ((eco.MassStorageRatio or 0) - 0.06) * 10)
+    local starterMexNeed = readyLand >= 1
+        and powerReady >= 1
+        and mexReady < 4
+        and now < 240
+        and not constraints.CriticalFactory
+        and not constraints.CriticalStructure
+
+    if starterMexNeed then
+        return {
+            Name = 'starter_mex_claim',
+            Reason = 'starter_mex_gap',
+        }
+    end
+
+    if landFactoryDebt then
+        return {
+            Name = 'land_factory_floor',
+            Reason = 'critical_land_factory',
+        }
+    end
+
+    if t2LandFactories <= 0 then
+        local canStartFirstHQ = readyLand >= 3
+            and totalLand >= 3
+            and mexReady >= 4
+            and powerReady >= 3
+            and not constraints.CriticalStructure
+            and not constraints.EcoCrash
+
+        if readyLand >= 4
+            or totalLand >= 5
+            or mode == 'tech_window'
+            or constraints.SurplusSpendWindow
+            or (canStartFirstHQ and earlyMassBudget >= 8.5 and not techPlan.UpgradeExtractors) then
+            return {
+                Name = 'first_land_hq',
+                Reason = readyLand >= 4 and 'land_floor_online'
+                    or constraints.SurplusSpendWindow and 'surplus_transition'
+                    or 'mandatory_transition',
+            }
+        end
+
+        if readyLand >= 2
+            and mexReady >= 4
+            and powerReady >= 3
+            and not constraints.EcoCrash
+            and not constraints.LandPanic
+            and not constraints.AirPanic
+            and (techPlan.UpgradeExtractors or earlyMassBudget >= 7.5 or constraints.SurplusSpendWindow) then
+            return {
+                Name = 'mass_consolidation',
+                Reason = techPlan.UpgradeExtractors and (techPlan.ExtractorUpgradeReason or 'upgrade_window')
+                    or earlyMassBudget >= 7.5 and 'budget_window'
+                    or 'surplus_window',
+            }
+        end
+
+        return {
+            Name = 'land_factory_floor',
+            Reason = 'pre_hq_floor',
+        }
+    end
+
+    if techEngineers <= 0 then
+        return {
+            Name = 'first_t2_engineer',
+            Reason = 'missing_t2_engineer',
+        }
+    end
+
+    if techPower <= 0 then
+        return {
+            Name = 'first_t2_power',
+            Reason = 'missing_t2_power',
+        }
+    end
+
+    return {
+        Name = 'surplus_scale',
+        Reason = 'post_t2_scale',
+    }
+end
+
 function Module.Update(aiBrain, now)
     local runtime = aiBrain.OvermindRuntime
     if not runtime then
@@ -1924,9 +2045,12 @@ function Module.Update(aiBrain, now)
     local demand = BuildDemandLedger(runtime, current, constraints, trends, confidence, mode)
     local budget = DecideDomainBudget(mode, constraints, demand, confidence)
     local rolePlan = DecideRolePlan(runtime, current, constraints, demand, budget, confidence, mode, trends)
-    local capacityPlan = DecideCapacityPlan(runtime, current, constraints, rolePlan)
     local techPlan = DecideTechPlan(runtime, current, constraints, confidence, mode)
     local structurePlan = DecideStructurePlan(runtime, current, constraints, confidence, mode, now)
+    local macroObjective = DecideMacroObjective(aiBrain, runtime, current, constraints, techPlan, mode, now)
+    state.MacroObjective = macroObjective.Name
+    state.MacroObjectiveReason = macroObjective.Reason
+    local capacityPlan = DecideCapacityPlan(runtime, current, constraints, rolePlan)
 
     state.ModeScores = scores
     state.Mode = mode
@@ -1972,10 +2096,12 @@ function Module.Update(aiBrain, now)
 
     if now - (state.LastLogTime or -999) >= 34 then
         state.LastLogTime = now
-        LOG(string.format('*OVERMIND PRODDIR A%d t=%.1f mode=%s conf=%.2f debt=%.2f fac=%d/%d/%d->%d/%d/%d bud=%.2f/%.2f/%.2f/%.2f/%.2f/%.2f/%.2f str=%.1f/%.1f/%.1f->%.1f/%.1f/%.1f gap=%.1f/%.1f/%.1f eng=%.1f/%.1f(%d/%d) eco=%d:%d/%d:%d/%d ft=%d:%s:%d/%d mex=%d:%s:%.2f struct=R%d S%d AA%d PD%d tech=%d:%s emerg=%d%d%d',
+        LOG(string.format('*OVERMIND PRODDIR A%d t=%.1f mode=%s obj=%s/%s conf=%.2f debt=%.2f fac=%d/%d/%d->%d/%d/%d bud=%.2f/%.2f/%.2f/%.2f/%.2f/%.2f/%.2f str=%.1f/%.1f/%.1f->%.1f/%.1f/%.1f gap=%.1f/%.1f/%.1f eng=%.1f/%.1f(%d/%d) eco=%d:%d/%d:%d/%d ft=%d:%s:%d/%d mex=%d:%s:%.2f struct=R%d S%d AA%d PD%d tech=%d:%s emerg=%d%d%d',
             aiBrain:GetArmyIndex(),
             now,
             mode,
+            macroObjective.Name or 'none',
+            macroObjective.Reason or 'none',
             confidence.Global or 0,
             scoutingDebt or 0,
             current.Factories.Land.Total or 0,
