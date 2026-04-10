@@ -1921,7 +1921,7 @@ local function DescribeStructureTaskTarget(target)
     return 'resume'
 end
 
-function Update(aiBrain, now)
+local function UpdateDirector(aiBrain, now)
     local runtime = aiBrain.OvermindRuntime
     if not runtime then
         return
@@ -2422,6 +2422,10 @@ function Update(aiBrain, now)
     end
 end
 
-Module.Update = Update
+Module.Update = UpdateDirector
+
+function Update(aiBrain, now)
+    return UpdateDirector(aiBrain, now)
+end
 
 return Module
