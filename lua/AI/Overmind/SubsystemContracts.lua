@@ -9,6 +9,7 @@ local OvermindZoneModel = import('/mods/OvermindAI/lua/AI/Overmind/ZoneModel.lua
 local OvermindIntelModel = import('/mods/OvermindAI/lua/AI/Overmind/IntelModel.lua')
 local OvermindEnemyClusterTracker = import('/mods/OvermindAI/lua/AI/Overmind/EnemyClusterTracker.lua')
 local OvermindOpponentModel = import('/mods/OvermindAI/lua/AI/Overmind/OpponentModel.lua')
+local OvermindMacroController = import('/mods/OvermindAI/lua/AI/Overmind/MacroController.lua')
 local OvermindStrategicPlanner = import('/mods/OvermindAI/lua/AI/Overmind/StrategicPlanner.lua')
 local OvermindGoalSelector = import('/mods/OvermindAI/lua/AI/Overmind/GoalSelector.lua')
 local OvermindEconomyOptimizer = import('/mods/OvermindAI/lua/AI/Overmind/EconomyOptimizer.lua')
@@ -102,6 +103,7 @@ local ActionGroups = {
         BuildAction({ Name = 'IntelModel', Label = 'intel-model', Group = 'strategic', StateSlice = 'IntelModel', ModuleRef = OvermindIntelModel, Inputs = { 'ZoneGraph', 'ReconState' }, Outputs = { 'IntelModel', 'PrimaryEnemyPos', 'LastEnemyContactTime' } }),
         BuildAction({ Name = 'EnemyClusterTracker', Label = 'enemy-clusters', Group = 'strategic', StateSlice = 'EnemyClusterTracker', ModuleRef = OvermindEnemyClusterTracker, Inputs = { 'ZoneGraph', 'IntelModel' }, Outputs = { 'EnemyClusterTracker', 'LastEnemyContactTime' } }),
         BuildAction({ Name = 'OpponentModel', Label = 'opponent-model', Group = 'strategic', StateSlice = 'OpponentModel', ModuleRef = OvermindOpponentModel, Inputs = { 'ZoneGraph', 'IntelModel', 'EnemyClusterTracker' }, Outputs = { 'OpponentModel' } }),
+        BuildAction({ Name = 'MacroController', Label = 'macro-controller', Group = 'strategic', StateSlice = 'MacroController', ModuleRef = OvermindMacroController, Inputs = { 'EcoState', 'Recovery', 'EngineerState', 'UpgradeDirector' }, Outputs = { 'MacroController' } }),
         BuildAction({ Name = 'StrategicPlanner', Label = 'strategic-planner', Group = 'strategic', StateSlice = 'StrategicPlanner', ModuleRef = OvermindStrategicPlanner, Inputs = { 'ZoneGraph', 'IntelModel', 'EnemyClusterTracker', 'OpponentModel', 'EcoState', 'Recovery', 'RaidDefense', 'ForceDirector' }, Outputs = { 'StrategicPlanner' } }),
         BuildAction({ Name = 'GoalSelector', Label = 'goal-selector', Group = 'strategic', ModuleRef = OvermindGoalSelector, Inputs = { 'ZoneGraph', 'IntelModel', 'EnemyClusterTracker', 'OpponentModel', 'StrategicPlanner', 'EcoState', 'Recovery', 'ForceDirector' }, Outputs = { 'StrategyGoal', 'StrategyGoalScore', 'StrategyUtilities', 'GoalAggressionModifier', 'GoalConfidence', 'StrategyFocusPos', 'StrategyFocusZoneKey', 'StrategyFocusReason', 'StrategySignals' } }),
         BuildAction({ Name = 'EconomyPolicy', Label = 'economy-policy', Group = 'strategic', Method = 'UpdatePolicy', ModuleRef = OvermindEconomyOptimizer, Inputs = { 'EcoState', 'OpponentModel', 'StrategicPlanner', 'ZoneGraph', 'IntelModel', 'Recovery' }, Outputs = { 'EcoPolicy', 'MacroPhase' } }),

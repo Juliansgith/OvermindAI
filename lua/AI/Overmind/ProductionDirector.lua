@@ -908,7 +908,36 @@ local function DecideDomainBudget(mode, constraints, demand, confidence, macroOb
         raw.Tech = raw.Tech - 0.03
         raw.Air = raw.Air - 0.01
     end
-    if macroObjective == 'first_land_hq' then
+    if macroObjective == 'bootstrap_factory' then
+        raw.Land = 0.12
+        raw.Air = 0
+        raw.Navy = 0
+        raw.Intel = 0.02
+        raw.Defense = 0
+        raw.Eco = 0.86
+        raw.Tech = 0
+    elseif macroObjective == 'starter_mex_claim' then
+        raw.Land = 0.10
+        raw.Air = 0
+        raw.Navy = 0
+        raw.Intel = math.min(raw.Intel, 0.06)
+        raw.Defense = 0
+        raw.Eco = math.max(raw.Eco, 0.82)
+        raw.Tech = 0
+    elseif macroObjective == 'land_factory_floor' then
+        raw.Land = raw.Land + 0.12
+        raw.Eco = raw.Eco + 0.14
+        raw.Tech = raw.Tech - 0.08
+        raw.Air = raw.Air - 0.18
+        raw.Defense = raw.Defense - 0.12
+        raw.Intel = raw.Intel - 0.03
+    elseif macroObjective == 'mass_consolidation' then
+        raw.Land = raw.Land + 0.04
+        raw.Eco = raw.Eco + 0.08
+        raw.Tech = raw.Tech + 0.06
+        raw.Air = raw.Air - 0.08
+        raw.Defense = raw.Defense - 0.06
+    elseif macroObjective == 'first_land_hq' then
         raw.Land = raw.Land + 0.08
         raw.Eco = raw.Eco + 0.05
         raw.Tech = raw.Tech + 0.16
@@ -1920,6 +1949,17 @@ local function DecideStructurePlan(runtime, current, constraints, confidence, mo
     }
 end
 
+local function GetMacroObjectiveState(runtime, fallback)
+    local macro = runtime and runtime.MacroController or false
+    if type(macro) == 'table' and macro.Phase then
+        return {
+            Name = macro.Phase,
+            Reason = macro.Reason or 'macro_controller',
+        }
+    end
+    return fallback
+end
+
 local function DecideMacroObjective(aiBrain, runtime, current, constraints, techPlan, mode, now)
     local eco = runtime.EcoState or {}
     local factories = current.Factories or {}
@@ -2056,9 +2096,13 @@ function Module.Update(aiBrain, now)
     local constraints = BuildConstraints(runtime, current, confidence, scoutingDebt, navalActive, now)
     local scores = ScoreModes(now, runtime, current, constraints, trends, confidence)
     local mode, bestScore, previousMode, previousScore = PickMode(state, scores, now)
+    local macroObjective = GetMacroObjectiveState(runtime, false)
+    if not macroObjective then
+        local provisionalTechPlan = DecideTechPlan(runtime, current, constraints, confidence, mode)
+        macroObjective = DecideMacroObjective(aiBrain, runtime, current, constraints, provisionalTechPlan, mode, now)
+    end
     local techPlan = DecideTechPlan(runtime, current, constraints, confidence, mode)
     local structurePlan = DecideStructurePlan(runtime, current, constraints, confidence, mode, now)
-    local macroObjective = DecideMacroObjective(aiBrain, runtime, current, constraints, techPlan, mode, now)
     local demand = BuildDemandLedger(runtime, current, constraints, trends, confidence, mode)
     local budget = DecideDomainBudget(mode, constraints, demand, confidence, macroObjective.Name)
     local rolePlan = DecideRolePlan(runtime, current, constraints, demand, budget, confidence, mode, trends)
@@ -2074,6 +2118,7 @@ function Module.Update(aiBrain, now)
     state.CapacityPlan = capacityPlan
     state.TechPlan = techPlan
     state.StructurePlan = structurePlan
+    state.MacroTransitionLocked = ((runtime.MacroController or {}).TransitionLocked) == true
     state.EmergencyOverrides = {
         AirPanic = constraints.AirPanic,
         BomberWatch = constraints.BomberWatch,

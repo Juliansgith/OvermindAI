@@ -517,8 +517,10 @@ function Update(aiBrain, now)
     local raid = runtime.RaidDefense or {}
     local underHarass = raid.UnderLandHarass or raid.UnderAirHarass
     local director = runtime.ProductionDirector or {}
+    local macro = runtime.MacroController or {}
     local constraints = director.ConstraintState or {}
-    local macroObjective = director.MacroObjective or 'land_factory_floor'
+    local macroObjective = macro.Phase or director.MacroObjective or 'land_factory_floor'
+    local transitionAnchor = macro.TransitionLocked == true and macroObjective ~= 'surplus_scale'
     local forceStats = ((runtime.ForceDirector or {}).Stats) or {}
     local strictLeash = now < (runtime.ACUStrictLeashUntil or -999)
     local engState = runtime.EngineerState or {}
@@ -546,7 +548,7 @@ function Update(aiBrain, now)
         desired = 'anchor'
     elseif starterPhaseLock then
         desired = 'anchor'
-    elseif macroObjective == 'first_land_hq' or macroObjective == 'first_t2_engineer' or macroObjective == 'first_t2_power' then
+    elseif transitionAnchor then
         desired = 'anchor'
     elseif insideDefendedSpace and desired == 'retreat' and healthRatio >= 0.8 and not underHarass and localThreat <= (homeThreat + 1.8) then
         desired = 'anchor'
@@ -578,8 +580,8 @@ function Update(aiBrain, now)
     runtime.ACURoleState = roleState
     runtime.ACURole = roleState.Current
     runtime.ACURoleMaxDistance = RoleDistance(roleState.Current)
-    if macroObjective == 'first_land_hq' or macroObjective == 'first_t2_engineer' or macroObjective == 'first_t2_power' then
-        runtime.ACURoleMaxDistance = math.min(runtime.ACURoleMaxDistance, 12)
+    if transitionAnchor then
+        runtime.ACURoleMaxDistance = math.min(runtime.ACURoleMaxDistance, 10)
     end
     if strictLeash then
         runtime.ACURoleMaxDistance = math.min(runtime.ACURoleMaxDistance, 16)
@@ -599,7 +601,7 @@ function Update(aiBrain, now)
         return
     end
 
-    if starterPhaseLock then
+    if starterPhaseLock or (transitionAnchor and now < 360 and healthRatio >= 0.80 and not underHarass) then
         if distance > 14 then
             if GetQueueLen(acu) <= 0 and IssueMove then
                 IssueMove({ acu }, homePos)

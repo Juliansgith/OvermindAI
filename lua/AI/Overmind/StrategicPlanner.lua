@@ -44,7 +44,9 @@ local function BuildSignals(aiBrain, runtime, now)
     local force = runtime.ForceDirector or runtime.ForceManager or {}
     local policy = runtime.EcoPolicy or {}
     local phase = runtime.MacroPhase or policy.MacroPhase or 'consolidate'
-    local macroObjective = ((runtime.ProductionDirector or {}).MacroObjective) or 'land_factory_floor'
+    local macro = runtime.MacroController or {}
+    local macroObjective = macro.Phase or ((runtime.ProductionDirector or {}).MacroObjective) or 'land_factory_floor'
+    local transitionLocked = macro.TransitionLocked == true
 
     local bestExpansionNode = GetNode(graph, intel.BestExpansionZoneKey or graph.BestExpansionNodeKey)
     local bestRaidNode = GetNode(graph, intel.BestRaidZoneKey or graph.BestRaidNodeKey)
@@ -156,6 +158,7 @@ local function BuildSignals(aiBrain, runtime, now)
             and mapControl >= 0.34
             and not ecoWeak
             and not recoveryActive
+            and not transitionLocked
             and not approachClose
             and (((frontTheater.PressureEMA or frontTheater.Pressure or 0) >= 1.2) or bestRaidScore >= 18)
             and ((forceStats.MainLine or 0) + (forceStats.Artillery or 0) >= math.max(16, (forceStats.BaseGuard or 0) + 6))
@@ -166,6 +169,7 @@ local function BuildSignals(aiBrain, runtime, now)
             and (relativePower <= 1.08 or opp.Posture == 'land_push' or opp.T2Push == true or (homeTheater.Confidence or 0) < 0.45)
         ) and true or false,
         MacroObjective = macroObjective,
+        TransitionLocked = transitionLocked,
     }
 end
 
@@ -300,6 +304,13 @@ local function ScoreDirectives(signals, primaryTheater)
         scores.punish_greed = scores.punish_greed + 1.0
         scores.trade_tech_for_tempo = scores.trade_tech_for_tempo + 1.5
     end
+    if signals.TransitionLocked and not signals.DesperationCounterstrike then
+        scores.force_air_answer = scores.force_air_answer - 2.0
+        scores.expand = scores.expand - 0.8
+        scores.stabilize = scores.stabilize - 0.3
+        scores.trade_map_for_tech = scores.trade_map_for_tech + 0.9
+        scores.trade_tech_for_tempo = scores.trade_tech_for_tempo + 0.7
+    end
     if signals.MacroObjective == 'first_land_hq'
         or signals.MacroObjective == 'first_t2_engineer'
         or signals.MacroObjective == 'first_t2_power' then
@@ -319,6 +330,7 @@ local function BuildDirectiveState(signals, primaryTheater, directive)
         or (directive == 'punish_greed' and not signals.DurableSurplus)
     local forceAirAnswer = (directive == 'force_air_answer' or signals.ForceAirAnswerCandidate)
         and not (signals.MacroObjective == 'first_land_hq' or signals.MacroObjective == 'first_t2_engineer')
+        and not signals.TransitionLocked
 
     local raidCentrality = Clamp(
         (signals.BestRaidScore * 0.04)
@@ -372,6 +384,7 @@ local function BuildDirectiveState(signals, primaryTheater, directive)
         AttackWindow = signals.AttackWindow and true or false,
         DesperationCounterstrike = signals.DesperationCounterstrike and true or false,
         MacroObjective = signals.MacroObjective or 'land_factory_floor',
+        TransitionLocked = signals.TransitionLocked and true or false,
         RaidCentrality = raidCentrality,
         RaidDirective = (raidCentrality >= 0.58) and 'central' or 'opportunistic',
         TempoMode = tempoMode,
@@ -447,6 +460,10 @@ local function BuildGoalBiases(primaryTheater, directiveState, directive)
         bias.raid = bias.raid + 1.4
         bias.all_in = bias.all_in + 2.6
         bias.hold = bias.hold - 1.2
+    end
+    if directiveState.TransitionLocked and not directiveState.DesperationCounterstrike then
+        bias.tech = bias.tech + 1.0
+        bias.hold = bias.hold - 0.3
     end
     if directiveState.MacroObjective == 'first_land_hq'
         or directiveState.MacroObjective == 'first_t2_engineer'

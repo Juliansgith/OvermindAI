@@ -1041,6 +1041,11 @@ local function CountUnfinishedMexes(aiBrain, mainPos, radius)
 end
 
 local function ShouldPersistentSurplusSpend(runtime, now)
+    local macro = runtime and runtime.MacroController or {}
+    local phase = macro.Phase or (((runtime and runtime.ProductionDirector) or {}).MacroObjective) or 'land_factory_floor'
+    if phase ~= 'surplus_scale' then
+        return false
+    end
     local director = runtime and runtime.ProductionDirector or {}
     local constraints = director.ConstraintState or {}
     local current = director.Current or {}
@@ -1914,6 +1919,9 @@ function Update(aiBrain, now)
     local radarCritical = NeedsCriticalRadar(runtime)
     local raid = runtime.RaidDefense or {}
     local constraints = ((runtime.ProductionDirector or {}).ConstraintState or {})
+    local macro = runtime.MacroController or {}
+    local macroPhase = macro.Phase or (((runtime.ProductionDirector or {}).MacroObjective) or 'land_factory_floor')
+    local transitionLock = macro.TransitionLocked == true
     local currentRadar = ((((runtime.ProductionDirector or {}).Current or {}).Structures or {}).Radar) or 0
     local bomberWatch = constraints.BomberWatch == true
     local bomberPanic = ((raid.BomberPanicUntil or -999) > now) or ((raid.LastBomberEnemyCount or 0) >= 1 and raid.UnderAirHarass)
@@ -2090,6 +2098,13 @@ function Update(aiBrain, now)
             if structureKind == 'Power' and structureFraction >= 0.8 then
                 structureTask.StickyUntil = math.max(structureTask.StickyUntil or -999, now + stickyDuration + 10)
             end
+            if transitionLock
+                and structureTask.Active
+                and (structureTask.Kind == 'AA' or structureTask.Kind == 'Defense' or string.lower(structureTask.Kind or 'none') == 'structure')
+                and not radarCritical then
+                ResetStructureTask(structureTask)
+                structureTargetObject = false
+            end
         else
             ResetStructureTask(structureTask)
         end
@@ -2119,6 +2134,51 @@ function Update(aiBrain, now)
                     local isIdle = IsIdle(eng)
                     local constructing = IsConstructing(eng)
                     local acted = false
+
+                    if (not acted) and isIdle and not constructing then
+                        if macroPhase == 'starter_mex_claim'
+                            and localThreat < 1.8
+                            and dist <= 320
+                            and TryOpenSurplusExpansionBuild(aiBrain, runtime, eng, mainPos, enemyPos, safeExpandDistance, now) then
+                            dispatchedExpand = dispatchedExpand + 1
+                            acted = true
+                        elseif (macroPhase == 'bootstrap_factory' or macroPhase == 'land_factory_floor')
+                            and factoryTask.Active
+                            and factoryTargetObject
+                            and localThreat < 2.2
+                            and dist <= 360
+                            and TryAssignAssistOrRepair(aiBrain, runtime, eng, factoryTargetObject, false, now) then
+                            forcedFactoryRecover = forcedFactoryRecover + 1
+                            acted = true
+                        elseif (macroPhase == 'first_land_hq' or macroPhase == 'first_t2_engineer' or macroPhase == 'first_t2_power') then
+                            local assistTarget, isUpgradeTarget = GetPriorityUpgradeAssistTarget(aiBrain, runtime, mainPos)
+                            if assistTarget
+                                and localThreat < 2.2
+                                and dist <= 360
+                                and TryAssignAssistOrRepair(aiBrain, runtime, eng, assistTarget, isUpgradeTarget, now) then
+                                surplusSpendCount = surplusSpendCount + 1
+                                acted = true
+                            elseif (hqPowerRecoveryWanted or macro.NeedPowerRecovery == true)
+                                and localThreat < 2.2
+                                and dist <= 360 then
+                                local powerTarget = GetPriorityPowerRecoveryTarget(aiBrain, runtime, mainPos, structureTargetObject, structureTask)
+                                if powerTarget and TryAssignAssistOrRepair(aiBrain, runtime, eng, powerTarget, false, now) then
+                                    powerRecoveryCount = powerRecoveryCount + 1
+                                    acted = true
+                                elseif TryOpenPowerRecoveryBuild(aiBrain, runtime, eng, mainPos, now) then
+                                    powerRecoveryCount = powerRecoveryCount + 1
+                                    acted = true
+                                end
+                            elseif factoryTask.Active
+                                and factoryTargetObject
+                                and localThreat < 2.2
+                                and dist <= 360
+                                and TryAssignAssistOrRepair(aiBrain, runtime, eng, factoryTargetObject, false, now) then
+                                forcedFactoryRecover = forcedFactoryRecover + 1
+                                acted = true
+                            end
+                        end
+                    end
 
                     if (not acted)
                         and isIdle
@@ -2198,6 +2258,7 @@ function Update(aiBrain, now)
                     if (not acted)
                         and isIdle
                         and not constructing
+                        and (not transitionLock)
                         and (ShouldPersistentSurplusSpend(runtime, now) or ShouldScaleBaseEco(runtime, now))
                         and localThreat < 2.0
                         and dist <= 360 then

@@ -3,7 +3,7 @@ local OvermindScheduler = import('/mods/OvermindAI/lua/AI/Overmind/Scheduler.lua
 local OvermindMemory = import('/mods/OvermindAI/lua/AI/Overmind/Memory.lua')
 
 local ActiveBrains = {}
-local BuildFingerprint = 'v154-m28-style-hq-and-commit'
+local BuildFingerprint = 'v155-macro-controller-reset'
 
 local NavUtils = false
 do
@@ -106,6 +106,7 @@ function PostCreate(aiBrain, planName)
         RuntimeModuleUpdateFix = true,
         EngineerFactoryTasks = true,
         StrategicPlanner = true,
+        MacroController = true,
     }
 
     if aiBrain.OvermindCheat and not aiBrain.CheatEnabled then

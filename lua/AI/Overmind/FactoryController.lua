@@ -421,6 +421,10 @@ local function CountTechEngineers(aiBrain)
 end
 
 local function GetMacroObjective(runtime)
+    local macro = (runtime and runtime.MacroController) or false
+    if type(macro) == 'table' and macro.Phase then
+        return macro.Phase
+    end
     local prod = (runtime and runtime.ProductionDirector) or {}
     return prod.MacroObjective or 'land_factory_floor'
 end

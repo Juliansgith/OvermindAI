@@ -1,0 +1,278 @@
+local Module = {
+    Name = 'MacroController',
+    StateSlice = 'MacroController',
+}
+
+local TransitionPhases = {
+    bootstrap_factory = true,
+    starter_mex_claim = true,
+    land_factory_floor = true,
+    mass_consolidation = true,
+    first_land_hq = true,
+    first_t2_engineer = true,
+    first_t2_power = true,
+}
+
+local function GetFraction(unit)
+    if not unit or unit.Dead then
+        return 0
+    end
+    if unit.GetFractionComplete then
+        return unit:GetFractionComplete()
+    end
+    if unit.GetHealth and unit.GetMaxHealth then
+        local maxHealth = math.max(1, unit:GetMaxHealth() or 1)
+        return (unit:GetHealth() or 0) / maxHealth
+    end
+    return 1
+end
+
+local function IsReadyUnit(unit)
+    return unit
+        and not unit.Dead
+        and GetFraction(unit) >= 0.95
+        and not unit:IsUnitState('BeingBuilt')
+        and not unit:IsUnitState('Upgrading')
+end
+
+local function CountUnits(aiBrain, category)
+    return aiBrain:GetCurrentUnits(category) or 0
+end
+
+local function CountReadyUnits(aiBrain, category)
+    local count = 0
+    local units = aiBrain:GetListOfUnits(category, false, true) or {}
+    for _, unit in units do
+        if IsReadyUnit(unit) then
+            count = count + 1
+        end
+    end
+    return count
+end
+
+local function CountActiveLandFactoryUpgrades(aiBrain)
+    local count = 0
+    local units = aiBrain:GetListOfUnits(categories.FACTORY * categories.LAND * categories.STRUCTURE, false, true) or {}
+    for _, unit in units do
+        if unit and not unit.Dead and unit:IsUnitState('Upgrading') then
+            count = count + 1
+        end
+    end
+    return count
+end
+
+local function CountActiveMexUpgrades(aiBrain)
+    local count = 0
+    local units = aiBrain:GetListOfUnits(categories.MASSEXTRACTION * categories.STRUCTURE, false, true) or {}
+    for _, unit in units do
+        if unit and not unit.Dead and unit:IsUnitState('Upgrading') then
+            count = count + 1
+        end
+    end
+    return count
+end
+
+local function ComputeMassBudget(eco)
+    eco = eco or {}
+    return (eco.MassIncome or 0)
+        + math.max(0, (eco.MassTrend or 0) * 8)
+        + math.max(0, ((eco.MassStorageRatio or 0) - 0.04) * 10)
+end
+
+local function HasCriticalLandFactoryDebt(runtime, readyLand)
+    local task = ((runtime.EngineerState or {}).UnfinishedFactoryTask) or {}
+    if not task.Active or task.Domain ~= 'Land' then
+        return false
+    end
+    if (task.ReadyFactories or 0) < math.max(1, math.min(2, readyLand or 0)) then
+        return true
+    end
+    if (task.AssignedBuilders or 0) < math.max(1, task.RequiredBuilders or 0) then
+        return true
+    end
+    if (task.StallTime or 0) >= 8 then
+        return true
+    end
+    return false
+end
+
+local function DetermineDesiredPhase(aiBrain, runtime, now)
+    local eco = runtime.EcoState or {}
+    local recovery = runtime.Recovery or {}
+    local raid = runtime.RaidDefense or {}
+    local readyLand = CountReadyUnits(aiBrain, categories.FACTORY * categories.LAND * categories.STRUCTURE)
+    local totalLand = CountUnits(aiBrain, categories.FACTORY * categories.LAND * categories.STRUCTURE)
+    local readyMex = CountReadyUnits(aiBrain, categories.MASSEXTRACTION * categories.STRUCTURE)
+    local readyPower = CountReadyUnits(aiBrain, categories.ENERGYPRODUCTION * categories.STRUCTURE)
+    local t2LandFactories = CountUnits(aiBrain, categories.FACTORY * categories.LAND * categories.STRUCTURE * (categories.TECH2 + categories.TECH3))
+    local techEngineers = CountUnits(aiBrain, categories.ENGINEER * categories.MOBILE * (categories.TECH2 + categories.TECH3))
+    local techPower = CountUnits(aiBrain, categories.ENERGYPRODUCTION * categories.STRUCTURE * (categories.TECH2 + categories.TECH3))
+    local activeLandFactoryUpgrades = CountActiveLandFactoryUpgrades(aiBrain)
+    local activeMexUpgrades = CountActiveMexUpgrades(aiBrain)
+    local criticalFactoryDebt = HasCriticalLandFactoryDebt(runtime, readyLand)
+    local ecoCrash = ((eco.MassStorageRatio or 0) <= 0.01 and (eco.EnergyStorageRatio or 0) <= 0.01)
+        or recovery.EcoCrash == true
+    local underHarass = raid.UnderLandHarass == true or raid.UnderAirHarass == true
+    local massBudget = ComputeMassBudget(eco)
+
+    local facts = {
+        ReadyLandFactories = readyLand,
+        TotalLandFactories = totalLand,
+        ReadyMexes = readyMex,
+        ReadyPower = readyPower,
+        T2LandFactories = t2LandFactories,
+        TechEngineers = techEngineers,
+        TechPower = techPower,
+        ActiveLandFactoryUpgrades = activeLandFactoryUpgrades,
+        ActiveMexUpgrades = activeMexUpgrades,
+        CriticalLandFactoryDebt = criticalFactoryDebt,
+        EcoCrash = ecoCrash,
+        UnderHarass = underHarass,
+        MassBudget = massBudget,
+        EnergyTrend = eco.EnergyTrend or 0,
+        MassTrend = eco.MassTrend or 0,
+    }
+
+    if readyLand <= 0 and totalLand <= 0 then
+        return 'bootstrap_factory', 'missing_first_factory', facts
+    end
+
+    if readyLand >= 1 and readyPower >= 1 and readyMex < 4 and now < 300 and not criticalFactoryDebt then
+        return 'starter_mex_claim', 'starter_mex_gap', facts
+    end
+
+    if criticalFactoryDebt or readyLand < 3 or totalLand < 3 then
+        return 'land_factory_floor', criticalFactoryDebt and 'critical_land_factory' or 'pre_hq_floor', facts
+    end
+
+    if t2LandFactories <= 0 then
+        if readyLand >= 3 and readyMex >= 4 and readyPower >= 3 then
+            if activeLandFactoryUpgrades > 0 then
+                return 'first_land_hq', 'hq_in_flight', facts
+            end
+            if massBudget >= 7.0 and not ecoCrash then
+                return 'first_land_hq', 'phase_owned_hq', facts
+            end
+            if readyLand >= 2 and readyMex >= 4 and readyPower >= 3 and massBudget >= 6.0 and not underHarass then
+                return 'mass_consolidation', 'budget_window', facts
+            end
+            return 'first_land_hq', 'forced_transition', facts
+        end
+        return 'land_factory_floor', 'hq_floor', facts
+    end
+
+    if techEngineers <= 0 then
+        return 'first_t2_engineer', 'missing_t2_engineer', facts
+    end
+
+    if techPower <= 0 and (readyPower < 5 or (eco.EnergyIncome or 0) < 90 or (eco.EnergyTrend or 0) < 4) then
+        return 'first_t2_power', 'missing_t2_power', facts
+    end
+
+    return 'surplus_scale', 'post_t2_scale', facts
+end
+
+local function ApplyLatch(state, desiredPhase, desiredReason, facts, now)
+    local current = state.Phase or false
+    if not current then
+        return desiredPhase, desiredReason
+    end
+
+    if current == 'starter_mex_claim'
+        and facts.ReadyMexes < 4
+        and now < 300
+        and not facts.CriticalLandFactoryDebt then
+        return current, 'latched_starter_mex_claim'
+    end
+
+    if current == 'land_factory_floor' and facts.CriticalLandFactoryDebt then
+        return current, 'latched_land_factory_floor'
+    end
+
+    if current == 'first_land_hq'
+        and facts.T2LandFactories <= 0
+        and (facts.ActiveLandFactoryUpgrades > 0 or (facts.ReadyLandFactories >= 2 and facts.ReadyMexes >= 4))
+        and not facts.EcoCrash then
+        return current, 'latched_first_land_hq'
+    end
+
+    if current == 'first_t2_engineer' and facts.TechEngineers <= 0 then
+        return current, 'latched_first_t2_engineer'
+    end
+
+    if current == 'first_t2_power' and facts.TechPower <= 0 then
+        return current, 'latched_first_t2_power'
+    end
+
+    return desiredPhase, desiredReason
+end
+
+function Module.Update(aiBrain, now)
+    local runtime = aiBrain.OvermindRuntime or {}
+    aiBrain.OvermindRuntime = runtime
+
+    local state = runtime.MacroController or {
+        Phase = 'bootstrap_factory',
+        Reason = 'boot',
+        PhaseStartedAt = now,
+        LastLogTime = -999,
+    }
+    runtime.MacroController = state
+
+    local desiredPhase, desiredReason, facts = DetermineDesiredPhase(aiBrain, runtime, now)
+    local phase, reason = ApplyLatch(state, desiredPhase, desiredReason, facts, now)
+
+    if phase ~= state.Phase then
+        state.Phase = phase
+        state.PhaseStartedAt = now
+    end
+    state.Reason = reason
+
+    state.TransitionLocked = TransitionPhases[phase] == true
+    state.SuppressAirExpansion = state.TransitionLocked and phase ~= 'surplus_scale'
+    state.SuppressDefenseDrift = phase == 'bootstrap_factory'
+        or phase == 'starter_mex_claim'
+        or phase == 'land_factory_floor'
+        or phase == 'first_land_hq'
+        or phase == 'first_t2_engineer'
+        or phase == 'first_t2_power'
+    state.SuppressCombatPlanner = state.TransitionLocked and phase ~= 'surplus_scale'
+    state.StrictACU = state.TransitionLocked
+    state.NeedStarterMex = phase == 'starter_mex_claim'
+    state.NeedFactoryRecovery = phase == 'land_factory_floor' or facts.CriticalLandFactoryDebt
+    state.NeedMassConsolidation = phase == 'mass_consolidation'
+    state.NeedFirstLandHQ = phase == 'first_land_hq'
+    state.NeedFirstT2Engineer = phase == 'first_t2_engineer'
+    state.NeedFirstT2Power = phase == 'first_t2_power'
+    state.NeedUpgradeAssist = phase == 'first_land_hq' or phase == 'first_t2_engineer' or phase == 'first_t2_power'
+    state.NeedPowerRecovery = (phase == 'first_land_hq' or phase == 'first_t2_power')
+        and (facts.ReadyPower < 4 or facts.EnergyTrend < -6)
+    state.Facts = facts
+    state.LastUpdate = now
+
+    if now - (state.LastLogTime or -999) >= 24 then
+        state.LastLogTime = now
+        LOG(string.format(
+            '*OVERMIND MACROCTRL A%d t=%.1f phase=%s reason=%s lock=%d land=%d/%d mex=%d pwr=%d hq=%d t2eng=%d t2pwr=%d budget=%.1f debt=%d',
+            aiBrain:GetArmyIndex(),
+            now,
+            phase,
+            reason,
+            state.TransitionLocked and 1 or 0,
+            facts.ReadyLandFactories or 0,
+            facts.TotalLandFactories or 0,
+            facts.ReadyMexes or 0,
+            facts.ReadyPower or 0,
+            (facts.T2LandFactories or 0) + (facts.ActiveLandFactoryUpgrades or 0),
+            facts.TechEngineers or 0,
+            facts.TechPower or 0,
+            facts.MassBudget or 0,
+            facts.CriticalLandFactoryDebt and 1 or 0))
+    end
+end
+
+function Update(aiBrain, now)
+    return Module.Update(aiBrain, now)
+end
+
+return Module
