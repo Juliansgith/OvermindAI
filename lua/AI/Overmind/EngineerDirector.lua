@@ -11,6 +11,7 @@ local RadarCategory = categories.STRUCTURE * categories.RADAR
 local AADefenseCategory = categories.STRUCTURE * categories.DEFENSE * categories.ANTIAIR
 local DefenseCategory = categories.STRUCTURE * categories.DEFENSE
 local BuilderCategory = categories.ENGINEER * categories.MOBILE + categories.COMMAND
+local LandCombatCategory = categories.MOBILE * categories.LAND - categories.ENGINEER - categories.SCOUT - categories.COMMAND
 local ComputeAirThreatFlags
 local HasEnemyCombatNear
 
@@ -194,6 +195,105 @@ local function TryReclaimEnemyMex(aiBrain, runtime, eng, now)
         end
         if issued then
             runtime.EngineerEnemyMexReclaimCooldown[entityId] = now
+            return true
+        end
+    end
+
+    return false
+end
+
+local function GetReclaimFieldTargets(targetPos, radius, minMass)
+    if not targetPos then
+        return {}, 0
+    end
+
+    local r = radius or 18
+    local rect = Rect((targetPos[1] or 0) - r, (targetPos[3] or 0) - r, (targetPos[1] or 0) + r, (targetPos[3] or 0) + r)
+    local reclaimRect = GetReclaimablesInRect(rect) or {}
+    local targets = {}
+    local totalMass = 0
+    for _, reclaim in reclaimRect do
+        local mass = reclaim and reclaim.MaxMassReclaim or 0
+        if mass > (minMass or 10) then
+            table.insert(targets, reclaim)
+            totalMass = totalMass + (mass * (reclaim.ReclaimLeft or 1))
+        end
+    end
+    return targets, totalMass
+end
+
+local function TryReclaimFieldZone(aiBrain, runtime, eng, targetPos, now)
+    if not eng or eng.Dead or not targetPos then
+        return false
+    end
+
+    local planner = runtime and runtime.StrategicPlanner or {}
+    if not (planner.ReclaimFirst == true or planner.OuterRetentionActive == true) then
+        return false
+    end
+
+    local pos = eng.GetPosition and eng:GetPosition() or false
+    local mainPos = GetMainPos(aiBrain, runtime)
+    if not pos or not mainPos then
+        return false
+    end
+
+    local distMain = Distance2D(targetPos, mainPos)
+    local localThreat = aiBrain:GetThreatAtPosition(targetPos, 1, true, 'AntiSurface') or 0
+    local routeRisk = OvermindMemory.GetRouteRisk(aiBrain, pos, targetPos, 4, 44)
+    local allySupport = aiBrain:GetNumUnitsAroundPoint(LandCombatCategory, targetPos, 28, 'Ally') or 0
+    local enemySupport = aiBrain:GetNumUnitsAroundPoint(LandCombatCategory, targetPos, 28, 'Enemy') or 0
+    local outerTask = (((runtime or {}).ForceDirector or {}).Tasks or {}).outer_contest or {}
+    local taskSupport = outerTask.CurrentUnits or 0
+    local supported = math.max(allySupport, taskSupport)
+    local reclaimTargets, reclaimMass = GetReclaimFieldTargets(targetPos, 18, planner.ReclaimFirst and 8 or 12)
+
+    if table.getn(reclaimTargets) <= 0 or reclaimMass < (planner.ReclaimFirst and 100 or 140) then
+        return false
+    end
+    if distMain > (((runtime.EcoPolicy or {}).SafeExpandDistance or 680) + 100) then
+        return false
+    end
+    if localThreat > (planner.ReclaimFirst and 1.3 or 1.0) then
+        return false
+    end
+    if routeRisk > (planner.ReclaimFirst and 2.8 or 2.4) then
+        return false
+    end
+    if enemySupport > math.max(0, supported - 1) then
+        return false
+    end
+    if supported < (planner.ReclaimFirst and 3 or 4) and distMain > 120 then
+        return false
+    end
+    if HasEnemyCombatNear(aiBrain, targetPos, 26) then
+        return false
+    end
+
+    table.sort(reclaimTargets, function(a, b)
+        local apos = a.CachePosition or (a.GetPosition and a:GetPosition()) or targetPos
+        local bpos = b.CachePosition or (b.GetPosition and b:GetPosition()) or targetPos
+        return Distance2D(apos, pos) < Distance2D(bpos, pos)
+    end)
+
+    if IssueClearCommands then
+        IssueClearCommands({ eng })
+    end
+    if IssueMove then
+        IssueMove({ eng }, targetPos)
+    end
+    if IssueReclaim then
+        local issued = 0
+        for _, reclaim in reclaimTargets do
+            if reclaim and (reclaim.MaxMassReclaim or 0) > 0 then
+                IssueReclaim({ eng }, reclaim)
+                issued = issued + 1
+                if issued >= 8 then
+                    break
+                end
+            end
+        end
+        if issued > 0 then
             return true
         end
     end
@@ -2020,6 +2120,7 @@ function Update(aiBrain, now)
     local forcedFactoryRecover = 0
     local dispatchedExpand = 0
     local reclaimEnemyMex = 0
+    local reclaimField = 0
     local powerRecoveryCount = 0
     local surplusSpendCount = 0
     local enemyPos = runtime.PrimaryEnemyPos
@@ -2299,6 +2400,13 @@ function Update(aiBrain, now)
                             and not factoryTask.Active
                             and not structureTask.Active
                             and needBase <= 0
+                            and TryReclaimFieldZone(aiBrain, runtime, eng, ((runtime.StrategicPlanner or {}).ReclaimFieldPos), now) then
+                            reclaimField = reclaimField + 1
+                            acted = true
+                        elseif contestFieldMode
+                            and not factoryTask.Active
+                            and not structureTask.Active
+                            and needBase <= 0
                             and localThreat < 1.8
                             and dist <= 380
                             and TryOpenSurplusExpansionBuild(aiBrain, runtime, eng, mainPos, enemyPos, safeExpandDistance, now) then
@@ -2432,6 +2540,14 @@ function Update(aiBrain, now)
                     if isIdle
                         and not constructing
                         and (not acted)
+                        and TryReclaimFieldZone(aiBrain, runtime, eng, ((runtime.StrategicPlanner or {}).ReclaimFieldPos), now) then
+                        reclaimField = reclaimField + 1
+                        acted = true
+                    end
+
+                    if isIdle
+                        and not constructing
+                        and (not acted)
                         and not (ShouldPersistentSurplusSpend(runtime, now) or ShouldScaleBaseEco(runtime, now))
                         and TryReclaimEnemyMex(aiBrain, runtime, eng, now) then
                         reclaimEnemyMex = reclaimEnemyMex + 1
@@ -2520,10 +2636,11 @@ function Update(aiBrain, now)
     runtime.LastEngineerStructureRecover = structureTask.AssignedBuilders or 0
     runtime.LastEngineerExpandDispatch = dispatchedExpand
     runtime.LastEngineerEnemyMexReclaim = reclaimEnemyMex
+    runtime.LastEngineerReclaimField = reclaimField
     runtime.LastEngineerPowerRecovery = powerRecoveryCount
     runtime.LastEngineerSurplusSpend = surplusSpendCount
 
-    local shouldLog = (recoverCount + threatenedCount + forcedFactoryRecover + dispatchedExpand + reclaimEnemyMex) > 0
+    local shouldLog = (recoverCount + threatenedCount + forcedFactoryRecover + dispatchedExpand + reclaimEnemyMex + reclaimField) > 0
         or powerRecoveryCount > 0
         or surplusSpendCount > 0
         or factoryTask.Active
@@ -2539,7 +2656,7 @@ function Update(aiBrain, now)
             sz = structureTask.TargetPos[3] or 0
             structureNearby = aiBrain:GetNumUnitsAroundPoint(categories.ENGINEER * categories.MOBILE, structureTask.TargetPos, 18, 'Ally') or 0
         end
-        LOG(string.format('*OVERMIND ENGDIR A%d t=%.1f recover=%d threat=%d facRec=%d powerRec=%d surp=%d expand=%d baseNeed=%d facTask=%d:%s frac=%.2f stall=%.1f asn=%d/%d structTask=%d:%s:%s frac=%.2f stall=%.1f asn=%d/%d near=%d pos=%.1f,%.1f',
+        LOG(string.format('*OVERMIND ENGDIR A%d t=%.1f recover=%d threat=%d facRec=%d powerRec=%d surp=%d expand=%d field=%d baseNeed=%d facTask=%d:%s frac=%.2f stall=%.1f asn=%d/%d structTask=%d:%s:%s frac=%.2f stall=%.1f asn=%d/%d near=%d pos=%.1f,%.1f',
             aiBrain:GetArmyIndex(),
             now,
             recoverCount,
@@ -2548,6 +2665,7 @@ function Update(aiBrain, now)
             powerRecoveryCount,
             surplusSpendCount,
             dispatchedExpand,
+            reclaimField,
             math.max(0, baseFloor - baseEngineers),
             factoryTask.Active and 1 or 0,
             factoryTask.Domain or 'none',

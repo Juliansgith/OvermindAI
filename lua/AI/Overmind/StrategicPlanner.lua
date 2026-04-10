@@ -1,3 +1,5 @@
+local OvermindMemory = import('/mods/OvermindAI/lua/AI/Overmind/Memory.lua')
+
 local Module = {
     Name = 'StrategicPlanner',
     StateSlice = 'StrategicPlanner',
@@ -11,6 +13,12 @@ local function Clamp(v, minV, maxV)
         return maxV
     end
     return v
+end
+
+local function Distance2D(a, b)
+    local dx = (a[1] or 0) - (b[1] or 0)
+    local dz = (a[3] or 0) - (b[3] or 0)
+    return math.sqrt((dx * dx) + (dz * dz))
 end
 
 local function TableCount(t)
@@ -30,6 +38,152 @@ local function GetMapControl(runtime)
     local graph = runtime.ZoneGraph or {}
     local zone = runtime.ZoneModel or {}
     return intel.MapControl or graph.MapControl or zone.MapControl or 0
+end
+
+local function GetOwnMainPos(aiBrain, runtime)
+    local zone = runtime.ZoneModel or {}
+    if zone.OwnMainPos then
+        return zone.OwnMainPos
+    end
+    if aiBrain.BuilderManagers and aiBrain.BuilderManagers.MAIN and aiBrain.BuilderManagers.MAIN.Position then
+        return aiBrain.BuilderManagers.MAIN.Position
+    end
+    local sx, sz = aiBrain:GetArmyStartPos()
+    return { sx, 0, sz }
+end
+
+local function EstimateReclaimMassAtPos(pos, radius)
+    if not pos then
+        return 0, 0
+    end
+
+    local r = radius or 18
+    local rect = Rect((pos[1] or 0) - r, (pos[3] or 0) - r, (pos[1] or 0) + r, (pos[3] or 0) + r)
+    local reclaimables = GetReclaimablesInRect(rect) or {}
+    local totalMass = 0
+    local count = 0
+    for _, reclaim in reclaimables do
+        local mass = reclaim and reclaim.MaxMassReclaim or 0
+        if mass > 0 then
+            totalMass = totalMass + (mass * (reclaim.ReclaimLeft or 1))
+            count = count + 1
+            if count >= 24 and totalMass >= 750 then
+                break
+            end
+        end
+    end
+    return totalMass, count
+end
+
+local function ScoreBattlefieldTarget(aiBrain, runtime, ownPos, pos, baseScore, reclaimWeight)
+    if not pos then
+        return -999999, 0
+    end
+
+    local reclaimMass = EstimateReclaimMassAtPos(pos, 18)
+    local distHome = Distance2D(ownPos, pos)
+    local threat = aiBrain:GetThreatAtPosition(pos, 1, true, 'AntiSurface') or 0
+    local friendlyLand = aiBrain:GetNumUnitsAroundPoint(categories.MOBILE * categories.LAND - categories.ENGINEER - categories.SCOUT - categories.COMMAND, pos, 28, 'Ally') or 0
+    local enemyLand = aiBrain:GetNumUnitsAroundPoint(categories.MOBILE * categories.LAND - categories.ENGINEER - categories.SCOUT - categories.COMMAND, pos, 28, 'Enemy') or 0
+    local routeRisk = OvermindMemory.GetRouteRisk(aiBrain, ownPos, pos, 4, 46)
+
+    local score =
+        (baseScore or 0)
+        + (reclaimMass * (reclaimWeight or 0.0065))
+        + math.min(3.2, math.max(0, distHome - 70) * 0.018)
+        + (friendlyLand * 0.6)
+        - (enemyLand * 0.95)
+        - (threat * 3.5)
+        - (routeRisk * 1.2)
+
+    return score, reclaimMass
+end
+
+local function BuildBattlefieldObjectives(aiBrain, runtime, signals, state, now)
+    local ownPos = GetOwnMainPos(aiBrain, runtime)
+    local policy = runtime.EcoPolicy or {}
+    local candidateList = {}
+    local reclaimFieldPos = false
+    local reclaimFieldScore = 0
+    local outerContestPos = false
+    local outerContestValue = 0
+
+    local function ConsiderCandidate(pos, baseScore, reclaimWeight)
+        if not pos then
+            return
+        end
+        local score, reclaimMass = ScoreBattlefieldTarget(aiBrain, runtime, ownPos, pos, baseScore, reclaimWeight)
+        table.insert(candidateList, {
+            Pos = pos,
+            Score = score,
+            ReclaimMass = reclaimMass,
+        })
+    end
+
+    ConsiderCandidate(signals.BestRaidPos, (signals.BestRaidScore or 0) * 0.34 + 2.4, 0.0075)
+    ConsiderCandidate(signals.BestExpansionPos, (signals.BestExpansionScore or 0) * 0.12 + 2.0, 0.007)
+    ConsiderCandidate(signals.FrontPos, (signals.FrontPressure or 0) * 0.9 + 1.6, 0.0085)
+
+    table.sort(candidateList, function(a, b)
+        return (a.Score or -999999) > (b.Score or -999999)
+    end)
+
+    local best = candidateList[1]
+    if best and best.Score > 1.8 then
+        outerContestPos = best.Pos
+        outerContestValue = best.Score
+        if (best.ReclaimMass or 0) >= 110 then
+            reclaimFieldPos = best.Pos
+            reclaimFieldScore = best.ReclaimMass
+        end
+    end
+
+    local strongHomeCollapse = signals.ACUCrisisActive
+        or signals.ApproachClose
+        or signals.HomePressure >= math.max(4.5, (signals.FrontPressure * 1.32) + 0.85)
+    local outerRetentionWanted =
+        not strongHomeCollapse
+        and not signals.RecoveryActive
+        and (signals.PrioritizeProduction or signals.ContestMapMode or signals.StructuralContestMap)
+        and (
+            (signals.ContestedZones or 0) >= 2
+            or (policy.OuterHoldShare or 0) < 0.58
+            or (policy.SafeForwardMexCount or 0) >= 2
+            or (outerContestValue >= 3.0)
+            or (reclaimFieldScore >= 160)
+        )
+
+    state.OuterRetentionUntil = state.OuterRetentionUntil or -999
+    if outerRetentionWanted then
+        state.OuterRetentionUntil = now + 48
+    elseif strongHomeCollapse then
+        state.OuterRetentionUntil = now - 1
+    end
+
+    local outerRetentionActive = not strongHomeCollapse and (
+        outerRetentionWanted
+        or (now < (state.OuterRetentionUntil or -999))
+    )
+    local reclaimFirst = outerRetentionActive
+        and reclaimFieldPos ~= false
+        and reclaimFieldScore >= 140
+        and signals.HomePressure < 4.5
+        and not signals.ACUCrisisActive
+
+    if not outerContestPos and outerRetentionActive then
+        outerContestPos = signals.BestExpansionPos or signals.BestRaidPos or signals.FrontPos
+        outerContestValue = math.max(outerContestValue, (signals.BestExpansionScore or 0) * 0.08)
+    end
+
+    return {
+        OuterRetentionActive = outerRetentionActive and true or false,
+        ReclaimFirst = reclaimFirst and true or false,
+        OuterContestPos = outerContestPos,
+        OuterContestValue = outerContestValue or 0,
+        ReclaimFieldPos = reclaimFieldPos,
+        ReclaimFieldScore = reclaimFieldScore or 0,
+        StrongHomeCollapse = strongHomeCollapse and true or false,
+    }
 end
 
 local function BuildSignals(aiBrain, runtime, now)
@@ -311,6 +465,11 @@ local function ScoreDirectives(signals, primaryTheater)
         scores.stabilize = scores.stabilize - 1.4
         scores.expand = scores.expand - 0.4
     end
+    if signals.OuterRetentionActive then
+        scores.Home = scores.Home - (signals.StrongHomeCollapse and 0 or 1.3)
+        scores.Front = scores.Front + 1.0 + math.min(1.0, (signals.OuterContestValue or 0) * 0.12)
+        scores.Enemy = scores.Enemy + 0.35 + math.min(0.8, (signals.OuterContestValue or 0) * 0.07)
+    end
     if signals.DesperationCounterstrike then
         scores.stabilize = scores.stabilize - 1.4
         scores.expand = scores.expand - 0.5
@@ -361,6 +520,13 @@ local function ScoreDirectives(signals, primaryTheater)
     if signals.PreferTempoFromSurplus then
         scores.trade_tech_for_tempo = scores.trade_tech_for_tempo + 0.5
         scores.trade_map_for_tech = scores.trade_map_for_tech - 0.4
+    end
+    if signals.ReclaimFirst then
+        scores.expand = scores.expand + 0.9
+        scores.stabilize = scores.stabilize - 0.45
+        scores.punish_greed = scores.punish_greed + 0.45
+        scores.trade_map_for_tech = scores.trade_map_for_tech - 0.6
+        scores.trade_tech_for_tempo = scores.trade_tech_for_tempo + 0.8
     end
 
     return scores
@@ -440,6 +606,8 @@ local function BuildDirectiveState(signals, primaryTheater, directive)
         TempoBias = tempoBias,
         TechBias = techBias,
         AggressionBias = aggressionBias,
+        OuterRetentionActive = signals.OuterRetentionActive and true or false,
+        ReclaimFirst = signals.ReclaimFirst and true or false,
     }
 end
 
@@ -521,6 +689,16 @@ local function BuildGoalBiases(primaryTheater, directiveState, directive)
         bias.raid = bias.raid + 0.4
         bias.hold = bias.hold - 0.4
     end
+    if directiveState.OuterRetentionActive then
+        bias.expand = bias.expand + 0.7
+        bias.raid = bias.raid + 0.8
+        bias.hold = bias.hold - 0.7
+    end
+    if directiveState.ReclaimFirst then
+        bias.expand = bias.expand + 0.9
+        bias.raid = bias.raid + 0.35
+        bias.tech = bias.tech - 0.45
+    end
 
     return bias
 end
@@ -534,10 +712,19 @@ local function DetermineFocus(signals, primaryTheater, directive, directiveState
     end
 
     if primaryTheater == 'Front' then
+        if directiveState.OuterRetentionActive and signals.ReclaimFieldPos then
+            return signals.ReclaimFieldPos, signals.FrontZoneKey, 'reclaim_field'
+        end
+        if directiveState.OuterRetentionActive and signals.OuterContestPos then
+            return signals.OuterContestPos, signals.FrontZoneKey, 'outer_contest'
+        end
         return signals.FrontPos, signals.FrontZoneKey, 'front_pressure'
     end
 
     if primaryTheater == 'Enemy' then
+        if directiveState.OuterRetentionActive and signals.ReclaimFieldPos then
+            return signals.ReclaimFieldPos, signals.BestExpansionZoneKey or signals.BestRaidZoneKey, 'reclaim_field'
+        end
         if directive == 'expand' and signals.BestExpansionPos then
             return signals.BestExpansionPos, signals.BestExpansionZoneKey, 'expand_lane'
         end
@@ -563,6 +750,10 @@ function Module.Update(aiBrain, now)
 
     local state = runtime.StrategicPlanner
     local signals = BuildSignals(aiBrain, runtime, now)
+    local battlefield = BuildBattlefieldObjectives(aiBrain, runtime, signals, state, now)
+    for key, value in pairs(battlefield) do
+        signals[key] = value
+    end
     local theaterScores = ScoreTheaters(signals)
     local primaryTheater = PickStableKey(state, 'PrimaryTheater', 'LastTheaterSwitch', theaterScores, 'Front', now, 45, 0.35)
     local directiveScores = ScoreDirectives(signals, primaryTheater)
@@ -601,6 +792,12 @@ function Module.Update(aiBrain, now)
     state.DesperationCounterstrike = directiveState.DesperationCounterstrike
     state.MacroObjective = directiveState.MacroObjective
     state.Confidence = confidence
+    state.OuterRetentionActive = battlefield.OuterRetentionActive and true or false
+    state.ReclaimFirst = battlefield.ReclaimFirst and true or false
+    state.OuterContestPos = battlefield.OuterContestPos
+    state.OuterContestValue = battlefield.OuterContestValue or 0
+    state.ReclaimFieldPos = battlefield.ReclaimFieldPos
+    state.ReclaimFieldScore = battlefield.ReclaimFieldScore or 0
     state.Signals = {
         Phase = signals.Phase,
         MapControl = signals.MapControl,
@@ -618,12 +815,16 @@ function Module.Update(aiBrain, now)
         RecoveryActive = signals.RecoveryActive,
         ApproachThreat = signals.ApproachThreat,
         ApproachDistance = signals.ApproachDistance,
+        OuterRetentionActive = signals.OuterRetentionActive and true or false,
+        ReclaimFirst = signals.ReclaimFirst and true or false,
+        OuterContestValue = signals.OuterContestValue or 0,
+        ReclaimFieldScore = signals.ReclaimFieldScore or 0,
     }
     runtime.StrategicPlanner = state
 
     if now - (state.LastLogTime or -999) >= 30 then
         state.LastLogTime = now
-        LOG(string.format('*OVERMIND STRAT A%d t=%.1f theater=%s dir=%s raid=%s:%.2f tempo=%s tb=%.2f tech=%.2f air=%d greed=%d focus=%s conf=%.2f map=%.2f press=%.1f/%.1f/%.1f',
+        LOG(string.format('*OVERMIND STRAT A%d t=%.1f theater=%s dir=%s raid=%s:%.2f tempo=%s tb=%.2f tech=%.2f air=%d greed=%d outer=%d reclaim=%.0f focus=%s conf=%.2f map=%.2f press=%.1f/%.1f/%.1f',
             aiBrain:GetArmyIndex(),
             now,
             state.PrimaryTheater or 'Front',
@@ -635,6 +836,8 @@ function Module.Update(aiBrain, now)
             state.TechBias or 0,
             state.ForceAirAnswer and 1 or 0,
             state.PunishGreed and 1 or 0,
+            state.OuterRetentionActive and 1 or 0,
+            state.ReclaimFieldScore or 0,
             state.FocusReason or 'none',
             state.Confidence or 0,
             signals.MapControl or 0,

@@ -1063,6 +1063,9 @@ local function DecideRolePlan(runtime, current, constraints, demand, budget, con
     local powerReady = (((current.Eco or {}).Power or {}).Ready) or 0
     local prioritizeProduction = policy.PrioritizeProduction == true
     local contestMapMode = policy.ContestMapMode == true
+    local outerRetentionActive = (runtime.StrategicPlanner or {}).OuterRetentionActive == true
+    local reclaimFirst = (runtime.StrategicPlanner or {}).ReclaimFirst == true
+    local outerControlStable = policy.FrontSecure == true and (policy.OuterHoldShare or 0) >= 0.55
     local contestUtilityAirWindow = (prioritizeProduction or contestMapMode)
         and current.Factories.Land.Ready >= 2
         and mexReady >= 4
@@ -1097,6 +1100,9 @@ local function DecideRolePlan(runtime, current, constraints, demand, budget, con
     if contestMapMode then
         landTotal = landTotal + 3
     end
+    if outerRetentionActive then
+        landTotal = landTotal + 3
+    end
     landTotal = Clamp(landTotal, ((constraints.EconBootstrap or constraints.StarterPhase) and 0) or 6, 72)
 
     local scoutDesired = Clamp(1 + math.floor(demand.IntelNeed * 0.18) + ((constraints.RaidPressure > 0.16) and 1 or 0), 1, 5)
@@ -1105,6 +1111,9 @@ local function DecideRolePlan(runtime, current, constraints, demand, budget, con
     end
     if constraints.StarterPhase and not constraints.ConfirmedHarass then
         scoutDesired = 0
+    end
+    if outerRetentionActive or reclaimFirst then
+        scoutDesired = math.max(scoutDesired, current.Factories.Land.Ready >= 3 and 2 or 1)
     end
     local indirectCounterWindow = (constraints.EnemyIndirectHeavy or constraints.EnemyT2Push)
         and (constraints.FrontPressure >= 0.14 or constraints.BasePressure >= 0.14 or constraints.ApproachReal)
@@ -1212,6 +1221,16 @@ local function DecideRolePlan(runtime, current, constraints, demand, budget, con
     if constraints.BomberPanic or constraints.ExposedMexAirRaid then
         bomberDesired = 0
     end
+    if (outerRetentionActive or reclaimFirst)
+        and not outerControlStable
+        and not constraints.CounterAirWindow
+        and not constraints.BomberWatch
+        and not constraints.BomberPanic
+        and not constraints.ExposedMexAirRaid
+        and not constraints.AirPanic then
+        bomberDesired = 0
+        airScoutDesired = Clamp(math.max(airScoutDesired, airEnabled and 1 or 0), airEnabled and 1 or 0, 2)
+    end
     if contestUtilityAirWindow
         and current.Factories.Land.Ready < 4
         and current.Factories.Air.Total <= 1
@@ -1290,6 +1309,15 @@ local function DecideRolePlan(runtime, current, constraints, demand, budget, con
         and not constraints.ExposedMexAirRaid then
         fighterDesired = Clamp(math.max(fighterDesired, 1), 1, 3)
     end
+    if (outerRetentionActive or reclaimFirst)
+        and not outerControlStable
+        and not constraints.CounterAirWindow
+        and not constraints.BomberWatch
+        and not constraints.BomberPanic
+        and not constraints.ExposedMexAirRaid
+        and not constraints.AirPanic then
+        fighterDesired = Clamp(math.max(fighterDesired, airEnabled and 1 or 0), airEnabled and 1 or 0, 2)
+    end
 
     local seaEnabled = constraints.NavalActive and not constraints.NavyLowValue
     local seaTotal = seaEnabled and Clamp(2 + math.floor((budget.Navy * 18) + (demand.NavyRisk * 0.06)), 2, 20) or 0
@@ -1323,6 +1351,12 @@ local function DecideRolePlan(runtime, current, constraints, demand, budget, con
     end
     if constraints.BomberPanic or constraints.ExposedMexAirRaid then
         engineerDesired = engineerDesired + 2
+    end
+    if outerRetentionActive then
+        engineerDesired = engineerDesired + 1
+    end
+    if reclaimFirst then
+        engineerDesired = engineerDesired + 1
     end
     engineerDesired = Clamp(engineerDesired, 3, 18)
 
@@ -1486,7 +1520,10 @@ local function DecideCapacityPlan(runtime, current, constraints, rolePlan)
     local relaxedFactoryTempo = policy.RelaxedFactoryTempo == true
     local suppressEarlyAir = policy.SuppressEarlyAir == true
     local hqPressureEscape = (runtime.MacroController or {}).HQPressureEscape == true
+    local outerRetentionActive = planner.OuterRetentionActive == true
+    local reclaimFirst = planner.ReclaimFirst == true
     local frontSecure = policy.FrontSecure == true
+    local outerControlStable = frontSecure and (policy.OuterHoldShare or 0) >= 0.55
     local outerMexShare = policy.OuterMexShare or 0
     local safeForwardMexCount = policy.SafeForwardMexCount or 0
     local contestScoutAirWindow = (contestMapMode or prioritizeProduction)
@@ -1901,6 +1938,18 @@ local function DecideCapacityPlan(runtime, current, constraints, rolePlan)
         if current.Factories.Land.Ready >= 2 then
             landTarget = math.max(landTarget, math.min(landCap, current.Factories.Land.Total + 1))
         end
+    end
+    if (outerRetentionActive or reclaimFirst)
+        and not preserveAirWindow
+        and not constraints.CounterAirWindow
+        and not constraints.BomberWatch
+        and not constraints.BomberPanic
+        and not constraints.ExposedMexAirRaid
+        and not constraints.AirPanic then
+        if not outerControlStable or current.Factories.Land.Ready < 5 then
+            airTarget = math.min(airTarget, math.max(contestScoutAirFloor, math.min(current.Factories.Air.Total, 1)))
+        end
+        landTarget = math.max(landTarget, math.min(landCap, math.max(current.Factories.Land.Total, current.Factories.Land.Ready + 1)))
     end
     if objectiveStarterClamp and not preserveAirWindow then
         airTarget = math.min(airTarget, contestScoutAirFloor)

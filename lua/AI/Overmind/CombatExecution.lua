@@ -687,6 +687,7 @@ function RunPressureCycle(aiBrain, now)
     local acuEmergencyTask = tasks.acu_emergency_intercept
     local interceptTask = tasks.intercept_cluster
     local raidTask = tasks.raid
+    local outerTask = tasks.outer_contest
     local homeThreat = (runtime.ZoneModel and runtime.ZoneModel.HomeThreat) or 0
     local recovery = runtime.Recovery or {}
     local inRecovery = recovery.ForceFactoryRecovery or recovery.ForceBaseEngineerRecovery or (recovery.StagnationTime or 0) > 90
@@ -727,6 +728,8 @@ function RunPressureCycle(aiBrain, now)
     local acuEmergencyCount = table.getn(acuEmergencyUnits)
     local raidUnits = ResolveTaskUnits(raidTask, groups.Raiders or {}, math.max(2, math.floor(maxUnits * 0.24)))
     local raidCount = table.getn(raidUnits)
+    local outerUnits = ResolvePersistentTaskUnits(outerTask, groups.OuterContest or {}, math.max(2, math.floor(maxUnits * 0.22)))
+    local outerCount = table.getn(outerUnits)
     local interceptUnits = ResolveTaskUnits(interceptTask, groups.Intercept or {}, math.max(3, math.floor(maxUnits * 0.3)))
     local interceptCount = table.getn(interceptUnits)
     local frontPos = (frontTask and frontTask.TargetPos) or intel.FrontLinePos or (runtime.ZoneModel and runtime.ZoneModel.FrontLinePos) or LerpPos(ownPos, primaryEnemyPos, 0.45)
@@ -739,6 +742,10 @@ function RunPressureCycle(aiBrain, now)
     local acuCrisisActive = now < (runtime.ACUCrisisUntil or -999)
     local acuCrisisPos = runtime.ACUCrisisEnemyPos or acuEnemyPos
     local raidTarget = (raidTask and raidTask.TargetPos) or intel.BestRaidPos or (runtime.ZoneModel and runtime.ZoneModel.BestRaidPos) or primaryEnemyPos
+    local outerTarget = (outerTask and outerTask.TargetPos) or (runtime.StrategicPlanner and (runtime.StrategicPlanner.ReclaimFieldPos or runtime.StrategicPlanner.OuterContestPos)) or intel.BestExpansionPos or raidTarget
+    local outerStage = (outerTask and outerTask.StagingPos) or LerpPos(ownPos, outerTarget or frontPos, 0.46)
+    local outerRetentionActive = (runtime.StrategicPlanner and runtime.StrategicPlanner.OuterRetentionActive == true) or false
+    local reclaimFirst = (runtime.StrategicPlanner and runtime.StrategicPlanner.ReclaimFirst == true) or false
     if acuCrisisActive and acuCrisisPos then
         acuEnemyPos = acuCrisisPos
     end
@@ -757,6 +764,15 @@ function RunPressureCycle(aiBrain, now)
             local raidStage = (raidTask and raidTask.StagingPos) or LerpPos(ownPos, raidTarget, 0.42)
             IssueMove(raidUnits, raidStage)
             SetTaskExecution(raidTask, now, 'staging', 'move', raidTarget, raidStage, raidCount)
+        end
+        if outerCount > 0 and outerTarget and not acuEmergencyActive then
+            if reclaimFirst and IssueCohesiveLandOrders then
+                IssueCohesiveLandOrders(aiBrain, ownPos, outerTarget, outerUnits, false)
+                SetTaskExecution(outerTask, now, 'contesting', 'cohesive-outer', outerTarget, outerStage, outerCount)
+            elseif IssueMove then
+                IssueMove(outerUnits, outerStage)
+                SetTaskExecution(outerTask, now, 'staging', 'move', outerTarget, outerStage, outerCount)
+            end
         end
         SetTaskExecution(frontTask, now, 'forming', 'hold', frontPos, frontPos, pressureCount)
         SetTaskExecution(artilleryTask, now, 'screening', 'hold', frontPos, frontPos, table.getn(artilleryReady))
@@ -873,6 +889,10 @@ function RunPressureCycle(aiBrain, now)
             IssueCohesiveLandOrders(aiBrain, ownPos, acuEnemyPos, raidUnits, true)
             SetTaskExecution(raidTask, now, 'recalling', 'cohesive-defend', acuEnemyPos, acuPos, raidCount)
         end
+        if outerCount > 0 and IssueCohesiveLandOrders then
+            IssueCohesiveLandOrders(aiBrain, ownPos, acuEnemyPos, outerUnits, true)
+            SetTaskExecution(outerTask, now, 'recalling', 'cohesive-defend', acuEnemyPos, acuPos, outerCount)
+        end
         if interceptCount > 0 then
             IssueCohesiveLandOrders(aiBrain, ownPos, acuEnemyPos, interceptUnits, true)
             SetTaskExecution(interceptTask, now, 'intercepting', 'cohesive-defend', acuEnemyPos, acuPos, interceptCount)
@@ -924,6 +944,18 @@ function RunPressureCycle(aiBrain, now)
                 SetTaskExecution(raidTask, now, 'staging', 'move', raidTarget, raidStage, raidCount)
             end
         end
+        if outerCount > 0 and outerTarget and not enemyNearBase then
+            if reclaimFirst and IssueCohesiveLandOrders then
+                IssueCohesiveLandOrders(aiBrain, ownPos, outerTarget, outerUnits, false)
+                SetTaskExecution(outerTask, now, 'contesting', 'cohesive-outer', outerTarget, outerStage, outerCount)
+            elseif IssueMove then
+                IssueMove(outerUnits, outerStage)
+                SetTaskExecution(outerTask, now, 'staging', 'move', outerTarget, outerStage, outerCount)
+            end
+        elseif outerCount > 0 and enemyNearBase and IssueMove then
+            IssueMove(outerUnits, frontPos or rearGuardPos)
+            SetTaskExecution(outerTask, now, 'holding', 'move', frontPos or rearGuardPos, frontPos or rearGuardPos, outerCount)
+        end
         return
     end
 
@@ -972,6 +1004,12 @@ function RunPressureCycle(aiBrain, now)
             IssueMove(baseGuardUnits, rearGuardPos)
             SetTaskExecution(baseTask, now, 'holding', 'move', rearGuardPos, rearGuardPos, baseGuardCount)
         end
+        if outerCount > 0 and outerTarget and not enemyNearBase then
+            if IssueMove then
+                IssueMove(outerUnits, outerStage)
+            end
+            SetTaskExecution(outerTask, now, 'contesting', 'move', outerTarget, outerStage, outerCount)
+        end
         runtime.LastPressureOrder = 'InterceptCluster'
         return
     end
@@ -1006,6 +1044,18 @@ function RunPressureCycle(aiBrain, now)
             SetTaskExecution(frontTask, now, 'defending', 'cohesive-defend', enemyNearBase, frontPos, pressureCount)
             SetTaskExecution(artilleryTask, now, 'screening', 'cohesive-defend', enemyNearBase, frontPos, table.getn(artilleryReady))
         end
+        if outerCount > 0 then
+            local keepOuter = outerRetentionActive and not acuDangerRecent and homeThreat < 8 and combatMomentum > -0.28
+            if keepOuter and outerTarget then
+                if IssueMove then
+                    IssueMove(outerUnits, outerStage)
+                end
+                SetTaskExecution(outerTask, now, 'contesting', 'move', outerTarget, outerStage, outerCount)
+            elseif IssueCohesiveLandOrders then
+                IssueCohesiveLandOrders(aiBrain, ownPos, enemyNearBase, outerUnits, true)
+                SetTaskExecution(outerTask, now, 'recalling', 'cohesive-defend', enemyNearBase, rearGuardPos, outerCount)
+            end
+        end
         runtime.LastPressureOrder = shouldSplit and 'DefendSplit' or 'Defend'
     else
         local distance = Distance2D(ownPos, selectedTarget)
@@ -1024,6 +1074,15 @@ function RunPressureCycle(aiBrain, now)
             IssueMove(baseGuardUnits, rearGuardPos)
             SetTaskExecution(baseTask, now, 'holding', 'move', rearGuardPos, rearGuardPos, baseGuardCount)
         end
+        if outerCount > 0 and outerTarget then
+            if reclaimFirst and IssueCohesiveLandOrders then
+                IssueCohesiveLandOrders(aiBrain, ownPos, outerTarget, outerUnits, false)
+                SetTaskExecution(outerTask, now, 'contesting', 'cohesive-outer', outerTarget, outerStage, outerCount)
+            elseif IssueMove then
+                IssueMove(outerUnits, outerStage)
+                SetTaskExecution(outerTask, now, 'staging', 'move', outerTarget, outerStage, outerCount)
+            end
+        end
     end
 
     if raidCount > 0 and raidTarget and not shouldDefend then
@@ -1041,6 +1100,10 @@ function RunPressureCycle(aiBrain, now)
         IssueCohesiveLandOrders(aiBrain, ownPos, enemyNearBase, raidUnits, true)
         runtime.LastRaidOrder = 'RaidRecall'
         SetTaskExecution(raidTask, now, 'recalling', 'cohesive-defend', enemyNearBase, rearGuardPos, raidCount)
+    end
+    if outerCount > 0 and enemyNearBase and not outerRetentionActive and IssueCohesiveLandOrders then
+        IssueCohesiveLandOrders(aiBrain, ownPos, enemyNearBase, outerUnits, true)
+        SetTaskExecution(outerTask, now, 'recalling', 'cohesive-defend', enemyNearBase, rearGuardPos, outerCount)
     end
 
     runtime.LastPressureTime = now

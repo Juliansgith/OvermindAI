@@ -349,9 +349,13 @@ function Module.Update(aiBrain, now)
     local punishGreed = planner.PunishGreed == true
     local tradeMapForTech = planner.TradeMapForTech == true
     local tradeTechForTempo = planner.TradeTechForTempo == true
+    local outerRetentionActive = planner.OuterRetentionActive == true
+    local reclaimFirst = planner.ReclaimFirst == true
     local ownPos = GetMainPos(aiBrain, runtime)
     local frontPos = intel.FrontLinePos or runtime.PrimaryEnemyPos or ownPos
     local raidPos = intel.BestRaidPos or runtime.PrimaryEnemyPos or frontPos
+    local outerContestPos = planner.ReclaimFieldPos or planner.OuterContestPos or intel.BestExpansionPos or raidPos
+    local outerContestValue = math.max(planner.ReclaimFieldScore or 0, planner.OuterContestValue or 0)
     local acu = GetACU(aiBrain)
     local acuPos = acu and acu:GetPosition() or ownPos
     local acuCrisisActive = now < (runtime.ACUCrisisUntil or -999)
@@ -417,6 +421,7 @@ function Module.Update(aiBrain, now)
     end
     local mainlineNeed = Clamp(8 + (contestedZones * 4), 8, 34)
     local airGuardNeed = Clamp(2 + (airThreatZones * 2) + (raid.UnderAirHarass and 2 or 0), 2, 10)
+    local outerContestNeed = 0
     if approachClose then
         baseGuardDirectNeed = Clamp(baseGuardDirectNeed + math.max(1, math.min(5, math.floor(approachThreat * 0.28))), 4, 16)
         mainlineNeed = Clamp(mainlineNeed + math.max(1, math.min(6, math.floor(approachThreat * 0.32))), 8, 40)
@@ -556,6 +561,26 @@ function Module.Update(aiBrain, now)
         minimumMainlineCommit = 0
     elseif acuEmergencyNeed > 0 then
         minimumMainlineCommit = math.max(2, minimumMainlineCommit - 6)
+    end
+    if outerRetentionActive
+        and outerContestPos
+        and not acuCrisisActive
+        and not approachTowardHome
+        and not raid.UnderLandHarass
+        and not (primaryTheater == 'Home' and directive == 'stabilize' and homeThreat >= 6) then
+        outerContestNeed = Clamp(
+            2
+                + math.floor(math.min(6, outerContestValue / 160))
+                + (reclaimFirst and 1 or 0)
+                + ((primaryTheater ~= 'Home') and 1 or 0),
+            2,
+            8)
+        if landCombatTotal < 10 then
+            outerContestNeed = math.min(outerContestNeed, 3)
+        end
+        if frontCrisis or assetSiege then
+            outerContestNeed = math.max(0, outerContestNeed - 2)
+        end
     end
     if minimumMainlineCommit > 0 then
         local maxGuardTotal = landCombatTotal - acuEscortNeed - interceptNeed - minimumMainlineCommit
@@ -728,6 +753,17 @@ function Module.Update(aiBrain, now)
     local acuEscort = MergeLists(acuEscortDirect, acuEscortAA, {})
     local interceptUnits = MergeLists(interceptDirect, interceptAA, {})
     local raiders = MergeLists(raiderDirect, raiderScouts, {})
+    local outerContest = {}
+    if outerContestNeed > 0 then
+        local need = outerContestNeed
+        need = need - ShiftNamedUnits(raiders, outerContest, reclaimFirst and 0 or 1, need)
+        if need > 0 then
+            need = need - ShiftNamedUnits(mainline, outerContest, math.max(6, minimumMainlineCommit), need)
+        end
+        if need > 0 then
+            need = need - ShiftNamedUnits(baseGuardDirect, outerContest, math.max(1, (homeThreat >= 4) and 2 or 1), need)
+        end
+    end
     local acuEmergency = {}
     local function ShiftNamedUnits(source, destination, keepCount, moveCount)
         local moved = 0
@@ -776,6 +812,7 @@ function Module.Update(aiBrain, now)
         ACUEmergency = acuEmergency,
         Intercept = interceptUnits,
         Raiders = raiders,
+        OuterContest = outerContest,
         Artillery = artillery,
         MainLine = mainline,
         AirGuard = airGuard,
@@ -788,6 +825,7 @@ function Module.Update(aiBrain, now)
         acu_emergency_intercept = acuEmergency,
         intercept_cluster = interceptUnits,
         raid = raiders,
+        outer_contest = outerContest,
         artillery_support = artillery,
         front_hold = mainline,
         air_guard = airGuard,
@@ -809,6 +847,7 @@ function Module.Update(aiBrain, now)
     Tag(acuEmergency, 'acu_emergency_intercept')
     Tag(interceptUnits, 'intercept_cluster')
     Tag(raiders, 'raider')
+    Tag(outerContest, 'outer_contest')
     Tag(artillery, 'artillery')
     Tag(mainline, 'mainline')
     Tag(airGuard, 'air_guard')
@@ -823,6 +862,7 @@ function Module.Update(aiBrain, now)
         ACUEmergency = CountUnits(acuEmergency),
         Intercept = CountUnits(interceptUnits),
         Raiders = CountUnits(raiders),
+        OuterContest = CountUnits(outerContest),
         Artillery = CountUnits(artillery),
         MainLine = CountUnits(mainline),
         AirGuard = CountUnits(airGuard),
@@ -837,6 +877,11 @@ function Module.Update(aiBrain, now)
     local acuEmergencyDesiredStrength = Round((acuEmergencyDirectNeed * directStrength) + (acuEmergencyAANeed * aaStrength), 2)
     local interceptDesiredStrength = Round((interceptDirectNeed * directStrength) + (interceptAANeed * aaStrength), 2)
     local raidDesiredStrength = Round((math.max(0, raiderNeed - raiderScoutNeed) * directStrength) + (raiderScoutNeed * scoutStrength), 2)
+    local outerContestDesiredStrength = Round(outerContestNeed * WeightedMean({
+        { directStrength, 0.68 },
+        { scoutStrength, 0.2 },
+        { aaStrength, 0.12 },
+    }, directStrength), 2)
     local mainlineDesiredStrength = Round(mainlineNeed * WeightedMean({
         { directStrength, 0.62 },
         { aaStrength, 0.24 },
@@ -941,6 +986,23 @@ function Module.Update(aiBrain, now)
         RetreatRadius = 16,
         EmptyStatus = 'queued',
     }, now)
+    UpdateTask(state, 'outer_contest', {
+        Role = 'outer_contest',
+        Priority = 58 + math.floor(math.min(18, outerContestValue / 40)) + (reclaimFirst and 8 or 0) + ((primaryTheater ~= 'Home') and 4 or 0),
+        AnchorPos = ownPos,
+        TargetPos = outerContestPos,
+        StagingPos = LerpPos(ownPos, outerContestPos or frontPos, 0.48),
+        AssignedUnits = outerContest,
+        DesiredUnits = outerContestNeed,
+        DesiredStrength = outerContestDesiredStrength,
+        Timeout = 75,
+        Objective = reclaimFirst and 'secure_reclaim_field' or 'hold_outer_contest',
+        RouteName = 'expansion',
+        HoldRadius = 20,
+        CommitRadius = 42,
+        RetreatRadius = 16,
+        EmptyStatus = 'reserve',
+    }, now)
     UpdateTask(state, 'artillery_support', {
         Role = 'artillery_support',
         Priority = 56 + math.floor(contestedZones * 3),
@@ -1038,6 +1100,7 @@ function Module.Update(aiBrain, now)
         ACUEmergency = TaskGap(state.Tasks.acu_emergency_intercept),
         Intercept = TaskGap(state.Tasks.intercept_cluster),
         Raider = TaskGap(state.Tasks.raid),
+        OuterContest = TaskGap(state.Tasks.outer_contest),
         MainLine = TaskGap(state.Tasks.front_hold),
         AirGuard = TaskGap(state.Tasks.air_guard),
         BomberStrike = TaskGap(state.Tasks.bomber_strike),
@@ -1048,6 +1111,7 @@ function Module.Update(aiBrain, now)
         state.Tasks.acu_emergency_intercept,
         state.Tasks.intercept_cluster,
         state.Tasks.raid,
+        state.Tasks.outer_contest,
         state.Tasks.artillery_support,
         state.Tasks.front_hold,
         state.Tasks.air_guard,
@@ -1060,7 +1124,7 @@ function Module.Update(aiBrain, now)
 
     if now - (state.LastLogTime or -999) >= 30 then
         state.LastLogTime = now
-        LOG(string.format('*OVERMIND FORCE A%d t=%.1f land=%d guard=%d acu=%d acuint=%d int=%d raid=%d art=%d main=%d air=%d bomb=%d stale=%d front=%d tasks=%d taskState=%s/%s/%s/%s/%s',
+        LOG(string.format('*OVERMIND FORCE A%d t=%.1f land=%d guard=%d acu=%d acuint=%d int=%d raid=%d outer=%d art=%d main=%d air=%d bomb=%d stale=%d front=%d tasks=%d taskState=%s/%s/%s/%s/%s',
             aiBrain:GetArmyIndex(),
             now,
             landCombatTotal,
@@ -1069,6 +1133,7 @@ function Module.Update(aiBrain, now)
             state.Stats.ACUEmergency or 0,
             state.Stats.Intercept or 0,
             state.Stats.Raiders or 0,
+            state.Stats.OuterContest or 0,
             state.Stats.Artillery or 0,
             state.Stats.MainLine or 0,
             state.Stats.AirGuard or 0,
