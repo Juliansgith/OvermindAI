@@ -510,7 +510,15 @@ local function BuildConstraints(runtime, current, confidence, scoutingDebt, nava
         engineerFloor = engineerFloor + 2
     end
 
-    if starterPhase and not confirmedHarass then
+    local contestStarterThreat = (policy.ContestMapMode == true or policy.PrioritizeProduction == true)
+        and (
+            (intel.ContestedZones or 0) >= 2
+            or realApproach
+            or frontPressure >= 0.24
+            or basePressure >= 0.18
+        )
+
+    if starterPhase and not confirmedHarass and not contestStarterThreat then
         frontCollapse = false
         landPanic = false
         airPanic = false
@@ -1044,9 +1052,20 @@ end
 local function DecideRolePlan(runtime, current, constraints, demand, budget, confidence, mode, trends)
     local policy = runtime.EcoPolicy or {}
     local opp = runtime.OpponentModel or {}
+    local mexReady = (((current.Eco or {}).Mex or {}).Ready) or 0
     local powerReady = (((current.Eco or {}).Power or {}).Ready) or 0
     local prioritizeProduction = policy.PrioritizeProduction == true
     local contestMapMode = policy.ContestMapMode == true
+    local contestUtilityAirWindow = (prioritizeProduction or contestMapMode)
+        and current.Factories.Land.Ready >= 2
+        and mexReady >= 4
+        and powerReady >= 3
+        and not constraints.EconBootstrap
+        and not constraints.StarterPhase
+        and not constraints.EcoCrash
+        and not constraints.QueueStarved
+        and not constraints.CriticalFactory
+        and not constraints.CriticalStructure
 
     local landTotal = 8
         + (constraints.FrontPressure * 12)
@@ -1137,6 +1156,7 @@ local function DecideRolePlan(runtime, current, constraints, demand, budget, con
     end
     if (prioritizeProduction or contestMapMode)
         and current.Factories.Land.Ready < 4
+        and not contestUtilityAirWindow
         and not constraints.AirPanic
         and not constraints.BomberPanic
         and not constraints.ExposedMexAirRaid
@@ -1184,6 +1204,16 @@ local function DecideRolePlan(runtime, current, constraints, demand, budget, con
     end
     if constraints.BomberPanic or constraints.ExposedMexAirRaid then
         bomberDesired = 0
+    end
+    if contestUtilityAirWindow
+        and current.Factories.Land.Ready < 4
+        and current.Factories.Air.Total <= 1
+        and not constraints.CounterAirWindow
+        and not constraints.BomberWatch
+        and not constraints.BomberPanic
+        and not constraints.ExposedMexAirRaid then
+        bomberDesired = 0
+        airScoutDesired = Clamp(math.max(airScoutDesired, 1), 1, 2)
     end
     if constraints.CounterAirWindow and airEnabled and not constraints.AirPanic and not constraints.BomberPanic and not constraints.ExposedMexAirRaid then
         local counterBomberFloor = Clamp(2 + math.floor(((opp.T2Land or 0) + (opp.LandIndirect or 0)) * 0.08) + math.floor((demand.CounterStrike or 0) * 2), 2, 6)
@@ -1243,6 +1273,15 @@ local function DecideRolePlan(runtime, current, constraints, demand, budget, con
     end
     if bomberDesired > 0 and airEnabled then
         fighterDesired = math.max(fighterDesired, math.min(6, math.max(2, bomberDesired - 1)))
+    end
+    if contestUtilityAirWindow
+        and current.Factories.Land.Ready < 4
+        and current.Factories.Air.Total <= 1
+        and not constraints.CounterAirWindow
+        and not constraints.BomberWatch
+        and not constraints.BomberPanic
+        and not constraints.ExposedMexAirRaid then
+        fighterDesired = Clamp(math.max(fighterDesired, 1), 1, 3)
     end
 
     local seaEnabled = constraints.NavalActive and not constraints.NavyLowValue
@@ -1443,15 +1482,32 @@ local function DecideCapacityPlan(runtime, current, constraints, rolePlan)
     local outerMexShare = policy.OuterMexShare or 0
     local safeForwardMexCount = policy.SafeForwardMexCount or 0
     local contestScoutAirWindow = (contestMapMode or prioritizeProduction)
-        and current.Factories.Land.Ready >= 3
-        and mexReady >= 5
-        and powerReady >= 4
+        and current.Factories.Land.Ready >= 2
+        and mexReady >= 4
+        and powerReady >= 3
         and not constraints.EcoCrash
         and not constraints.QueueStarved
         and not constraints.CriticalFactory
         and not constraints.CriticalStructure
         and (frontSecure or safeForwardMexCount >= 3 or outerMexShare >= 0.34)
     local contestScoutAirFloor = contestScoutAirWindow and 1 or 0
+    local contestStarterTempo = (contestMapMode or prioritizeProduction)
+        and current.Factories.Land.Ready >= 1
+        and current.Factories.Air.Total <= 0
+        and mexReady >= math.max(4, (constraints.StarterMexFloor or 5) - 1)
+        and powerReady >= math.max(2, (constraints.StarterPowerFloor or 2) - 1)
+        and engineerUnits >= math.max(4, (constraints.StarterEngineerFloor or 6) - 2)
+        and not constraints.EcoCrash
+        and not constraints.CriticalFactory
+        and not constraints.CriticalStructure
+        and not constraints.UnitCapPressure
+        and not powerBufferLow
+        and (
+            constraints.ContestedZones >= 2
+            or constraints.ApproachReal
+            or constraints.FrontPressure >= 0.14
+            or constraints.BasePressure >= 0.12
+        )
 
     local landCap = math.max(
         6,
@@ -1534,6 +1590,24 @@ local function DecideCapacityPlan(runtime, current, constraints, rolePlan)
             or constraints.EnemyIndirectHeavy
             or constraints.EnemyT2Push
             or constraints.ApproachReal)
+    local landEmergencyTempo = (contestMapMode or prioritizeProduction or planner.TradeTechForTempo or planner.PunishGreed)
+        and landCoreOnline
+        and not constraints.EcoCrash
+        and not constraints.UnitCapPressure
+        and not constraints.CriticalFactory
+        and not constraints.CriticalStructure
+        and (
+            constraints.LandPanic
+            or constraints.FrontCollapse
+            or constraints.ApproachReal
+            or constraints.FrontPressure >= 0.22
+            or constraints.BasePressure >= 0.18
+        )
+        and (
+            landRoleGap >= 10
+            or landRoleLoad >= 26
+            or current.Factories.Land.Ready <= 2
+        )
 
     if constraints.EcoWeak or constraints.QueueStarved then
         landTarget = math.min(landTarget, math.max(1, current.Factories.Land.Ready + (current.Factories.Land.Total <= 0 and 1 or 0)))
@@ -1553,8 +1627,18 @@ local function DecideCapacityPlan(runtime, current, constraints, rolePlan)
     end
     if constraints.StarterPhase then
         landTarget = 1
-        if secondLandEcoReady or secondLandBootstrap then
+        if secondLandEcoReady or secondLandBootstrap or contestStarterTempo then
             landTarget = math.max(landTarget, 2)
+        end
+        if contestStarterTempo
+            and secondLandLatched
+            and (
+                constraints.ApproachReal
+                or constraints.FrontPressure >= 0.22
+                or constraints.BasePressure >= 0.16
+                or landRoleGap >= 10
+            ) then
+            landTarget = math.max(landTarget, 3)
         end
         airTarget = 0
         seaTarget = 0
@@ -1585,6 +1669,15 @@ local function DecideCapacityPlan(runtime, current, constraints, rolePlan)
     end
     if liveCombatWindow and current.Factories.Land.Ready >= 3 then
         landTarget = math.max(landTarget, 3)
+    end
+    if landEmergencyTempo then
+        landTarget = math.max(landTarget, math.min(landCap, math.max(3, current.Factories.Land.Total + 1)))
+        if current.Factories.Land.Ready >= 3 then
+            landTarget = math.max(landTarget, math.min(landCap, 4))
+        end
+        if not preserveAirWindow then
+            airTarget = math.min(airTarget, math.max(current.Factories.Air.Total, contestScoutAirFloor))
+        end
     end
     if current.Factories.Land.Ready >= 4
         and current.Factories.Total >= 4
@@ -1627,6 +1720,7 @@ local function DecideCapacityPlan(runtime, current, constraints, rolePlan)
     end
     if current.Factories.Land.Ready < 3
         and current.Factories.Air.Total <= 0
+        and not contestScoutAirWindow
         and not emergencyAirFactory
         and not threatenedAirUnlock
         and not counterAirFactory then
@@ -1654,6 +1748,7 @@ local function DecideCapacityPlan(runtime, current, constraints, rolePlan)
     end
 
     local starterGrowthLock = constraints.StarterPhase
+        and not contestStarterTempo
         and (
             current.Factories.Total <= 1
             or constraints.RadarCritical
@@ -1665,13 +1760,18 @@ local function DecideCapacityPlan(runtime, current, constraints, rolePlan)
             ))
         )
     local pauseGrowth = constraints.EcoCrash or constraints.QueueStarved or constraints.UnitCapPressure or constraints.CriticalFactory or structurePausesGrowth
+    local ignoreSingleFactoryPause = landEmergencyTempo
+        and totalUnfinished <= 1
+        and not structurePausesGrowth
+        and not landFactoryCompletionDebt
+        and not unstaffedFactoryShell
     if constraints.EconBootstrap then
         pauseGrowth = true
     end
     if starterGrowthLock then
         pauseGrowth = true
     end
-    if totalUnfinished >= 1 and not tempoRecoveryWindow and not staffedFactoryShell then
+    if totalUnfinished >= 1 and not tempoRecoveryWindow and not staffedFactoryShell and not ignoreSingleFactoryPause then
         pauseGrowth = true
     end
     if totalUnfinished >= 2 then
@@ -1711,6 +1811,18 @@ local function DecideCapacityPlan(runtime, current, constraints, rolePlan)
         landTarget = math.max(landTarget, 2)
         pauseGrowth = false
     end
+    if contestStarterTempo
+        and totalUnfinished <= 0
+        and not constraints.QueueStarved
+        and not structurePausesGrowth then
+        pauseGrowth = false
+    end
+    if landEmergencyTempo
+        and not constraints.QueueStarved
+        and not structurePausesGrowth
+        and not powerBufferLow then
+        pauseGrowth = false
+    end
     if powerBufferLow and not emergencyAirFactory and not threatenedAirUnlock then
         airTarget = math.min(airTarget, current.Factories.Air.Total)
         if current.Factories.Total >= 2 then
@@ -1730,8 +1842,12 @@ local function DecideCapacityPlan(runtime, current, constraints, rolePlan)
     if staffedFactoryShell and unfinishedAllowance > 0 then
         unfinishedAllowance = unfinishedAllowance - 1
     end
+    local landUnfinishedAllowance = unfinishedAllowance
+    if ignoreSingleFactoryPause and landUnfinishedAllowance > 0 then
+        landUnfinishedAllowance = landUnfinishedAllowance - 1
+    end
     if landTarget > current.Factories.Land.Total then
-        landTarget = math.min(landTarget, current.Factories.Land.Total + math.max(0, 1 - unfinishedAllowance))
+        landTarget = math.min(landTarget, current.Factories.Land.Total + math.max(0, 1 - landUnfinishedAllowance))
     end
     if airTarget > current.Factories.Air.Total then
         airTarget = math.min(airTarget, current.Factories.Air.Total + math.max(0, 1 - unfinishedAllowance))

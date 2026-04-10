@@ -3,7 +3,7 @@ local OvermindScheduler = import('/mods/OvermindAI/lua/AI/Overmind/Scheduler.lua
 local OvermindMemory = import('/mods/OvermindAI/lua/AI/Overmind/Memory.lua')
 
 local ActiveBrains = {}
-local BuildFingerprint = 'v157-structural-contest-detector'
+local BuildFingerprint = 'v158-acu-retreat-and-utility-air'
 
 local NavUtils = false
 do

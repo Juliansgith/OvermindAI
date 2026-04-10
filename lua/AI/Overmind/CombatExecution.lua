@@ -833,6 +833,12 @@ function RunPressureCycle(aiBrain, now)
     if acuEmergencyActive then
         IssueCohesiveLandOrders(aiBrain, ownPos, acuEnemyPos, acuEmergencyUnits, true)
         SetTaskExecution(acuEmergencyTask, now, 'intercepting', 'cohesive-defend', acuEnemyPos, acuPos, acuEmergencyCount)
+        local frontCollapseThreshold = acuDangerRecent and 1 or 2
+        if pressureCount >= frontCollapseThreshold then
+            IssueCohesiveLandOrders(aiBrain, ownPos, acuEnemyPos, pressureUnits, true)
+            SetTaskExecution(frontTask, now, 'intercepting', 'cohesive-defend', acuEnemyPos, acuPos, pressureCount)
+            SetTaskExecution(artilleryTask, now, 'screening', 'cohesive-defend', acuEnemyPos, acuPos, table.getn(artilleryReady))
+        end
         local emergencyReinforce = {}
         if pressureCount > 0 then
             emergencyReinforce = MergeUnitTables(emergencyReinforce, pressureUnits, {})
@@ -849,7 +855,8 @@ function RunPressureCycle(aiBrain, now)
         if table.getn(artilleryReady) > 0 and acuDangerRecent then
             emergencyReinforce = MergeUnitTables(emergencyReinforce, artilleryReady, {})
         end
-        if table.getn(emergencyReinforce) >= (acuDangerRecent and 3 or 6) then
+        local emergencyThreshold = acuDangerRecent and 2 or 4
+        if table.getn(emergencyReinforce) >= emergencyThreshold then
             IssueCohesiveLandOrders(aiBrain, ownPos, acuEnemyPos, emergencyReinforce, true)
             SetTaskExecution(frontTask, now, 'intercepting', 'cohesive-defend', acuEnemyPos, acuPos, table.getn(emergencyReinforce))
             SetTaskExecution(artilleryTask, now, 'screening', 'cohesive-defend', acuEnemyPos, acuPos, table.getn(artilleryReady))

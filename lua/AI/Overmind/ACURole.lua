@@ -542,24 +542,47 @@ function Update(aiBrain, now)
     local roleState = runtime.ACURoleState or {
         Current = 'anchor',
         LastSwitch = -999,
+        RetreatBurst = 0,
+        LastRetreatTrigger = -999,
+        RetreatEscalatedUntil = -999,
     }
+    local recentDamage = (runtime.LastAcuDamageTime or -999) >= (now - 20)
     local desired = DecideRole(now, factories, combat, escort, localThreat, homeThreat, relativePower, healthRatio, distance, underHarass, strictLeash, roleState.Current)
+    local rawDesired = desired
+    if rawDesired == 'retreat' then
+        if (now - (roleState.LastRetreatTrigger or -999)) <= 30 then
+            roleState.RetreatBurst = (roleState.RetreatBurst or 0) + 1
+        else
+            roleState.RetreatBurst = 1
+        end
+        roleState.LastRetreatTrigger = now
+        if (roleState.RetreatBurst or 0) >= 2 then
+            roleState.RetreatEscalatedUntil = math.max(roleState.RetreatEscalatedUntil or -999, now + 42)
+            runtime.ACUStrictLeashUntil = math.max(runtime.ACUStrictLeashUntil or -999, now + 70)
+        elseif recentDamage then
+            roleState.RetreatEscalatedUntil = math.max(roleState.RetreatEscalatedUntil or -999, now + 26)
+            runtime.ACUStrictLeashUntil = math.max(runtime.ACUStrictLeashUntil or -999, now + 40)
+        end
+    elseif (roleState.LastRetreatTrigger or -999) < (now - 34) and not recentDamage and healthRatio >= 0.90 then
+        roleState.RetreatBurst = 0
+    end
+    local retreatEscalated = now < (roleState.RetreatEscalatedUntil or -999)
     if openingFactoryFloor then
         desired = 'anchor'
     elseif starterPhaseLock then
         desired = 'anchor'
     elseif transitionAnchor then
         desired = 'anchor'
-    elseif insideDefendedSpace and desired == 'retreat' and healthRatio >= 0.8 and not underHarass and localThreat <= (homeThreat + 1.8) then
+    elseif insideDefendedSpace and desired == 'retreat' and not retreatEscalated and healthRatio >= 0.8 and not underHarass and localThreat <= (homeThreat + 1.8) then
         desired = 'anchor'
     end
 
     if roleState.Current == 'retreat' and desired == 'anchor' then
-        if distance > 8 or localThreat > (homeThreat + 1.5) then
+        if retreatEscalated or distance > 8 or localThreat > (homeThreat + 1.5) then
             desired = 'retreat'
         end
     elseif roleState.Current == 'anchor' and desired == 'retreat' then
-        if distance < 13 and localThreat <= (homeThreat + 2.8) and escort >= 3 then
+        if not retreatEscalated and distance < 13 and localThreat <= (homeThreat + 2.8) and escort >= 3 then
             desired = 'anchor'
         end
     end
@@ -583,8 +606,11 @@ function Update(aiBrain, now)
     if transitionAnchor then
         runtime.ACURoleMaxDistance = math.min(runtime.ACURoleMaxDistance, 10)
     end
-    if strictLeash then
+    if strictLeash or retreatEscalated then
         runtime.ACURoleMaxDistance = math.min(runtime.ACURoleMaxDistance, 16)
+    end
+    if retreatEscalated then
+        runtime.ACURoleMaxDistance = math.min(runtime.ACURoleMaxDistance, 12)
     end
 
     local actionInterval = 7

@@ -194,6 +194,9 @@ local function DetermineDesiredPhase(aiBrain, runtime, now)
         and now < 840
         and mapControl <= 0.62
         and (opp.RelativePower or 1) <= 1.08
+    local starterMexTarget = contestTempoMap and 3 or 4
+    local starterMexDeadline = contestTempoMap and 210 or 300
+    local landFactoryFloorTarget = contestTempoMap and 2 or 3
 
     local facts = {
         ReadyLandFactories = readyLand,
@@ -222,24 +225,24 @@ local function DetermineDesiredPhase(aiBrain, runtime, now)
         return 'bootstrap_factory', 'missing_first_factory', facts
     end
 
-    if readyLand >= 1 and readyPower >= 1 and readyMex < 4 and now < 300 and not criticalFactoryDebt then
+    if readyLand >= 1 and readyPower >= 1 and readyMex < starterMexTarget and now < starterMexDeadline and not criticalFactoryDebt then
         return 'starter_mex_claim', 'starter_mex_gap', facts
     end
 
-    if criticalFactoryDebt or readyLand < 3 or totalLand < 3 then
+    if criticalFactoryDebt or readyLand < landFactoryFloorTarget or totalLand < landFactoryFloorTarget then
         return 'land_factory_floor', criticalFactoryDebt and 'critical_land_factory' or 'pre_hq_floor', facts
     end
 
     if t2LandFactories <= 0 then
-        if readyLand >= 3 and readyMex >= 4 and readyPower >= 3 then
+        if readyLand >= landFactoryFloorTarget and readyMex >= 4 and readyPower >= 3 then
             if activeLandFactoryUpgrades > 0 then
                 return 'first_land_hq', 'hq_in_flight', facts
             end
             if contestTempoMap
-                and readyLand < 5
+                and readyLand < 4
                 and readyMex >= 5
-                and readyPower >= 4
-                and massBudget >= 6.0
+                and readyPower >= 3
+                and massBudget >= 5.2
                 and not ecoCrash
                 and not underHarass then
                 return 'mass_consolidation', 'contest_mode_tempo', facts
@@ -247,7 +250,7 @@ local function DetermineDesiredPhase(aiBrain, runtime, now)
             if massBudget >= 7.0 and not ecoCrash then
                 return 'first_land_hq', 'phase_owned_hq', facts
             end
-            if readyLand >= 2 and readyMex >= 4 and readyPower >= 3 and massBudget >= 6.0 and not underHarass then
+            if readyLand >= landFactoryFloorTarget and readyMex >= 4 and readyPower >= 3 and massBudget >= (contestTempoMap and 5.4 or 6.0) and not underHarass then
                 return 'mass_consolidation', 'budget_window', facts
             end
             return 'first_land_hq', 'forced_transition', facts
@@ -272,9 +275,11 @@ local function ApplyLatch(state, desiredPhase, desiredReason, facts, now)
         return desiredPhase, desiredReason
     end
 
+    local starterLatchMexFloor = facts.ContestTempoMap and 3 or 4
+    local starterLatchDeadline = facts.ContestTempoMap and 210 or 300
     if current == 'starter_mex_claim'
-        and facts.ReadyMexes < 4
-        and now < 300
+        and facts.ReadyMexes < starterLatchMexFloor
+        and now < starterLatchDeadline
         and not facts.CriticalLandFactoryDebt then
         return current, 'latched_starter_mex_claim'
     end
