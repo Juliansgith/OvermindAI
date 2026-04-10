@@ -159,6 +159,11 @@ local function BuildSignals(aiBrain, runtime, now)
             and ((frontTheater.PressureEMA or frontTheater.Pressure or 0) >= 1.6)
             and ((forceStats.MainLine or 0) + (forceStats.Artillery or 0) >= math.max(18, (forceStats.BaseGuard or 0) + 8))
         ) and true or false,
+        DesperationCounterstrike = (
+            raid.UnderLandHarass == true
+            and (((homeTheater.PressureEMA or homeTheater.Pressure or 0) >= 4.5) or approachClose)
+            and (relativePower <= 0.98 or opp.Posture == 'land_push' or opp.T2Push == true)
+        ) and true or false,
     }
 end
 
@@ -249,6 +254,7 @@ local function ScoreDirectives(signals, primaryTheater)
         + (signals.BestRaidScore * 0.06)
         + math.max(0, signals.RelativePower - 0.92) * 1.1
         + (signals.AttackWindow and 1.1 or 0)
+        + (signals.DesperationCounterstrike and 0.9 or 0)
         + ((primaryTheater == 'Enemy') and 0.8 or 0)
         - (signals.ApproachClose and 0.8 or 0)
         - (signals.RecoveryActive and 1.0 or 0)
@@ -275,6 +281,7 @@ local function ScoreDirectives(signals, primaryTheater)
         + (signals.PushWindow and 0.8 or 0)
         + math.max(0, signals.RelativePower - 0.96) * 1.0
         + (signals.AttackWindow and 1.3 or 0)
+        + (signals.DesperationCounterstrike and 1.5 or 0)
         + (signals.BestRaidScore * 0.04)
         + ((primaryTheater == 'Front') and 0.5 or 0)
         + ((primaryTheater == 'Enemy') and 0.4 or 0)
@@ -284,6 +291,10 @@ local function ScoreDirectives(signals, primaryTheater)
     if signals.AttackWindow then
         scores.stabilize = scores.stabilize - 0.9
         scores.expand = scores.expand - 0.4
+    end
+    if signals.DesperationCounterstrike then
+        scores.stabilize = scores.stabilize - 0.6
+        scores.expand = scores.expand - 0.5
     end
 
     return scores
@@ -346,6 +357,7 @@ local function BuildDirectiveState(signals, primaryTheater, directive)
         TradeMapForTech = tradeMapForTech and true or false,
         TradeTechForTempo = tradeTechForTempo and true or false,
         AttackWindow = signals.AttackWindow and true or false,
+        DesperationCounterstrike = signals.DesperationCounterstrike and true or false,
         RaidCentrality = raidCentrality,
         RaidDirective = (raidCentrality >= 0.58) and 'central' or 'opportunistic',
         TempoMode = tempoMode,
@@ -416,6 +428,11 @@ local function BuildGoalBiases(primaryTheater, directiveState, directive)
         bias.raid = bias.raid + 0.9
         bias.all_in = bias.all_in + 1.4
         bias.hold = bias.hold - 0.7
+    end
+    if directiveState.DesperationCounterstrike then
+        bias.raid = bias.raid + 0.7
+        bias.all_in = bias.all_in + 1.7
+        bias.hold = bias.hold - 0.5
     end
 
     return bias
