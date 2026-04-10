@@ -1189,6 +1189,25 @@ local function GetPriorityPowerRecoveryTarget(aiBrain, runtime, mainPos, structu
     return best
 end
 
+local function ShouldForceFinishPower(aiBrain, runtime, mainPos, structureTargetObject, structureTask)
+    local powerTarget = GetPriorityPowerRecoveryTarget(aiBrain, runtime, mainPos, structureTargetObject, structureTask)
+    if not powerTarget or powerTarget.Dead then
+        return false, false
+    end
+
+    local fraction = GetFraction(powerTarget)
+    local eco = runtime and runtime.EcoState or {}
+    local constraints = (((runtime or {}).ProductionDirector or {}).ConstraintState or {})
+    local bootstrapPowerNeed = NeedsBootstrapPower(aiBrain, runtime)
+
+    local forceFinish = bootstrapPowerNeed
+        or constraints.PowerBufferLow == true
+        or fraction >= 0.35
+        or (CountNearbyUnfinishedPower(aiBrain, mainPos, 220) > 0 and (eco.MassStorageRatio or 0) >= 0.06)
+
+    return forceFinish, powerTarget
+end
+
 local function TryOpenPowerRecoveryBuild(aiBrain, runtime, eng, mainPos, now)
     if not eng or eng.Dead or not mainPos or not IssueBuildMobile then
         return false
@@ -2113,7 +2132,15 @@ local function ProcessEngineer(aiBrain, runtime, eng, now, ctx)
     local acted = false
 
     if isIdle and not constructing then
-        if ctx.macroPhase == 'starter_mex_claim'
+        if ctx.structureTask.Active
+            and ctx.structureTask.Kind == 'Power'
+            and ctx.structureTargetObject
+            and localThreat < 2.2
+            and dist <= 360
+            and TryAssignAssistOrRepair(aiBrain, runtime, eng, ctx.structureTargetObject, false, now) then
+            ctx.powerRecoveryCount = ctx.powerRecoveryCount + 1
+            acted = true
+        elseif ctx.macroPhase == 'starter_mex_claim'
             and localThreat < 1.8
             and dist <= 320
             and TryOpenSurplusExpansionBuild(aiBrain, runtime, eng, ctx.mainPos, ctx.enemyPos, ctx.safeExpandDistance, now) then
@@ -2447,9 +2474,21 @@ function Update(aiBrain, now)
         reservedStructureBuilderIds[id] = value
     end
     local structureTargetObject = false
-    if not factoryTaskCritical then
+    local forceFinishPower, forcedPowerTarget = ShouldForceFinishPower(aiBrain, runtime, mainPos, false, false)
+    if (not factoryTaskCritical) or forceFinishPower then
         local trackedStructure, trackedPos, trackedFraction, trackedKind, trackedPriority = FindTrackedUnfinishedStructure(aiBrain, structureTask)
         local structure, structurePos, structureFraction, structureKind, structurePriority = FindBestUnfinishedStructure(aiBrain, runtime, mainPos)
+
+        if forceFinishPower and forcedPowerTarget and not forcedPowerTarget.Dead then
+            local forcedPos = forcedPowerTarget.GetPosition and forcedPowerTarget:GetPosition() or false
+            if forcedPos then
+                structure = forcedPowerTarget
+                structurePos = forcedPos
+                structureFraction = GetFraction(forcedPowerTarget)
+                structureKind = 'Power'
+                structurePriority = 1000 + (structureFraction * 100)
+            end
+        end
 
         if trackedStructure and trackedPos then
             local trackedTargetId = GetEntityId(trackedStructure)
@@ -2564,6 +2603,8 @@ function Update(aiBrain, now)
             end
             if structureKind == 'Power' and structureFraction >= 0.8 then
                 structureTask.StickyUntil = math.max(structureTask.StickyUntil or -999, now + stickyDuration + 10)
+            elseif structureKind == 'Power' and structureFraction >= 0.35 then
+                structureTask.StickyUntil = math.max(structureTask.StickyUntil or -999, now + stickyDuration + 16)
             end
             if transitionLock
                 and structureTask.Active

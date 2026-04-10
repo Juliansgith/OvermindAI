@@ -158,6 +158,24 @@ local function CopyPos(pos)
     return { pos[1] or 0, pos[2] or 0, pos[3] or 0 }
 end
 
+local function LerpPos(a, b, alpha)
+    if not a and not b then
+        return false
+    end
+    if not a then
+        return CopyPos(b)
+    end
+    if not b then
+        return CopyPos(a)
+    end
+    local t = Clamp(alpha or 0.5, 0, 1)
+    return {
+        (a[1] or 0) + (((b[1] or 0) - (a[1] or 0)) * t),
+        (a[2] or 0) + (((b[2] or 0) - (a[2] or 0)) * t),
+        (a[3] or 0) + (((b[3] or 0) - (a[3] or 0)) * t),
+    }
+end
+
 local function BuildAssignedIds(list)
     local ids = {}
     for _, unit in list or {} do

@@ -466,9 +466,10 @@ local function ScoreDirectives(signals, primaryTheater)
         scores.expand = scores.expand - 0.4
     end
     if signals.OuterRetentionActive then
-        scores.Home = scores.Home - (signals.StrongHomeCollapse and 0 or 1.3)
-        scores.Front = scores.Front + 1.0 + math.min(1.0, (signals.OuterContestValue or 0) * 0.12)
-        scores.Enemy = scores.Enemy + 0.35 + math.min(0.8, (signals.OuterContestValue or 0) * 0.07)
+        scores.stabilize = scores.stabilize - (signals.StrongHomeCollapse and 0 or 1.3)
+        scores.expand = scores.expand + 1.0 + math.min(1.0, (signals.OuterContestValue or 0) * 0.12)
+        scores.punish_greed = scores.punish_greed + 0.35 + math.min(0.8, (signals.OuterContestValue or 0) * 0.07)
+        scores.trade_tech_for_tempo = scores.trade_tech_for_tempo + 0.45 + math.min(0.6, (signals.OuterContestValue or 0) * 0.05)
     end
     if signals.DesperationCounterstrike then
         scores.stabilize = scores.stabilize - 1.4
