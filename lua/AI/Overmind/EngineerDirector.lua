@@ -126,14 +126,20 @@ local function TryReclaimEnemyMex(aiBrain, runtime, eng, now)
         return false
     end
 
+    local policy = runtime and runtime.EcoPolicy or {}
+    local aggressiveContest = policy.ReclaimPressureMode == true
+        or policy.ForwardContestBias == true
+        or policy.PrioritizeProduction == true
+        or policy.ContestMapMode == true
+
     runtime.EngineerEnemyMexReclaimCooldown = runtime.EngineerEnemyMexReclaimCooldown or {}
     local entityId = eng.EntityId or 0
     local last = runtime.EngineerEnemyMexReclaimCooldown[entityId] or -999
-    if now - last < 14 then
+    if now - last < (aggressiveContest and 10 or 14) then
         return false
     end
 
-    local enemyMex = aiBrain:GetUnitsAroundPoint(EnemyMexCategory, pos, 26, 'Enemy')
+    local enemyMex = aiBrain:GetUnitsAroundPoint(EnemyMexCategory, pos, aggressiveContest and 32 or 26, 'Enemy')
     if not enemyMex or table.getn(enemyMex) <= 0 then
         return false
     end
@@ -144,12 +150,14 @@ local function TryReclaimEnemyMex(aiBrain, runtime, eng, now)
         pos,
         24,
         'Ally') or 0
-    if localThreat > 0.8 or escort < 4 or HasEnemyCombatNear(aiBrain, pos, 28) then
+    local localThreatCap = aggressiveContest and 1.05 or 0.8
+    local minEscort = aggressiveContest and 3 or 4
+    if localThreat > localThreatCap or escort < minEscort or HasEnemyCombatNear(aiBrain, pos, aggressiveContest and 32 or 28) then
         return false
     end
 
     local reclaimTargets = {}
-    local maxTargets = math.min(2, table.getn(enemyMex))
+    local maxTargets = math.min(aggressiveContest and 3 or 2, table.getn(enemyMex))
     for i = 1, maxTargets do
         local target = enemyMex[i]
         if target and not target.Dead then
@@ -161,7 +169,10 @@ local function TryReclaimEnemyMex(aiBrain, runtime, eng, now)
                 targetPos,
                 24,
                 'Enemy') or 0) or 999
-            if targetPos and routeRisk <= 1.35 and targetThreat <= 0.6 and enemyGuard <= 0 and not HasEnemyCombatNear(aiBrain, targetPos, 24) then
+            local routeRiskCap = aggressiveContest and 1.7 or 1.35
+            local targetThreatCap = aggressiveContest and 0.85 or 0.6
+            local enemyGuardCap = aggressiveContest and 1 or 0
+            if targetPos and routeRisk <= routeRiskCap and targetThreat <= targetThreatCap and enemyGuard <= enemyGuardCap and not HasEnemyCombatNear(aiBrain, targetPos, aggressiveContest and 28 or 24) then
                 table.insert(reclaimTargets, target)
             end
         end
@@ -276,6 +287,102 @@ local function ExpansionReservationKey(pos)
         return false
     end
     return string.format('%d:%d', math.floor((pos[1] or 0) + 0.5), math.floor((pos[3] or 0) + 0.5))
+end
+
+local function FindNearestZoneNode(runtime, pos, maxDistance)
+    if not runtime or not pos then
+        return false
+    end
+    local nodes = ((runtime.ZoneGraph or {}).Nodes) or {}
+    local best = false
+    local bestDistSq = (maxDistance or 56) * (maxDistance or 56)
+    for _, node in nodes do
+        if node and node.Pos and node.Medium == 'land' then
+            local dx = (node.Pos[1] or 0) - (pos[1] or 0)
+            local dz = (node.Pos[3] or 0) - (pos[3] or 0)
+            local distSq = (dx * dx) + (dz * dz)
+            if distSq <= bestDistSq then
+                best = node
+                bestDistSq = distSq
+            end
+        end
+    end
+    return best
+end
+
+local function GetContestExpansionBias(runtime, pos, mainPos, enemyPos)
+    if not runtime or not pos or not mainPos then
+        return 0
+    end
+
+    local policy = runtime.EcoPolicy or {}
+    if not (policy.ForwardContestBias == true or policy.PrioritizeProduction == true or policy.ContestMapMode == true) then
+        return 0
+    end
+
+    local bias = 0
+    local distMain = Distance2D(pos, mainPos)
+    local outerHoldShare = policy.OuterHoldShare or 0
+    if distMain >= 120 then
+        bias = bias + 14
+    end
+    if distMain >= 165 and outerHoldShare < 0.55 then
+        bias = bias + 18
+    end
+
+    local graph = runtime.ZoneGraph or {}
+    local bestExpansionPos = graph.BestExpansionPos or ((runtime.ZoneModel or {}).BestExpansionPos)
+    if bestExpansionPos then
+        local distExpansion = Distance2D(pos, bestExpansionPos)
+        if distExpansion <= 36 then
+            bias = bias + 30
+        elseif distExpansion <= 80 then
+            bias = bias + 14
+        end
+    end
+
+    local bestRaidPos = graph.BestRaidPos or ((runtime.ZoneModel or {}).BestRaidPos)
+    if bestRaidPos then
+        local distRaid = Distance2D(pos, bestRaidPos)
+        if distRaid <= 42 then
+            bias = bias + 16
+        elseif distRaid <= 90 then
+            bias = bias + 8
+        end
+    end
+
+    local node = FindNearestZoneNode(runtime, pos, 60)
+    if node then
+        if node.Classification == 'contested' then
+            bias = bias + 24
+        elseif node.Classification == 'front' then
+            bias = bias + 18
+        elseif node.Classification == 'rear' or node.Classification == 'core' then
+            bias = bias - 6
+        elseif node.Classification == 'enemy_side' then
+            bias = bias - 24
+        end
+        bias = bias + Clamp((node.ExpansionValue or 0) * 0.18, -8, 34)
+        bias = bias + Clamp((node.RaidValue or 0) * 0.08, -6, 18)
+        if (node.EnemyMex or 0) > 0 then
+            bias = bias + 10
+        end
+        if (node.RouteRisk or 0) >= 4 then
+            bias = bias - 10
+        end
+        if (node.FriendlyLand or 0) >= (node.EnemyLand or 0) then
+            bias = bias + 6
+        end
+    end
+
+    if enemyPos then
+        local distEnemy = Distance2D(pos, enemyPos)
+        if distEnemy > distMain then
+            bias = bias + math.min(12, (distEnemy - distMain) * 0.08)
+        end
+    end
+
+    return bias
 end
 
 local function CleanupExpansionReservations(runtime, now)
@@ -416,6 +523,7 @@ local function FindExpansionTarget(aiBrain, runtime, mainPos, enemyPos, maxDista
                 score = 320 - math.abs(170 - distMain) - (distSource * 0.18)
             end
             score = score - (threat * 28)
+            score = score + GetContestExpansionBias(runtime, pos, mainPos, enemyPos)
             if enemyPos then
                 local distEnemy = Distance2D(pos, enemyPos)
                 score = score + math.min(45, distEnemy * 0.12)
@@ -475,9 +583,14 @@ end
 local function DispatchExpansionEngineer(aiBrain, runtime, now, engineers, mainPos, enemyPos, safeExpandDistance, threatCap)
     local director = runtime and runtime.ProductionDirector or {}
     local constraints = director and director.ConstraintState or {}
+    local policy = runtime and runtime.EcoPolicy or {}
+    local macro = runtime and runtime.MacroController or {}
     local raid = runtime and runtime.RaidDefense or {}
     local bootstrap = constraints and constraints.EconBootstrap == true
     local starterPhase = constraints and constraints.StarterPhase == true
+    local contestDispatch = policy.ForwardContestBias == true
+        or policy.ReclaimPressureMode == true
+        or macro.HQPressureEscape == true
     if (bootstrap or starterPhase) and NeedsBootstrapPower(aiBrain, runtime) then
         return 0
     end
@@ -496,7 +609,7 @@ local function DispatchExpansionEngineer(aiBrain, runtime, now, engineers, mainP
 
     CleanupExpansionReservations(runtime, now)
     local dispatched = 0
-    local dispatchLimit = bootstrap and 2 or 1
+    local dispatchLimit = bootstrap and 2 or (contestDispatch and 2 or 1)
     for _, eng in engineers do
         if eng and not eng.Dead and not IsConstructing(eng) and IsIdle(eng) then
             local pos = eng:GetPosition()
@@ -1921,7 +2034,12 @@ function Update(aiBrain, now)
     local constraints = ((runtime.ProductionDirector or {}).ConstraintState or {})
     local macro = runtime.MacroController or {}
     local macroPhase = macro.Phase or (((runtime.ProductionDirector or {}).MacroObjective) or 'land_factory_floor')
+    local hqPressureEscape = macro.HQPressureEscape == true
     local transitionLock = macro.TransitionLocked == true
+    local forwardContestBias = policy.ForwardContestBias == true
+    local reclaimPressureMode = policy.ReclaimPressureMode == true
+    local contestFieldMode = hqPressureEscape
+        or ((forwardContestBias or reclaimPressureMode) and (macroPhase == 'mass_consolidation' or macroPhase == 'surplus_scale'))
     local currentRadar = ((((runtime.ProductionDirector or {}).Current or {}).Structures or {}).Radar) or 0
     local bomberWatch = constraints.BomberWatch == true
     local bomberPanic = ((raid.BomberPanicUntil or -999) > now) or ((raid.LastBomberEnemyCount or 0) >= 1 and raid.UnderAirHarass)
@@ -2177,6 +2295,24 @@ function Update(aiBrain, now)
                                 forcedFactoryRecover = forcedFactoryRecover + 1
                                 acted = true
                             end
+                        elseif contestFieldMode
+                            and not factoryTask.Active
+                            and not structureTask.Active
+                            and needBase <= 0
+                            and localThreat < 1.8
+                            and dist <= 380
+                            and TryOpenSurplusExpansionBuild(aiBrain, runtime, eng, mainPos, enemyPos, safeExpandDistance, now) then
+                            dispatchedExpand = dispatchedExpand + 1
+                            acted = true
+                        elseif contestFieldMode
+                            and not factoryTask.Active
+                            and not structureTask.Active
+                            and needBase <= 0
+                            and localThreat < 1.9
+                            and dist <= 420
+                            and TryReclaimEnemyMex(aiBrain, runtime, eng, now) then
+                            reclaimEnemyMex = reclaimEnemyMex + 1
+                            acted = true
                         end
                     end
 
@@ -2371,6 +2507,9 @@ function Update(aiBrain, now)
         end
         if (runtime.ZoneModel and (runtime.ZoneModel.MapControl or 0) < 0.26) or now >= 420 then
             threatCap = 1.55
+        end
+        if forwardContestBias or hqPressureEscape then
+            threatCap = threatCap + 0.15
         end
         dispatchedExpand = DispatchExpansionEngineer(aiBrain, runtime, now, engineers, mainPos, enemyPos, math.max(420, safeExpandDistance), threatCap)
     end

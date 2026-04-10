@@ -327,6 +327,16 @@ function EnforceCommanderSafety(aiBrain, now)
         or approachCluster.Pos
         or runtime.PrimaryEnemyPos
         or homePos
+    local q = acu.GetCommandQueue and acu:GetCommandQueue() or false
+    local isIdle = (not q or table.getn(q) == 0)
+    local isConstructing = acu:IsUnitState('Building') or acu:IsUnitState('Upgrading')
+    local macro = runtime.MacroController or {}
+    local macroObjective = macro.Phase or ((runtime.ProductionDirector or {}).MacroObjective) or 'land_factory_floor'
+    local transitionLocked = macro.TransitionLocked == true
+    local earlyTransitionPhase = macroObjective == 'bootstrap_factory'
+        or macroObjective == 'starter_mex_claim'
+        or macroObjective == 'land_factory_floor'
+
     local approachTowardHome = approachConfirmed and approachDistance < 150 and approachThreat >= 5.0
     local acuZoneAttack = (raidLabel == 'acu' or raidLabel == 'main') and raidLandCount >= 2
     local confirmedLocalContact = enemyRaiders >= 1
@@ -390,15 +400,6 @@ function EnforceCommanderSafety(aiBrain, now)
         shouldRecall = true
     end
 
-    local q = acu.GetCommandQueue and acu:GetCommandQueue() or false
-    local isIdle = (not q or table.getn(q) == 0)
-    local isConstructing = acu:IsUnitState('Building') or acu:IsUnitState('Upgrading')
-    local macro = runtime.MacroController or {}
-    local macroObjective = macro.Phase or ((runtime.ProductionDirector or {}).MacroObjective) or 'land_factory_floor'
-    local transitionLocked = macro.TransitionLocked == true
-    local earlyTransitionPhase = macroObjective == 'bootstrap_factory'
-        or macroObjective == 'starter_mex_claim'
-        or macroObjective == 'land_factory_floor'
     local idleFar = isIdle and distance > math.max(15, maxDistance + 3)
     local constraints = ((runtime.ProductionDirector or {}).ConstraintState) or {}
     local starterSafeLeash = constraints.StarterPhase
@@ -553,6 +554,27 @@ function EnforceCommanderSafety(aiBrain, now)
         noMansLand = false
         enemyContactUnsafe = false
         raidRecall = false
+    end
+    local unconfirmedTransitionThreat = transitionLocked
+        and now < 420
+        and not recentDamage
+        and not confirmedLocalContact
+        and enemyRaiders <= 0
+        and raidLandCount <= 1
+        and approachThreat < 4.0
+        and distance <= math.max(28, maxDistance + 10)
+        and not catastrophicOverextend
+    if unconfirmedTransitionThreat and not acuCrisisActive then
+        shouldRecall = false
+        idleFar = false
+        stuckFar = false
+        earlyHardLeash = false
+        noMansLand = false
+        enemyContactUnsafe = false
+        raidRecall = false
+        underThreat = false
+        openingLock = false
+        hardAnchor = false
     end
     local techAnchorPosture = (macroObjective == 'first_land_hq' or macroObjective == 'first_t2_engineer' or macroObjective == 'first_t2_power' or (transitionLocked and now < 600))
         and distance <= math.max(34, maxDistance + 18)

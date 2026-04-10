@@ -600,6 +600,7 @@ local function PickFactoryTarget(aiBrain, runtime, state)
     local current = director.Current or {}
     local constraints = director.ConstraintState or {}
     local planner = runtime.StrategicPlanner or {}
+    local macro = runtime.MacroController or {}
     local eco = runtime.EcoState or {}
     local macroObjective = GetMacroObjective(runtime)
     local mainPos = GetMainPos(aiBrain, runtime)
@@ -630,6 +631,14 @@ local function PickFactoryTarget(aiBrain, runtime, state)
     state.NeedsFirstLandHQ = needsFirstHQOverall and true or false
     state.Mandatory = needsFirstHQOverall and true or false
     state.PowerRecoveryWanted = constraints.PowerBufferLow and needsFirstHQOverall
+
+    if macro.HQPressureEscape == true and needsFirstHQOverall then
+        state.Reason = 'pressure_escape'
+        state.NeedsFirstLandHQ = true
+        state.Mandatory = false
+        state.PowerRecoveryWanted = false
+        return
+    end
 
     if upgradeCount > 0 then
         local allFactories = aiBrain:GetListOfUnits(categories.FACTORY * categories.LAND * categories.STRUCTURE, false, true) or {}

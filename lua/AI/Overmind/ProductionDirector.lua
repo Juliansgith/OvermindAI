@@ -963,6 +963,13 @@ local function DecideDomainBudget(runtime, mode, constraints, demand, confidence
         raw.Air = raw.Air - (constraints.ConfirmedHarass and 0.04 or 0.10)
         raw.Defense = raw.Defense - (constraints.ConfirmedHarass and 0.02 or 0.08)
     end
+    if (runtime.MacroController or {}).HQPressureEscape == true then
+        raw.Land = raw.Land + 0.18
+        raw.Eco = raw.Eco + 0.04
+        raw.Tech = raw.Tech - 0.18
+        raw.Air = raw.Air - 0.18
+        raw.Defense = raw.Defense - (constraints.ConfirmedHarass and 0.02 or 0.06)
+    end
     if prioritizeProduction then
         raw.Land = raw.Land + 0.12 + (policy.ProductionTempoBias or 0)
         raw.Eco = raw.Eco - 0.06
@@ -1478,6 +1485,7 @@ local function DecideCapacityPlan(runtime, current, constraints, rolePlan)
     local contestMapMode = policy.ContestMapMode == true
     local relaxedFactoryTempo = policy.RelaxedFactoryTempo == true
     local suppressEarlyAir = policy.SuppressEarlyAir == true
+    local hqPressureEscape = (runtime.MacroController or {}).HQPressureEscape == true
     local frontSecure = policy.FrontSecure == true
     local outerMexShare = policy.OuterMexShare or 0
     local safeForwardMexCount = policy.SafeForwardMexCount or 0
@@ -1886,6 +1894,12 @@ local function DecideCapacityPlan(runtime, current, constraints, rolePlan)
         airTarget = math.min(airTarget, math.min(current.Factories.Air.Total, 1))
         if current.Factories.Land.Ready >= 3 and not preserveAirWindow then
             airTarget = math.min(airTarget, 1)
+        end
+    end
+    if hqPressureEscape and not preserveAirWindow then
+        airTarget = math.min(airTarget, math.min(current.Factories.Air.Total, 1))
+        if current.Factories.Land.Ready >= 2 then
+            landTarget = math.max(landTarget, math.min(landCap, current.Factories.Land.Total + 1))
         end
     end
     if objectiveStarterClamp and not preserveAirWindow then

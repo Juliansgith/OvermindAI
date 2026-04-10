@@ -172,6 +172,7 @@ local function DetermineDesiredPhase(aiBrain, runtime, now)
     local intel = runtime.IntelModel or {}
     local graph = runtime.ZoneGraph or {}
     local zone = runtime.ZoneModel or {}
+    local constraints = ((runtime.ProductionDirector or {}).ConstraintState) or {}
     local readyLand = CountReadyUnits(aiBrain, categories.FACTORY * categories.LAND * categories.STRUCTURE)
     local totalLand = CountUnits(aiBrain, categories.FACTORY * categories.LAND * categories.STRUCTURE)
     local readyMex = CountReadyUnits(aiBrain, categories.MASSEXTRACTION * categories.STRUCTURE)
@@ -188,6 +189,11 @@ local function DetermineDesiredPhase(aiBrain, runtime, now)
     local massBudget = ComputeMassBudget(eco)
     local contestedZones = intel.ContestedZones or graph.ContestedZones or 0
     local mapControl = intel.MapControl or graph.MapControl or zone.MapControl or 0
+    local frontPressure = constraints.FrontPressure or 0
+    local basePressure = constraints.BasePressure or 0
+    local approachReal = constraints.ApproachReal == true
+    local landPanic = constraints.LandPanic == true
+    local acuCrisisActive = now < (runtime.ACUCrisisUntil or -999)
     local structure = ComputeContestMapStructure(runtime)
     local contestTempoMap = structure.StructuralContestMap
         and (contestedZones >= 2 or structure.ContestableZoneCount >= 3)
@@ -197,6 +203,14 @@ local function DetermineDesiredPhase(aiBrain, runtime, now)
     local starterMexTarget = contestTempoMap and 3 or 4
     local starterMexDeadline = contestTempoMap and 210 or 300
     local landFactoryFloorTarget = contestTempoMap and 2 or 3
+    local hqPressureEscape = t2LandFactories <= 0
+        and activeLandFactoryUpgrades <= 0
+        and readyLand >= 2
+        and (
+            acuCrisisActive
+            or ((landPanic or underHarass or approachReal) and (frontPressure >= 0.18 or basePressure >= 0.14))
+            or (frontPressure >= 0.26 and basePressure >= 0.18)
+        )
 
     local facts = {
         ReadyLandFactories = readyLand,
@@ -219,6 +233,10 @@ local function DetermineDesiredPhase(aiBrain, runtime, now)
         MassBudget = massBudget,
         EnergyTrend = eco.EnergyTrend or 0,
         MassTrend = eco.MassTrend or 0,
+        FrontPressure = frontPressure,
+        BasePressure = basePressure,
+        HQPressureEscape = hqPressureEscape and true or false,
+        ACUCrisisActive = acuCrisisActive and true or false,
     }
 
     if readyLand <= 0 and totalLand <= 0 then
@@ -234,6 +252,9 @@ local function DetermineDesiredPhase(aiBrain, runtime, now)
     end
 
     if t2LandFactories <= 0 then
+        if hqPressureEscape then
+            return 'mass_consolidation', 'hq_pressure_escape', facts
+        end
         if readyLand >= landFactoryFloorTarget and readyMex >= 4 and readyPower >= 3 then
             if activeLandFactoryUpgrades > 0 then
                 return 'first_land_hq', 'hq_in_flight', facts
@@ -288,6 +309,18 @@ local function ApplyLatch(state, desiredPhase, desiredReason, facts, now)
         return current, 'latched_land_factory_floor'
     end
 
+    if current == 'mass_consolidation'
+        and facts.HQPressureEscape
+        and facts.T2LandFactories <= 0 then
+        return current, 'latched_hq_pressure_escape'
+    end
+
+    if current == 'first_land_hq'
+        and facts.HQPressureEscape
+        and (now - (state.PhaseStartedAt or now)) >= 10 then
+        return 'mass_consolidation', 'hq_pressure_escape'
+    end
+
     if current == 'first_land_hq'
         and facts.T2LandFactories <= 0
         and (facts.ActiveLandFactoryUpgrades > 0 or (facts.ReadyLandFactories >= 2 and facts.ReadyMexes >= 4))
@@ -328,6 +361,7 @@ function Module.Update(aiBrain, now)
     state.Reason = reason
 
     state.TransitionLocked = TransitionPhases[phase] == true
+    state.HQPressureEscape = (facts.HQPressureEscape and phase ~= 'first_land_hq') and true or false
     state.SuppressAirExpansion = state.TransitionLocked and phase ~= 'surplus_scale'
     state.SuppressDefenseDrift = phase == 'bootstrap_factory'
         or phase == 'starter_mex_claim'

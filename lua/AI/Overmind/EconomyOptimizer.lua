@@ -272,17 +272,35 @@ function UpdatePolicy(aiBrain, now)
         and stableTempoEco
         and mapControl <= 0.68
         and (opp.RelativePower or 1) <= 1.08
-    local frontSecureUpgradeWindow = landContestMap
-        and structure.FrontSecure
-        and stableTempoEco
-        and mapControl >= 0.44
-        and contestedZones <= 1
     local prioritizeProduction = planner.TradeTechForTempo
         or planner.PunishGreed
         or goal == 'all_in'
         or goal == 'raid'
         or productionFirstWindow
         or (stableTempoEco and phase == 'pressure' and contestedZones >= 2 and now < 900 and mapControl < 0.55)
+    local frontSecureUpgradeWindow = landContestMap
+        and structure.FrontSecure
+        and stableTempoEco
+        and mapControl >= 0.44
+        and contestedZones <= 1
+    local forwardContestBias = (contestMapMode or prioritizeProduction)
+        and (
+            not structure.FrontSecure
+            or structure.OuterHoldShare < 0.5
+            or structure.SafeForwardMexCount >= 2
+            or structure.OuterMexShare >= 0.34
+        )
+    local reclaimPressureMode = (contestMapMode or prioritizeProduction)
+        and stableTempoEco
+        and now >= 240
+        and not forceFactoryRecovery
+        and not forceBaseRecovery
+        and not enemyPressure
+        and (
+            structure.ContestableZoneCount >= 2
+            or structure.OuterMexShare >= 0.34
+            or structure.SafeForwardMexCount >= 2
+        )
     local preferTempoFromSurplus = prioritizeProduction
         and stableTempoEco
         and not enemyPressure
@@ -298,6 +316,8 @@ function UpdatePolicy(aiBrain, now)
     policy.LocalMexUpgradeMaxConcurrent = 2
     policy.RelaxedFactoryTempo = false
     policy.SuppressEarlyAir = false
+    policy.ForwardContestBias = false
+    policy.ReclaimPressureMode = false
     policy.ProductionTempoBias = 0
     policy.OuterMexShare = structure.OuterMexShare or 0
     policy.OuterHoldShare = structure.OuterHoldShare or 0
@@ -368,6 +388,8 @@ function UpdatePolicy(aiBrain, now)
     policy.LocalMexUpgradeMaxConcurrent = ((contestMapMode or prioritizeProduction) and not frontSecureUpgradeWindow) and 1 or 2
     policy.RelaxedFactoryTempo = (contestMapMode or prioritizeProduction) and true or false
     policy.SuppressEarlyAir = (contestMapMode or prioritizeProduction) and true or false
+    policy.ForwardContestBias = forwardContestBias and true or false
+    policy.ReclaimPressureMode = reclaimPressureMode and true or false
     policy.ProductionTempoBias = (contestMapMode and 0.28) or (prioritizeProduction and 0.16) or 0
 
     if now < 420 then
