@@ -329,10 +329,17 @@ function EnforceCommanderSafety(aiBrain, now)
         or homePos
     local approachTowardHome = approachConfirmed and approachDistance < 150 and approachThreat >= 5.0
     local acuZoneAttack = (raidLabel == 'acu' or raidLabel == 'main') and raidLandCount >= 2
+    local confirmedLocalContact = enemyRaiders >= 1
+        or (raid.UnderLandHarass and raidLandCount >= 1)
+        or approachTowardHome
+        or recentDamage
+    local startupCrisisGuard = now < 150
+        and earlyTransitionPhase
+        and not confirmedLocalContact
     local preemptiveCrisis = acuZoneAttack
         or (raid.UnderLandHarass and raidLandCount >= 3 and distance > 8)
         or (approachTowardHome and distance > 10)
-        or (localThreat > math.max(homeThreat + 2.6, 7.0) and distance > 8)
+        or ((not startupCrisisGuard) and localThreat > math.max(homeThreat + 2.6, 7.0) and enemyRaiders >= 1 and distance > 8)
         or (recentDamage and localThreat > math.max(homeThreat + 1.4, 4.0))
     if preemptiveCrisis then
         runtime.ACUCrisisEnemyPos = crisisEnemyPos
@@ -389,6 +396,9 @@ function EnforceCommanderSafety(aiBrain, now)
     local macro = runtime.MacroController or {}
     local macroObjective = macro.Phase or ((runtime.ProductionDirector or {}).MacroObjective) or 'land_factory_floor'
     local transitionLocked = macro.TransitionLocked == true
+    local earlyTransitionPhase = macroObjective == 'bootstrap_factory'
+        or macroObjective == 'starter_mex_claim'
+        or macroObjective == 'land_factory_floor'
     local idleFar = isIdle and distance > math.max(15, maxDistance + 3)
     local constraints = ((runtime.ProductionDirector or {}).ConstraintState) or {}
     local starterSafeLeash = constraints.StarterPhase
