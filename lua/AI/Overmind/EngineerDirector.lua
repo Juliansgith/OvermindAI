@@ -2087,6 +2087,269 @@ local function DescribeStructureTaskTarget(target)
     return 'resume'
 end
 
+local function ProcessEngineer(aiBrain, runtime, eng, now, ctx)
+    if not eng or eng.Dead then
+        return
+    end
+
+    local entityId = GetEntityId(eng)
+    local claimedByFactoryTask = ctx.factoryTask.Active and entityId and ctx.factoryTask.BuilderIds and ctx.factoryTask.BuilderIds[entityId]
+    local claimedByStructureTask = ctx.structureTask.Active and entityId and ctx.structureTask.BuilderIds and ctx.structureTask.BuilderIds[entityId]
+    local claimedByRadarOrder = entityId and ctx.radarReservedBuilderIds[entityId]
+    if claimedByFactoryTask or claimedByStructureTask or claimedByRadarOrder then
+        return
+    end
+
+    local pos = eng:GetPosition()
+    if not pos then
+        return
+    end
+
+    local dist = Distance2D(pos, ctx.mainPos)
+    local localThreat = aiBrain:GetThreatAtPosition(pos, 1, true, 'AntiSurface') or 0
+    local escort = aiBrain:GetNumUnitsAroundPoint(categories.MOBILE * (categories.LAND + categories.AIR) - categories.ENGINEER - categories.SCOUT - categories.COMMAND, pos, 26, 'Ally') or 0
+    local isIdle = IsIdle(eng)
+    local constructing = IsConstructing(eng)
+    local acted = false
+
+    if isIdle and not constructing then
+        if ctx.macroPhase == 'starter_mex_claim'
+            and localThreat < 1.8
+            and dist <= 320
+            and TryOpenSurplusExpansionBuild(aiBrain, runtime, eng, ctx.mainPos, ctx.enemyPos, ctx.safeExpandDistance, now) then
+            ctx.dispatchedExpand = ctx.dispatchedExpand + 1
+            acted = true
+        elseif (ctx.macroPhase == 'bootstrap_factory' or ctx.macroPhase == 'land_factory_floor')
+            and ctx.factoryTask.Active
+            and ctx.factoryTargetObject
+            and localThreat < 2.2
+            and dist <= 360
+            and TryAssignAssistOrRepair(aiBrain, runtime, eng, ctx.factoryTargetObject, false, now) then
+            ctx.forcedFactoryRecover = ctx.forcedFactoryRecover + 1
+            acted = true
+        elseif (ctx.macroPhase == 'first_land_hq' or ctx.macroPhase == 'first_t2_engineer' or ctx.macroPhase == 'first_t2_power') then
+            local assistTarget, isUpgradeTarget = GetPriorityUpgradeAssistTarget(aiBrain, runtime, ctx.mainPos)
+            if assistTarget
+                and localThreat < 2.2
+                and dist <= 360
+                and TryAssignAssistOrRepair(aiBrain, runtime, eng, assistTarget, isUpgradeTarget, now) then
+                ctx.surplusSpendCount = ctx.surplusSpendCount + 1
+                acted = true
+            elseif (ctx.hqPowerRecoveryWanted or ctx.macroNeedPowerRecovery)
+                and localThreat < 2.2
+                and dist <= 360 then
+                local powerTarget = GetPriorityPowerRecoveryTarget(aiBrain, runtime, ctx.mainPos, ctx.structureTargetObject, ctx.structureTask)
+                if powerTarget and TryAssignAssistOrRepair(aiBrain, runtime, eng, powerTarget, false, now) then
+                    ctx.powerRecoveryCount = ctx.powerRecoveryCount + 1
+                    acted = true
+                elseif TryOpenPowerRecoveryBuild(aiBrain, runtime, eng, ctx.mainPos, now) then
+                    ctx.powerRecoveryCount = ctx.powerRecoveryCount + 1
+                    acted = true
+                end
+            elseif ctx.factoryTask.Active
+                and ctx.factoryTargetObject
+                and localThreat < 2.2
+                and dist <= 360
+                and TryAssignAssistOrRepair(aiBrain, runtime, eng, ctx.factoryTargetObject, false, now) then
+                ctx.forcedFactoryRecover = ctx.forcedFactoryRecover + 1
+                acted = true
+            end
+        elseif ctx.contestFieldMode
+            and not ctx.factoryTask.Active
+            and not ctx.structureTask.Active
+            and ctx.needBase <= 0
+            and TryReclaimFieldZone(aiBrain, runtime, eng, ctx.reclaimFieldPos, now) then
+            ctx.reclaimField = ctx.reclaimField + 1
+            acted = true
+        elseif ctx.contestFieldMode
+            and not ctx.factoryTask.Active
+            and not ctx.structureTask.Active
+            and ctx.needBase <= 0
+            and localThreat < 1.8
+            and dist <= 380
+            and TryOpenSurplusExpansionBuild(aiBrain, runtime, eng, ctx.mainPos, ctx.enemyPos, ctx.safeExpandDistance, now) then
+            ctx.dispatchedExpand = ctx.dispatchedExpand + 1
+            acted = true
+        elseif ctx.contestFieldMode
+            and not ctx.factoryTask.Active
+            and not ctx.structureTask.Active
+            and ctx.needBase <= 0
+            and localThreat < 1.9
+            and dist <= 420
+            and TryReclaimEnemyMex(aiBrain, runtime, eng, now) then
+            ctx.reclaimEnemyMex = ctx.reclaimEnemyMex + 1
+            acted = true
+        end
+    end
+
+    if (not acted)
+        and isIdle
+        and not constructing
+        and (ctx.constraints.PowerBufferLow == true or ctx.hqPowerRecoveryWanted or ShouldScaleBaseEco(runtime, now))
+        and localThreat < 2.2
+        and dist <= 360 then
+        local powerTarget = GetPriorityPowerRecoveryTarget(aiBrain, runtime, ctx.mainPos, ctx.structureTargetObject, ctx.structureTask)
+        if powerTarget and TryAssignAssistOrRepair(aiBrain, runtime, eng, powerTarget, false, now) then
+            ctx.powerRecoveryCount = ctx.powerRecoveryCount + 1
+            acted = true
+        elseif TryOpenPowerRecoveryBuild(aiBrain, runtime, eng, ctx.mainPos, now) then
+            ctx.powerRecoveryCount = ctx.powerRecoveryCount + 1
+            acted = true
+        end
+    end
+
+    if (not acted)
+        and ctx.factoryTask.Active
+        and ctx.factoryTargetObject
+        and (ctx.factoryTask.AssignedBuilders or 0) < (ctx.factoryTask.RequiredBuilders or 0)
+        and localThreat < 2.2
+        and dist <= 360
+        and not eng:IsUnitState('Upgrading')
+        and ((isIdle and not constructing) or (not constructing and GetCommandQueueLength(eng) <= 2))
+        and TryAssignAssistOrRepair(aiBrain, runtime, eng, ctx.factoryTargetObject, false, now) then
+        if entityId then
+            ctx.factoryTask.BuilderIds = ctx.factoryTask.BuilderIds or {}
+            ctx.factoryTask.BuilderIds[entityId] = true
+        end
+        ctx.factoryTask.AssignedBuilders = math.min((ctx.factoryTask.RequiredBuilders or 0), (ctx.factoryTask.AssignedBuilders or 0) + 1)
+        ctx.forcedFactoryRecover = ctx.forcedFactoryRecover + 1
+        acted = true
+    end
+
+    if (not acted)
+        and isIdle
+        and not constructing
+        and ctx.structureTask.Active
+        and ctx.structureTargetObject
+        and (ctx.structureTask.AssignedBuilders or 0) < (ctx.structureTask.RequiredBuilders or 0)
+        and localThreat < 2.2
+        and dist <= 320
+        and TryAssignAssistOrRepair(aiBrain, runtime, eng, ctx.structureTargetObject, false, now) then
+        if entityId then
+            ctx.structureTask.BuilderIds = ctx.structureTask.BuilderIds or {}
+            ctx.structureTask.BuilderIds[entityId] = true
+        end
+        ctx.structureTask.AssignedBuilders = math.min((ctx.structureTask.RequiredBuilders or 0), (ctx.structureTask.AssignedBuilders or 0) + 1)
+        acted = true
+    end
+
+    if (not acted)
+        and isIdle
+        and not constructing
+        and ctx.structureTask.Active
+        and ctx.structureTargetObject
+        and (ctx.structureTask.Kind == 'Mex' or ctx.structureTask.Kind == 'Power')
+        and ShouldPersistentSurplusSpend(runtime, now)
+        and localThreat < 2.0
+        and dist <= 360
+        and TryAssignAssistOrRepair(aiBrain, runtime, eng, ctx.structureTargetObject, false, now) then
+        ctx.surplusSpendCount = ctx.surplusSpendCount + 1
+        acted = true
+    end
+
+    if (not acted) and isIdle and not constructing then
+        local assistTarget, isUpgradeTarget = GetPriorityUpgradeAssistTarget(aiBrain, runtime, ctx.mainPos)
+        if assistTarget and localThreat < 2.2 and dist <= 360 and TryAssignAssistOrRepair(aiBrain, runtime, eng, assistTarget, isUpgradeTarget, now) then
+            ctx.surplusSpendCount = ctx.surplusSpendCount + 1
+            acted = true
+        end
+    end
+
+    if (not acted)
+        and isIdle
+        and not constructing
+        and (not ctx.transitionLock)
+        and (ShouldPersistentSurplusSpend(runtime, now) or ShouldScaleBaseEco(runtime, now))
+        and localThreat < 2.0
+        and dist <= 360 then
+        local buildAssistTarget = GetPriorityBuildAssistTarget(aiBrain, runtime, ctx.mainPos)
+        if buildAssistTarget and TryAssignAssistOrRepair(aiBrain, runtime, eng, buildAssistTarget, false, now) then
+            ctx.surplusSpendCount = ctx.surplusSpendCount + 1
+            acted = true
+        end
+    end
+
+    if (not acted) and isIdle and not constructing then
+        local repairTarget = GetPriorityRepairTarget(aiBrain, runtime, ctx.mainPos)
+        if repairTarget and localThreat < 2.2 and dist <= 360 and TryAssignAssistOrRepair(aiBrain, runtime, eng, repairTarget, false, now) then
+            acted = true
+        end
+    end
+
+    if (not acted)
+        and isIdle
+        and not constructing
+        and ShouldPersistentSurplusSpend(runtime, now)
+        and localThreat < 1.8
+        and dist <= 260 then
+        if TryOpenSurplusExpansionBuild(aiBrain, runtime, eng, ctx.mainPos, ctx.enemyPos, ctx.safeExpandDistance, now) then
+            ctx.dispatchedExpand = ctx.dispatchedExpand + 1
+            ctx.surplusSpendCount = ctx.surplusSpendCount + 1
+            acted = true
+        elseif ShouldScaleBaseEco(runtime, now) and TryOpenPowerRecoveryBuild(aiBrain, runtime, eng, ctx.mainPos, now) then
+            ctx.powerRecoveryCount = ctx.powerRecoveryCount + 1
+            ctx.surplusSpendCount = ctx.surplusSpendCount + 1
+            acted = true
+        end
+    end
+
+    if isIdle
+        and not constructing
+        and (not acted)
+        and TryReclaimFieldZone(aiBrain, runtime, eng, ctx.reclaimFieldPos, now) then
+        ctx.reclaimField = ctx.reclaimField + 1
+        acted = true
+    end
+
+    if isIdle
+        and not constructing
+        and (not acted)
+        and not (ShouldPersistentSurplusSpend(runtime, now) or ShouldScaleBaseEco(runtime, now))
+        and TryReclaimEnemyMex(aiBrain, runtime, eng, now) then
+        ctx.reclaimEnemyMex = ctx.reclaimEnemyMex + 1
+        acted = true
+    end
+
+    local farUnsafe = dist > math.max(230, ctx.safeExpandDistance * 0.88) and localThreat > 2 and escort < 3
+    local earlyOverextend = now < 420 and dist > math.min(350, ctx.safeExpandDistance * 0.82) and escort < 2 and localThreat > 1.1
+    local enemySideRisk = false
+    if ctx.enemyPos then
+        local distEnemy = Distance2D(pos, ctx.enemyPos)
+        enemySideRisk = dist > 160 and distEnemy < (dist * 0.95) and escort < 3
+    end
+    local severeThreat = localThreat > 3.3 and escort < 3
+    local airRaidRisk = (ctx.bomberPanic or ctx.raid.ExposedMexUnderAirRaid)
+        and dist > 110
+        and escort < 2
+        and (
+            localThreat > 0.8
+            or (ctx.raid.ExposedMexThreatPos and Distance2D(pos, ctx.raid.ExposedMexThreatPos) < 70)
+        )
+
+    if (not acted) and (severeThreat or farUnsafe or (not constructing and (earlyOverextend or enemySideRisk))) then
+        if RecallEngineer(runtime, eng, ctx.mainPos, now, 'threatened') then
+            ctx.threatenedCount = ctx.threatenedCount + 1
+        end
+    elseif (not acted) and not constructing and airRaidRisk then
+        if RecallEngineer(runtime, eng, ctx.mainPos, now, 'air_raid') then
+            ctx.threatenedCount = ctx.threatenedCount + 1
+        end
+    elseif (not acted) and not constructing and ctx.needBase > 0 and dist > 130 and isIdle and localThreat < 1.9 then
+        if RecallEngineer(runtime, eng, ctx.mainPos, now, 'base_floor') then
+            ctx.recoverCount = ctx.recoverCount + 1
+            ctx.needBase = ctx.needBase - 1
+        end
+    elseif (not acted) and not constructing and ctx.factoryTask.Active and (ctx.factoryTask.AssignedBuilders or 0) < (ctx.factoryTask.RequiredBuilders or 0) and dist > 140 and localThreat < 1.6 and ctx.forcedFactoryRecover < math.max(2, ctx.factoryTask.RequiredBuilders or 0) then
+        if RecallEngineer(runtime, eng, ctx.mainPos, now, 'factory_task') then
+            ctx.forcedFactoryRecover = ctx.forcedFactoryRecover + 1
+        end
+    elseif (not acted) and not constructing and ctx.severeFactoryStarve and dist > 140 and localThreat < 1.6 and ctx.forcedFactoryRecover < 2 then
+        if RecallEngineer(runtime, eng, ctx.mainPos, now, 'factory_starve') then
+            ctx.forcedFactoryRecover = ctx.forcedFactoryRecover + 1
+        end
+    end
+end
+
 function Update(aiBrain, now)
     local runtime = aiBrain.OvermindRuntime
     if not runtime then
@@ -2115,14 +2378,6 @@ function Update(aiBrain, now)
         baseFloor = math.max(2, baseFloor - 1)
     end
     local safeExpandDistance = policy.SafeExpandDistance or 680
-    local recoverCount = 0
-    local threatenedCount = 0
-    local forcedFactoryRecover = 0
-    local dispatchedExpand = 0
-    local reclaimEnemyMex = 0
-    local reclaimField = 0
-    local powerRecoveryCount = 0
-    local surplusSpendCount = 0
     local enemyPos = runtime.PrimaryEnemyPos
     local baseEngineers = aiBrain:GetNumUnitsAroundPoint(categories.ENGINEER * categories.MOBILE, mainPos, 80, 'Ally') or 0
     local needBase = math.max(0, baseFloor - baseEngineers)
@@ -2137,17 +2392,13 @@ function Update(aiBrain, now)
     local macroPhase = macro.Phase or (((runtime.ProductionDirector or {}).MacroObjective) or 'land_factory_floor')
     local hqPressureEscape = macro.HQPressureEscape == true
     local transitionLock = macro.TransitionLocked == true
-    local forwardContestBias = policy.ForwardContestBias == true
-    local reclaimPressureMode = policy.ReclaimPressureMode == true
     local contestFieldMode = hqPressureEscape
-        or ((forwardContestBias or reclaimPressureMode) and (macroPhase == 'mass_consolidation' or macroPhase == 'surplus_scale'))
+        or ((((policy.ForwardContestBias == true) or (policy.ReclaimPressureMode == true)) and (macroPhase == 'mass_consolidation' or macroPhase == 'surplus_scale')))
     local currentRadar = ((((runtime.ProductionDirector or {}).Current or {}).Structures or {}).Radar) or 0
     local bomberWatch = constraints.BomberWatch == true
     local bomberPanic = ((raid.BomberPanicUntil or -999) > now) or ((raid.LastBomberEnemyCount or 0) >= 1 and raid.UnderAirHarass)
     local radarReservedBuilderIds = GetRadarReservedBuilderIds(runtime, now)
-    local upgradeDirector = runtime.UpgradeDirector or {}
-    local factoryUpgradeState = upgradeDirector.Factory or {}
-    local hqPowerRecoveryWanted = factoryUpgradeState.PowerRecoveryWanted == true
+    local hqPowerRecoveryWanted = ((((runtime.UpgradeDirector or {}).Factory) or {}).PowerRecoveryWanted) == true
 
     local target, targetPos, fraction, domain, readyFactories = FindBestUnfinishedFactory(aiBrain, runtime, mainPos)
     local factoryTargetObject = target
@@ -2181,9 +2432,6 @@ function Update(aiBrain, now)
         factoryTask.BuilderIds = claimedBuilders
         factoryTask.UsedCommander = usedCommander and true or false
         factoryTask.CandidateDebug = debug
-        if assignedBuilders > 0 then
-            forcedFactoryRecover = assignedBuilders
-        end
     else
         ResetFactoryTask(factoryTask)
     end
@@ -2338,263 +2586,37 @@ function Update(aiBrain, now)
         end
     end
 
+    local ctx = {
+        bomberPanic = bomberPanic,
+        constraints = constraints,
+        contestFieldMode = contestFieldMode,
+        dispatchedExpand = 0,
+        enemyPos = enemyPos,
+        factoryTargetObject = factoryTargetObject,
+        factoryTask = factoryTask,
+        forcedFactoryRecover = factoryTask.AssignedBuilders or 0,
+        hqPowerRecoveryWanted = hqPowerRecoveryWanted,
+        macroNeedPowerRecovery = macro.NeedPowerRecovery == true,
+        macroPhase = macroPhase,
+        mainPos = mainPos,
+        needBase = needBase,
+        powerRecoveryCount = 0,
+        radarReservedBuilderIds = radarReservedBuilderIds,
+        raid = raid,
+        reclaimEnemyMex = 0,
+        reclaimField = 0,
+        reclaimFieldPos = ((runtime.StrategicPlanner or {}).ReclaimFieldPos),
+        recoverCount = 0,
+        safeExpandDistance = safeExpandDistance,
+        severeFactoryStarve = severeFactoryStarve,
+        structureTargetObject = structureTargetObject,
+        structureTask = structureTask,
+        surplusSpendCount = 0,
+        threatenedCount = 0,
+        transitionLock = transitionLock,
+    }
     for _, eng in engineers do
-        if eng and not eng.Dead then
-            local entityId = GetEntityId(eng)
-            local claimedByFactoryTask = factoryTask.Active and entityId and factoryTask.BuilderIds and factoryTask.BuilderIds[entityId]
-            local claimedByStructureTask = structureTask.Active and entityId and structureTask.BuilderIds and structureTask.BuilderIds[entityId]
-            local claimedByRadarOrder = entityId and radarReservedBuilderIds[entityId]
-            if not (claimedByFactoryTask or claimedByStructureTask or claimedByRadarOrder) then
-                local pos = eng:GetPosition()
-                if pos then
-                    local dist = Distance2D(pos, mainPos)
-                    local localThreat = aiBrain:GetThreatAtPosition(pos, 1, true, 'AntiSurface') or 0
-                    local escort = aiBrain:GetNumUnitsAroundPoint(categories.MOBILE * (categories.LAND + categories.AIR) - categories.ENGINEER - categories.SCOUT - categories.COMMAND, pos, 26, 'Ally') or 0
-                    local isIdle = IsIdle(eng)
-                    local constructing = IsConstructing(eng)
-                    local acted = false
-
-                    if (not acted) and isIdle and not constructing then
-                        if macroPhase == 'starter_mex_claim'
-                            and localThreat < 1.8
-                            and dist <= 320
-                            and TryOpenSurplusExpansionBuild(aiBrain, runtime, eng, mainPos, enemyPos, safeExpandDistance, now) then
-                            dispatchedExpand = dispatchedExpand + 1
-                            acted = true
-                        elseif (macroPhase == 'bootstrap_factory' or macroPhase == 'land_factory_floor')
-                            and factoryTask.Active
-                            and factoryTargetObject
-                            and localThreat < 2.2
-                            and dist <= 360
-                            and TryAssignAssistOrRepair(aiBrain, runtime, eng, factoryTargetObject, false, now) then
-                            forcedFactoryRecover = forcedFactoryRecover + 1
-                            acted = true
-                        elseif (macroPhase == 'first_land_hq' or macroPhase == 'first_t2_engineer' or macroPhase == 'first_t2_power') then
-                            local assistTarget, isUpgradeTarget = GetPriorityUpgradeAssistTarget(aiBrain, runtime, mainPos)
-                            if assistTarget
-                                and localThreat < 2.2
-                                and dist <= 360
-                                and TryAssignAssistOrRepair(aiBrain, runtime, eng, assistTarget, isUpgradeTarget, now) then
-                                surplusSpendCount = surplusSpendCount + 1
-                                acted = true
-                            elseif (hqPowerRecoveryWanted or macro.NeedPowerRecovery == true)
-                                and localThreat < 2.2
-                                and dist <= 360 then
-                                local powerTarget = GetPriorityPowerRecoveryTarget(aiBrain, runtime, mainPos, structureTargetObject, structureTask)
-                                if powerTarget and TryAssignAssistOrRepair(aiBrain, runtime, eng, powerTarget, false, now) then
-                                    powerRecoveryCount = powerRecoveryCount + 1
-                                    acted = true
-                                elseif TryOpenPowerRecoveryBuild(aiBrain, runtime, eng, mainPos, now) then
-                                    powerRecoveryCount = powerRecoveryCount + 1
-                                    acted = true
-                                end
-                            elseif factoryTask.Active
-                                and factoryTargetObject
-                                and localThreat < 2.2
-                                and dist <= 360
-                                and TryAssignAssistOrRepair(aiBrain, runtime, eng, factoryTargetObject, false, now) then
-                                forcedFactoryRecover = forcedFactoryRecover + 1
-                                acted = true
-                            end
-                        elseif contestFieldMode
-                            and not factoryTask.Active
-                            and not structureTask.Active
-                            and needBase <= 0
-                            and TryReclaimFieldZone(aiBrain, runtime, eng, ((runtime.StrategicPlanner or {}).ReclaimFieldPos), now) then
-                            reclaimField = reclaimField + 1
-                            acted = true
-                        elseif contestFieldMode
-                            and not factoryTask.Active
-                            and not structureTask.Active
-                            and needBase <= 0
-                            and localThreat < 1.8
-                            and dist <= 380
-                            and TryOpenSurplusExpansionBuild(aiBrain, runtime, eng, mainPos, enemyPos, safeExpandDistance, now) then
-                            dispatchedExpand = dispatchedExpand + 1
-                            acted = true
-                        elseif contestFieldMode
-                            and not factoryTask.Active
-                            and not structureTask.Active
-                            and needBase <= 0
-                            and localThreat < 1.9
-                            and dist <= 420
-                            and TryReclaimEnemyMex(aiBrain, runtime, eng, now) then
-                            reclaimEnemyMex = reclaimEnemyMex + 1
-                            acted = true
-                        end
-                    end
-
-                    if (not acted)
-                        and isIdle
-                        and not constructing
-                        and (constraints.PowerBufferLow == true or hqPowerRecoveryWanted or ShouldScaleBaseEco(runtime, now))
-                        and localThreat < 2.2
-                        and dist <= 360 then
-                        local powerTarget = GetPriorityPowerRecoveryTarget(aiBrain, runtime, mainPos, structureTargetObject, structureTask)
-                        if powerTarget and TryAssignAssistOrRepair(aiBrain, runtime, eng, powerTarget, false, now) then
-                            powerRecoveryCount = powerRecoveryCount + 1
-                            acted = true
-                        elseif TryOpenPowerRecoveryBuild(aiBrain, runtime, eng, mainPos, now) then
-                            powerRecoveryCount = powerRecoveryCount + 1
-                            acted = true
-                        end
-                    end
-
-                    if (not acted)
-                        and factoryTask.Active
-                        and factoryTargetObject
-                        and (factoryTask.AssignedBuilders or 0) < (factoryTask.RequiredBuilders or 0)
-                        and localThreat < 2.2
-                        and dist <= 360
-                        and not eng:IsUnitState('Upgrading')
-                        and ((isIdle and not constructing) or (not constructing and GetCommandQueueLength(eng) <= 2))
-                        and TryAssignAssistOrRepair(aiBrain, runtime, eng, factoryTargetObject, false, now) then
-                        local entityId = GetEntityId(eng)
-                        if entityId then
-                            factoryTask.BuilderIds = factoryTask.BuilderIds or {}
-                            factoryTask.BuilderIds[entityId] = true
-                        end
-                        factoryTask.AssignedBuilders = math.min((factoryTask.RequiredBuilders or 0), (factoryTask.AssignedBuilders or 0) + 1)
-                        forcedFactoryRecover = forcedFactoryRecover + 1
-                        acted = true
-                    end
-
-                    if (not acted)
-                        and isIdle
-                        and not constructing
-                        and structureTask.Active
-                        and structureTargetObject
-                        and (structureTask.AssignedBuilders or 0) < (structureTask.RequiredBuilders or 0)
-                        and localThreat < 2.2
-                        and dist <= 320
-                        and TryAssignAssistOrRepair(aiBrain, runtime, eng, structureTargetObject, false, now) then
-                        local entityId = GetEntityId(eng)
-                        if entityId then
-                            structureTask.BuilderIds = structureTask.BuilderIds or {}
-                            structureTask.BuilderIds[entityId] = true
-                        end
-                        structureTask.AssignedBuilders = math.min((structureTask.RequiredBuilders or 0), (structureTask.AssignedBuilders or 0) + 1)
-                        acted = true
-                    end
-
-                    if (not acted)
-                        and isIdle
-                        and not constructing
-                        and structureTask.Active
-                        and structureTargetObject
-                        and (structureTask.Kind == 'Mex' or structureTask.Kind == 'Power')
-                        and ShouldPersistentSurplusSpend(runtime, now)
-                        and localThreat < 2.0
-                        and dist <= 360
-                        and TryAssignAssistOrRepair(aiBrain, runtime, eng, structureTargetObject, false, now) then
-                        surplusSpendCount = surplusSpendCount + 1
-                        acted = true
-                    end
-
-                    if (not acted) and isIdle and not constructing then
-                        local assistTarget, isUpgradeTarget = GetPriorityUpgradeAssistTarget(aiBrain, runtime, mainPos)
-                        if assistTarget and localThreat < 2.2 and dist <= 360 and TryAssignAssistOrRepair(aiBrain, runtime, eng, assistTarget, isUpgradeTarget, now) then
-                            surplusSpendCount = surplusSpendCount + 1
-                            acted = true
-                        end
-                    end
-
-                    if (not acted)
-                        and isIdle
-                        and not constructing
-                        and (not transitionLock)
-                        and (ShouldPersistentSurplusSpend(runtime, now) or ShouldScaleBaseEco(runtime, now))
-                        and localThreat < 2.0
-                        and dist <= 360 then
-                        local buildAssistTarget = GetPriorityBuildAssistTarget(aiBrain, runtime, mainPos)
-                        if buildAssistTarget and TryAssignAssistOrRepair(aiBrain, runtime, eng, buildAssistTarget, false, now) then
-                            surplusSpendCount = surplusSpendCount + 1
-                            acted = true
-                        end
-                    end
-
-                    if (not acted) and isIdle and not constructing then
-                        local repairTarget = GetPriorityRepairTarget(aiBrain, runtime, mainPos)
-                        if repairTarget and localThreat < 2.2 and dist <= 360 and TryAssignAssistOrRepair(aiBrain, runtime, eng, repairTarget, false, now) then
-                            acted = true
-                        end
-                    end
-
-                    if (not acted)
-                        and isIdle
-                        and not constructing
-                        and ShouldPersistentSurplusSpend(runtime, now)
-                        and localThreat < 1.8
-                        and dist <= 260 then
-                        if TryOpenSurplusExpansionBuild(aiBrain, runtime, eng, mainPos, enemyPos, safeExpandDistance, now) then
-                            dispatchedExpand = dispatchedExpand + 1
-                            surplusSpendCount = surplusSpendCount + 1
-                            acted = true
-                        elseif ShouldScaleBaseEco(runtime, now) and TryOpenPowerRecoveryBuild(aiBrain, runtime, eng, mainPos, now) then
-                            powerRecoveryCount = powerRecoveryCount + 1
-                            surplusSpendCount = surplusSpendCount + 1
-                            acted = true
-                        end
-                    end
-
-                    if isIdle
-                        and not constructing
-                        and (not acted)
-                        and TryReclaimFieldZone(aiBrain, runtime, eng, ((runtime.StrategicPlanner or {}).ReclaimFieldPos), now) then
-                        reclaimField = reclaimField + 1
-                        acted = true
-                    end
-
-                    if isIdle
-                        and not constructing
-                        and (not acted)
-                        and not (ShouldPersistentSurplusSpend(runtime, now) or ShouldScaleBaseEco(runtime, now))
-                        and TryReclaimEnemyMex(aiBrain, runtime, eng, now) then
-                        reclaimEnemyMex = reclaimEnemyMex + 1
-                        acted = true
-                    end
-
-                    local farUnsafe = dist > math.max(230, safeExpandDistance * 0.88) and localThreat > 2 and escort < 3
-                    local earlyOverextend = now < 420 and dist > math.min(350, safeExpandDistance * 0.82) and escort < 2 and localThreat > 1.1
-                    local enemySideRisk = false
-                    if enemyPos then
-                        local distEnemy = Distance2D(pos, enemyPos)
-                        enemySideRisk = dist > 160 and distEnemy < (dist * 0.95) and escort < 3
-                    end
-                    local severeThreat = localThreat > 3.3 and escort < 3
-                    local airRaidRisk = (bomberPanic or raid.ExposedMexUnderAirRaid)
-                        and dist > 110
-                        and escort < 2
-                        and (
-                            localThreat > 0.8
-                            or (raid.ExposedMexThreatPos and Distance2D(pos, raid.ExposedMexThreatPos) < 70)
-                        )
-
-                    if (not acted) and (severeThreat or farUnsafe or (not constructing and (earlyOverextend or enemySideRisk))) then
-                        if RecallEngineer(runtime, eng, mainPos, now, 'threatened') then
-                            threatenedCount = threatenedCount + 1
-                        end
-                    elseif (not acted) and not constructing and airRaidRisk then
-                        if RecallEngineer(runtime, eng, mainPos, now, 'air_raid') then
-                            threatenedCount = threatenedCount + 1
-                        end
-                    elseif (not acted) and not constructing and needBase > 0 and dist > 130 and isIdle and localThreat < 1.9 then
-                        if RecallEngineer(runtime, eng, mainPos, now, 'base_floor') then
-                            recoverCount = recoverCount + 1
-                            needBase = needBase - 1
-                        end
-                    elseif (not acted) and not constructing and factoryTask.Active and (factoryTask.AssignedBuilders or 0) < (factoryTask.RequiredBuilders or 0) and dist > 140 and localThreat < 1.6 and forcedFactoryRecover < math.max(2, factoryTask.RequiredBuilders or 0) then
-                        if RecallEngineer(runtime, eng, mainPos, now, 'factory_task') then
-                            forcedFactoryRecover = forcedFactoryRecover + 1
-                        end
-                    elseif (not acted) and not constructing and severeFactoryStarve and dist > 140 and localThreat < 1.6 and forcedFactoryRecover < 2 then
-                        if RecallEngineer(runtime, eng, mainPos, now, 'factory_starve') then
-                            forcedFactoryRecover = forcedFactoryRecover + 1
-                        end
-                    end
-                end
-            end
-        end
+        ProcessEngineer(aiBrain, runtime, eng, now, ctx)
     end
 
     local radarOrderActive = next(radarReservedBuilderIds) ~= nil
@@ -2624,25 +2646,25 @@ function Update(aiBrain, now)
         if (runtime.ZoneModel and (runtime.ZoneModel.MapControl or 0) < 0.26) or now >= 420 then
             threatCap = 1.55
         end
-        if forwardContestBias or hqPressureEscape then
+        if (policy.ForwardContestBias == true) or hqPressureEscape then
             threatCap = threatCap + 0.15
         end
-        dispatchedExpand = DispatchExpansionEngineer(aiBrain, runtime, now, engineers, mainPos, enemyPos, math.max(420, safeExpandDistance), threatCap)
+        ctx.dispatchedExpand = DispatchExpansionEngineer(aiBrain, runtime, now, engineers, mainPos, enemyPos, math.max(420, safeExpandDistance), threatCap)
     end
 
-    runtime.LastEngineerRecovered = recoverCount
-    runtime.LastEngineerThreatRecalls = threatenedCount
-    runtime.LastEngineerFactoryRecalls = forcedFactoryRecover
+    runtime.LastEngineerRecovered = ctx.recoverCount
+    runtime.LastEngineerThreatRecalls = ctx.threatenedCount
+    runtime.LastEngineerFactoryRecalls = ctx.forcedFactoryRecover
     runtime.LastEngineerStructureRecover = structureTask.AssignedBuilders or 0
-    runtime.LastEngineerExpandDispatch = dispatchedExpand
-    runtime.LastEngineerEnemyMexReclaim = reclaimEnemyMex
-    runtime.LastEngineerReclaimField = reclaimField
-    runtime.LastEngineerPowerRecovery = powerRecoveryCount
-    runtime.LastEngineerSurplusSpend = surplusSpendCount
+    runtime.LastEngineerExpandDispatch = ctx.dispatchedExpand
+    runtime.LastEngineerEnemyMexReclaim = ctx.reclaimEnemyMex
+    runtime.LastEngineerReclaimField = ctx.reclaimField
+    runtime.LastEngineerPowerRecovery = ctx.powerRecoveryCount
+    runtime.LastEngineerSurplusSpend = ctx.surplusSpendCount
 
-    local shouldLog = (recoverCount + threatenedCount + forcedFactoryRecover + dispatchedExpand + reclaimEnemyMex + reclaimField) > 0
-        or powerRecoveryCount > 0
-        or surplusSpendCount > 0
+    local shouldLog = (ctx.recoverCount + ctx.threatenedCount + ctx.forcedFactoryRecover + ctx.dispatchedExpand + ctx.reclaimEnemyMex + ctx.reclaimField) > 0
+        or ctx.powerRecoveryCount > 0
+        or ctx.surplusSpendCount > 0
         or factoryTask.Active
         or structureTask.Active
     if shouldLog and (now - (runtime.LastEngineerDirectorLogTime or -999)) >= 20 then
@@ -2659,13 +2681,13 @@ function Update(aiBrain, now)
         LOG(string.format('*OVERMIND ENGDIR A%d t=%.1f recover=%d threat=%d facRec=%d powerRec=%d surp=%d expand=%d field=%d baseNeed=%d facTask=%d:%s frac=%.2f stall=%.1f asn=%d/%d structTask=%d:%s:%s frac=%.2f stall=%.1f asn=%d/%d near=%d pos=%.1f,%.1f',
             aiBrain:GetArmyIndex(),
             now,
-            recoverCount,
-            threatenedCount,
-            forcedFactoryRecover,
-            powerRecoveryCount,
-            surplusSpendCount,
-            dispatchedExpand,
-            reclaimField,
+            ctx.recoverCount,
+            ctx.threatenedCount,
+            ctx.forcedFactoryRecover,
+            ctx.powerRecoveryCount,
+            ctx.surplusSpendCount,
+            ctx.dispatchedExpand,
+            ctx.reclaimField,
             math.max(0, baseFloor - baseEngineers),
             factoryTask.Active and 1 or 0,
             factoryTask.Domain or 'none',
