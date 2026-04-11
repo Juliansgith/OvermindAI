@@ -1517,6 +1517,7 @@ local function DecideCapacityPlan(runtime, current, constraints, rolePlan)
         or macroObjective == 'land_factory_floor'
     local prioritizeProduction = policy.PrioritizeProduction == true
     local contestMapMode = policy.ContestMapMode == true
+    local focusOnT1Spam = policy.FocusOnT1Spam == true
     local relaxedFactoryTempo = policy.RelaxedFactoryTempo == true
     local suppressEarlyAir = policy.SuppressEarlyAir == true
     local hqPressureEscape = (runtime.MacroController or {}).HQPressureEscape == true
@@ -1694,6 +1695,9 @@ local function DecideCapacityPlan(runtime, current, constraints, rolePlan)
     if prioritizeProduction and secondLandLatched and not constraints.EcoCrash and not constraints.CriticalFactory and not constraints.CriticalStructure then
         landTarget = math.max(landTarget, 3)
     end
+    if focusOnT1Spam and secondLandLatched and current.Factories.Land.Ready >= 2 and not constraints.EcoCrash and not constraints.CriticalFactory and not constraints.CriticalStructure then
+        landTarget = math.max(landTarget, 3)
+    end
     if (planner.TradeTechForTempo or planner.PunishGreed) and secondLandLatched and current.Factories.Land.Ready >= 2 then
         landTarget = math.max(landTarget, 3)
     end
@@ -1714,6 +1718,13 @@ local function DecideCapacityPlan(runtime, current, constraints, rolePlan)
     end
     if liveCombatWindow and current.Factories.Land.Ready >= 3 then
         landTarget = math.max(landTarget, 3)
+    end
+    if focusOnT1Spam
+        and current.Factories.Land.Ready >= 3
+        and not constraints.EcoCrash
+        and not constraints.CriticalFactory
+        and not constraints.CriticalStructure then
+        landTarget = math.max(landTarget, 4)
     end
     if landEmergencyTempo then
         landTarget = math.max(landTarget, math.min(landCap, math.max(3, current.Factories.Land.Total + 1)))
@@ -1739,6 +1750,25 @@ local function DecideCapacityPlan(runtime, current, constraints, rolePlan)
         and not constraints.CriticalFactory
         and not constraints.CriticalStructure then
         landTarget = math.max(landTarget, 4)
+    end
+    if focusOnT1Spam
+        and (eco.MassStored or 0) >= 250
+        and current.Factories.Land.Ready >= 2
+        and not constraints.EcoWeak
+        and not constraints.EcoCrash
+        and not constraints.QueueStarved
+        and not constraints.CriticalFactory
+        and not constraints.CriticalStructure then
+        landTarget = math.max(landTarget, math.min(landCap, current.Factories.Land.Total + 1))
+    end
+    if focusOnT1Spam
+        and (eco.MassStored or 0) >= 220
+        and current.Factories.Land.Ready >= 4
+        and (eco.MassTrend or 0) >= -0.15
+        and not constraints.EcoCrash
+        and not constraints.CriticalFactory
+        and not constraints.CriticalStructure then
+        landTarget = math.max(landTarget, math.min(landCap, 5))
     end
     if secondLandEcoReady and not emergencyAirFactory then
         landTarget = math.max(landTarget, 2)
@@ -1962,6 +1992,13 @@ local function DecideCapacityPlan(runtime, current, constraints, rolePlan)
     if contestScoutAirWindow and not preserveAirWindow then
         airTarget = math.max(airTarget, 1)
     end
+    if focusOnT1Spam and not preserveAirWindow then
+        if current.Factories.Land.Ready < 4 then
+            airTarget = 0
+        else
+            airTarget = math.min(airTarget, math.max(contestScoutAirFloor, math.min(current.Factories.Air.Total, 1)))
+        end
+    end
     if macroObjective == 'first_land_hq' and current.Factories.Land.Ready >= 4 and not completionLock then
         landTarget = math.min(landTarget, math.max(current.Factories.Land.Total, current.Factories.Land.Ready))
     end
@@ -2002,6 +2039,7 @@ local function DecideTechPlan(runtime, current, constraints, confidence, mode)
     local policy = runtime.EcoPolicy or {}
     local prioritizeProduction = policy.PrioritizeProduction == true
     local contestMapMode = policy.ContestMapMode == true
+    local focusOnT1Spam = policy.FocusOnT1Spam == true
     local preferTempoFromSurplus = policy.PreferTempoFromSurplus == true
     local readyLand = (((current.Factories or {}).Land or {}).Ready) or 0
     local frontCovered = constraints.FrontPressure <= 0.18 and constraints.BasePressure <= 0.14 and constraints.AirGuardPressure <= 0.16
@@ -2029,6 +2067,15 @@ local function DecideTechPlan(runtime, current, constraints, confidence, mode)
         landBias = landBias + (constraints.LandPanic and 0.06 or 0)
         airBias = airBias + (constraints.AirPanic and 0.06 or 0)
         ecoBias = ecoBias - 0.08
+    end
+    if focusOnT1Spam then
+        eligible = false
+        landBias = landBias + 0.22
+        ecoBias = ecoBias - 0.28
+        airBias = airBias - 0.06
+        if blockReason == 'none' then
+            blockReason = 't1_spam'
+        end
     end
 
     if planner.TradeMapForTech then
@@ -2126,6 +2173,11 @@ local function DecideTechPlan(runtime, current, constraints, confidence, mode)
         upgradeExtractors = false
         aggressiveExtractors = false
         extractorReason = 'scouting_debt'
+    end
+    if focusOnT1Spam and not overflowWindow and not constraints.StrongSurplusWindow then
+        upgradeExtractors = false
+        aggressiveExtractors = false
+        extractorReason = 't1_spam'
     end
     if (planner.TradeTechForTempo or planner.PunishGreed) and not overflowWindow and not constraints.SurplusSpendWindow then
         upgradeExtractors = false

@@ -299,6 +299,7 @@ local function PickMexTarget(aiBrain, runtime, state)
     local tempoMode = planner.TradeTechForTempo or planner.PunishGreed or techPlan.ExtractorUpgradeReason == 'tempo_mode'
     local prioritizeProduction = policy.PrioritizeProduction == true
     local contestMapMode = policy.ContestMapMode == true
+    local focusOnT1Spam = policy.FocusOnT1Spam == true
     local localMexOnly = policy.LocalMexUpgradeOnly == true
     local localMexConcurrentCap = math.max(1, policy.LocalMexUpgradeMaxConcurrent or 2)
     local frontSecure = policy.FrontSecure == true
@@ -395,6 +396,9 @@ local function PickMexTarget(aiBrain, runtime, state)
     elseif frontUpgradeReopen and budgetT2Cap >= 1 then
         allowGeneralT2 = true
     end
+    if focusOnT1Spam then
+        allowGeneralT2 = false
+    end
 
     local allowTech3 = techPlan.UpgradeExtractors == true
         and not tempoMode
@@ -413,7 +417,7 @@ local function PickMexTarget(aiBrain, runtime, state)
     if strongSurplusWindow and not tempoMode and not scoutingDebt and readyLand >= 5 and powerReady >= 5 and mexReady >= 5 then
         allowTech3 = true
     end
-    if contestMapMode then
+    if contestMapMode or focusOnT1Spam then
         allowTech3 = false
     end
     local dynamicT2Cap = math.max(budgetT2Cap, ComputeDynamicMexCap(eco, readyLand, totalLand, powerReady, mexReady, surplusSpendWindow, strongSurplusWindow))
@@ -450,6 +454,12 @@ local function PickMexTarget(aiBrain, runtime, state)
         or macroObjective == 'first_t2_engineer'
         or macroObjective == 'first_t2_power') then
         state.Reason = 'objective_hold'
+        state.Cap = 0
+        return
+    end
+
+    if focusOnT1Spam and not strongSurplusWindow and not frontUpgradeReopen then
+        state.Reason = 't1_spam'
         state.Cap = 0
         return
     end

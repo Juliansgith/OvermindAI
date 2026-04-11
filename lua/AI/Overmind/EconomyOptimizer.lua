@@ -14,11 +14,51 @@ local function TableCount(t)
     return t and table.getn(t) or 0
 end
 
-local function ComputeContestMapStructure(runtime)
+local function Distance2D(a, b)
+    local dx = (a[1] or 0) - (b[1] or 0)
+    local dz = (a[3] or 0) - (b[3] or 0)
+    return math.sqrt((dx * dx) + (dz * dz))
+end
+
+local function IsCivilianArmyName(name)
+    if not name or name == 'NEUTRAL_CIVILIAN' then
+        return true
+    end
+    if ScenarioInfo and ScenarioInfo.ArmySetup and ScenarioInfo.ArmySetup[name] then
+        local personality = string.lower(ScenarioInfo.ArmySetup[name].AIPersonality or '')
+        if string.find(personality, 'civilian') ~= nil then
+            return true
+        end
+    end
+    return false
+end
+
+local function CountActivePlayerBrains()
+    local count = 0
+    if not ArmyBrains then
+        return 2
+    end
+
+    for _, brain in ArmyBrains do
+        if brain and not IsCivilianArmyName(brain.Name) then
+            count = count + 1
+        end
+    end
+
+    return math.max(2, count)
+end
+
+local function ComputeContestMapStructure(aiBrain, runtime)
     local graph = runtime.ZoneGraph or {}
     local zone = runtime.ZoneModel or {}
     local nodes = graph.Nodes or {}
     local navMarkerCount = zone.NavMarkerCount or graph.WaterZones or 0
+    local ownPos = graph.OwnMainPos or zone.OwnMainPos
+    if not ownPos and aiBrain and aiBrain.GetArmyStartPos then
+        local sx, sz = aiBrain:GetArmyStartPos()
+        ownPos = { sx, 0, sz }
+    end
+    local enemyPos = graph.EnemyMainPos or runtime.PrimaryEnemyPos or false
     local metrics = {
         NavMarkerCount = navMarkerCount or 0,
         TotalLandZones = 0,
@@ -26,12 +66,16 @@ local function ComputeContestMapStructure(runtime)
         OuterMass = 0,
         ForwardOwnedMass = 0,
         OuterMexShare = 0,
+        StartZoneMexShare = 0,
         OuterHoldShare = 0,
         SafeForwardMexCount = 0,
         ContestableZoneCount = 0,
         LandRouteDepth = 0,
         FrontSecure = false,
         StructuralContestMap = false,
+        PlayerCount = CountActivePlayerBrains(),
+        DirectEnemyDistance = (ownPos and enemyPos) and Distance2D(ownPos, enemyPos) or 999,
+        FocusOnT1Spam = false,
     }
 
     if navMarkerCount >= 3 then
@@ -105,6 +149,28 @@ local function ComputeContestMapStructure(runtime)
             or (metrics.ContestableZoneCount >= 3 and metrics.LandRouteDepth >= 1.7)
         )
 
+    local mexPercentThreshold = 0.45
+    if metrics.TotalMass > 80 or metrics.PlayerCount >= 4 then
+        if metrics.TotalMass > 130 then
+            mexPercentThreshold = 0.30
+        else
+            mexPercentThreshold = 0.375
+        end
+    end
+    local outsideStartThreshold = 1 - mexPercentThreshold
+    local smallMapLike = metrics.TotalLandZones <= 16
+        or metrics.DirectEnemyDistance <= 1100
+        or metrics.LandRouteDepth <= 2.6
+    metrics.StartZoneMexShare = (metrics.TotalMass > 0) and Clamp(1 - metrics.OuterMexShare, 0, 1) or 0
+    metrics.FocusOnT1Spam =
+        metrics.StructuralContestMap
+        and metrics.PlayerCount <= 4
+        and metrics.TotalMass > 0
+        and metrics.TotalMass < 150
+        and smallMapLike
+        and metrics.OuterMexShare >= outsideStartThreshold
+        and (metrics.SafeForwardMexCount >= 2 or metrics.ContestableZoneCount >= 2)
+
     return metrics
 end
 
@@ -119,7 +185,7 @@ local function DetermineMacroPhase(aiBrain, runtime, eco, opp, recovery, now)
     local intel = runtime.IntelModel or {}
     local graph = runtime.ZoneGraph or {}
     local zone = runtime.ZoneModel or {}
-    local structure = ComputeContestMapStructure(runtime)
+    local structure = ComputeContestMapStructure(aiBrain, runtime)
     local mexCount = GetUnitCount(aiBrain, categories.MASSEXTRACTION * categories.STRUCTURE)
     local landFactories = GetUnitCount(aiBrain, categories.FACTORY * categories.LAND * categories.STRUCTURE)
     local airFactories = GetUnitCount(aiBrain, categories.FACTORY * categories.AIR * categories.STRUCTURE)
@@ -152,6 +218,7 @@ local function DetermineMacroPhase(aiBrain, runtime, eco, opp, recovery, now)
     local relativePower = opp.RelativePower or 1
     local stagnation = recovery.StagnationTime or 0
     local landContestMap = structure.StructuralContestMap or (navMarkerCount < 3 and zoneCount >= 6)
+    local focusOnT1Spam = structure.FocusOnT1Spam == true
     local contestTempoWindow = landContestMap
         and contestedZones >= 2
         and now >= 180
@@ -182,6 +249,17 @@ local function DetermineMacroPhase(aiBrain, runtime, eco, opp, recovery, now)
 
     if weakEnergy and airFactories > 0 and totalFactories >= 3 then
         return 'recover', counts
+    end
+
+    if focusOnT1Spam
+        and now <= 1200
+        and mexCount >= 4
+        and landFactories >= 1
+        and massIncome >= 3.2
+        and energyIncome >= 40
+        and not weakMass
+        and not weakEnergy then
+        return 'pressure', counts
     end
 
     if now >= 900 and stableFactoryFeed and mexCount >= 7 and relativePower >= 0.92 and mapControl >= 0.38 then
@@ -251,12 +329,13 @@ function UpdatePolicy(aiBrain, now)
     runtime.MacroPhase = phase
     runtime.MacroCounts = macroCounts
 
-    local structure = ComputeContestMapStructure(runtime)
+    local structure = ComputeContestMapStructure(aiBrain, runtime)
     local mapControl = intel.MapControl or graph.MapControl or zone.MapControl or 0
     local contestedZones = intel.ContestedZones or graph.ContestedZones or 0
     local zoneCount = TableCount(graph.Nodes or {})
     local navMarkerCount = structure.NavMarkerCount or zone.NavMarkerCount or graph.WaterZones or 0
     local landContestMap = structure.StructuralContestMap or (navMarkerCount < 3 and zoneCount >= 6)
+    local focusOnT1Spam = structure.FocusOnT1Spam == true
     local stableTempoEco = (eco.MassIncome or 0) >= 3.6
         and (eco.EnergyIncome or 0) >= 50
         and massTrend >= -0.08
@@ -268,7 +347,10 @@ function UpdatePolicy(aiBrain, now)
         and now <= 1200
         and phase ~= 'bootstrap'
         and phase ~= 'recover'
-    local productionFirstWindow = contestMapMode
+    if focusOnT1Spam then
+        contestMapMode = true
+    end
+    local productionFirstWindow = (contestMapMode or focusOnT1Spam)
         and stableTempoEco
         and mapControl <= 0.68
         and (opp.RelativePower or 1) <= 1.08
@@ -276,6 +358,7 @@ function UpdatePolicy(aiBrain, now)
         or planner.PunishGreed
         or goal == 'all_in'
         or goal == 'raid'
+        or focusOnT1Spam
         or productionFirstWindow
         or (stableTempoEco and phase == 'pressure' and contestedZones >= 2 and now < 900 and mapControl < 0.55)
     local frontSecureUpgradeWindow = landContestMap
@@ -283,6 +366,7 @@ function UpdatePolicy(aiBrain, now)
         and stableTempoEco
         and mapControl >= 0.44
         and contestedZones <= 1
+        and (not focusOnT1Spam or (now >= 900 and structure.OuterHoldShare >= 0.62))
     local forwardContestBias = (contestMapMode or prioritizeProduction)
         and (
             not structure.FrontSecure
@@ -319,11 +403,15 @@ function UpdatePolicy(aiBrain, now)
     policy.ForwardContestBias = false
     policy.ReclaimPressureMode = false
     policy.ProductionTempoBias = 0
+    policy.FocusOnT1Spam = false
     policy.OuterMexShare = structure.OuterMexShare or 0
+    policy.StartZoneMexShare = structure.StartZoneMexShare or 0
     policy.OuterHoldShare = structure.OuterHoldShare or 0
     policy.SafeForwardMexCount = structure.SafeForwardMexCount or 0
     policy.ContestableZoneCount = structure.ContestableZoneCount or 0
     policy.LandRouteDepth = structure.LandRouteDepth or 0
+    policy.PlayerCount = structure.PlayerCount or 2
+    policy.DirectEnemyDistance = structure.DirectEnemyDistance or 999
     policy.FrontSecure = structure.FrontSecure and true or false
     policy.StructuralContestMap = structure.StructuralContestMap and true or false
     policy.EnergyNeedRatio = 0.42
@@ -384,13 +472,14 @@ function UpdatePolicy(aiBrain, now)
     policy.ContestMapMode = contestMapMode and true or false
     policy.PrioritizeProduction = prioritizeProduction and true or false
     policy.PreferTempoFromSurplus = preferTempoFromSurplus and true or false
-    policy.LocalMexUpgradeOnly = ((contestMapMode or prioritizeProduction) and not frontSecureUpgradeWindow) and true or false
-    policy.LocalMexUpgradeMaxConcurrent = ((contestMapMode or prioritizeProduction) and not frontSecureUpgradeWindow) and 1 or 2
-    policy.RelaxedFactoryTempo = (contestMapMode or prioritizeProduction) and true or false
-    policy.SuppressEarlyAir = (contestMapMode or prioritizeProduction) and true or false
+    policy.FocusOnT1Spam = focusOnT1Spam and true or false
+    policy.LocalMexUpgradeOnly = ((contestMapMode or prioritizeProduction or focusOnT1Spam) and not frontSecureUpgradeWindow) and true or false
+    policy.LocalMexUpgradeMaxConcurrent = ((contestMapMode or prioritizeProduction or focusOnT1Spam) and not frontSecureUpgradeWindow) and 1 or 2
+    policy.RelaxedFactoryTempo = (contestMapMode or prioritizeProduction or focusOnT1Spam) and true or false
+    policy.SuppressEarlyAir = (contestMapMode or prioritizeProduction or focusOnT1Spam) and true or false
     policy.ForwardContestBias = forwardContestBias and true or false
     policy.ReclaimPressureMode = reclaimPressureMode and true or false
-    policy.ProductionTempoBias = (contestMapMode and 0.28) or (prioritizeProduction and 0.16) or 0
+    policy.ProductionTempoBias = (focusOnT1Spam and 0.42) or (contestMapMode and 0.28) or (prioritizeProduction and 0.16) or 0
 
     if now < 420 then
         policy.EngineerReserveMin = 5
@@ -637,6 +726,33 @@ function UpdatePolicy(aiBrain, now)
         policy.AirFactoryMinTime = policy.AirFactoryMinTime + 60
         policy.AirFactoryMinEnergyIncome = policy.AirFactoryMinEnergyIncome + 6
         policy.PrimaryFactorySoftCap = policy.PrimaryFactorySoftCap + 1
+    end
+
+    if focusOnT1Spam then
+        policy.FactoryMassIncome = math.max(2.2, policy.FactoryMassIncome - 1.1)
+        policy.FactoryEnergyIncome = math.max(36, policy.FactoryEnergyIncome - 18)
+        policy.FactoryMassRatio = math.min(policy.FactoryMassRatio, 0.24)
+        policy.FactoryEnergyRatio = math.min(policy.FactoryEnergyRatio, 0.24)
+        policy.FactoryMinMassTrend = math.min(policy.FactoryMinMassTrend, -0.08)
+        policy.FactoryMinEnergyTrend = math.min(policy.FactoryMinEnergyTrend, -4)
+        policy.FactoryMassPerFactory = math.max(0.82, policy.FactoryMassPerFactory - 0.18)
+        policy.FactoryToMexCap = math.max(policy.FactoryToMexCap, 1.14)
+        policy.PgenPerMexCap = math.min(policy.PgenPerMexCap, 1.65)
+        policy.EngineerFactoryRatio = math.max(0.8, policy.EngineerFactoryRatio - 0.08)
+        policy.T2MexMinTime = policy.T2MexMinTime + 150
+        policy.UpgradeMassIncome = policy.UpgradeMassIncome + 1.8
+        policy.UpgradeEnergyIncome = policy.UpgradeEnergyIncome + 22
+        policy.PrimaryFactorySoftCap = policy.PrimaryFactorySoftCap + 2
+        policy.AirFactoryMinMex = policy.AirFactoryMinMex + 2
+        policy.AirFactoryMinTime = policy.AirFactoryMinTime + 180
+        policy.AirFactoryMinEnergyIncome = policy.AirFactoryMinEnergyIncome + 12
+        policy.MaxAirBomberShare = math.max(0.12, policy.MaxAirBomberShare - 0.1)
+        policy.MassFabMassRatio = math.max(policy.MassFabMassRatio, 0.98)
+        policy.MassFabEnergyRatio = math.max(policy.MassFabEnergyRatio, 0.98)
+        policy.MassFabEnergyIncome = policy.MassFabEnergyIncome + 400
+        policy.MassFabMassTrend = policy.MassFabMassTrend + 0.2
+        policy.MassFabEnergyTrend = policy.MassFabEnergyTrend + 40
+        policy.MassFabMinT3Mex = policy.MassFabMinT3Mex + 2
     end
 
     policy.FactoryMassRatio = Clamp(policy.FactoryMassRatio, 0.18, 0.5)

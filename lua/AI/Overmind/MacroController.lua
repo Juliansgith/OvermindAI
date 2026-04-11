@@ -166,6 +166,7 @@ end
 
 local function DetermineDesiredPhase(aiBrain, runtime, now)
     local eco = runtime.EcoState or {}
+    local policy = runtime.EcoPolicy or {}
     local recovery = runtime.Recovery or {}
     local raid = runtime.RaidDefense or {}
     local opp = runtime.OpponentModel or {}
@@ -200,9 +201,16 @@ local function DetermineDesiredPhase(aiBrain, runtime, now)
         and now < 840
         and mapControl <= 0.62
         and (opp.RelativePower or 1) <= 1.08
-    local starterMexTarget = contestTempoMap and 3 or 4
+    local focusOnT1Spam = policy.FocusOnT1Spam == true
+        or (
+            contestTempoMap
+            and structure.OuterMexShare >= 0.55
+            and (structure.SafeForwardMexCount >= 2 or structure.ContestableZoneCount >= 2)
+            and now < 960
+        )
+    local starterMexTarget = (contestTempoMap or focusOnT1Spam) and 3 or 4
     local starterMexDeadline = contestTempoMap and 210 or 300
-    local landFactoryFloorTarget = contestTempoMap and 2 or 3
+    local landFactoryFloorTarget = (contestTempoMap or focusOnT1Spam) and 2 or 3
     local hqPressureEscape = t2LandFactories <= 0
         and activeLandFactoryUpgrades <= 0
         and readyLand >= 2
@@ -236,6 +244,7 @@ local function DetermineDesiredPhase(aiBrain, runtime, now)
         FrontPressure = frontPressure,
         BasePressure = basePressure,
         HQPressureEscape = hqPressureEscape and true or false,
+        FocusOnT1Spam = focusOnT1Spam and true or false,
         ACUCrisisActive = acuCrisisActive and true or false,
     }
 
@@ -254,6 +263,19 @@ local function DetermineDesiredPhase(aiBrain, runtime, now)
     if t2LandFactories <= 0 then
         if hqPressureEscape then
             return 'mass_consolidation', 'hq_pressure_escape', facts
+        end
+        if focusOnT1Spam then
+            if readyLand >= 4
+                and readyMex >= 5
+                and readyPower >= 4
+                and massBudget >= 8.5
+                and mapControl >= 0.42
+                and not ecoCrash
+                and not underHarass
+                and not landPanic then
+                return 'first_land_hq', 't1_spam_exit', facts
+            end
+            return 'mass_consolidation', 'focus_t1_spam', facts
         end
         if readyLand >= landFactoryFloorTarget and readyMex >= 4 and readyPower >= 3 then
             if activeLandFactoryUpgrades > 0 then
@@ -386,12 +408,13 @@ function Module.Update(aiBrain, now)
     if now - (state.LastLogTime or -999) >= 24 then
         state.LastLogTime = now
         LOG(string.format(
-            '*OVERMIND MACROCTRL A%d t=%.1f phase=%s reason=%s lock=%d land=%d/%d mex=%d pwr=%d hq=%d t2eng=%d t2pwr=%d budget=%.1f debt=%d outer=%.2f sfwd=%d contest=%d depth=%.1f',
+            '*OVERMIND MACROCTRL A%d t=%.1f phase=%s reason=%s lock=%d spam=%d land=%d/%d mex=%d pwr=%d hq=%d t2eng=%d t2pwr=%d budget=%.1f debt=%d outer=%.2f sfwd=%d contest=%d depth=%.1f',
             aiBrain:GetArmyIndex(),
             now,
             phase,
             reason,
             state.TransitionLocked and 1 or 0,
+            facts.FocusOnT1Spam and 1 or 0,
             facts.ReadyLandFactories or 0,
             facts.TotalLandFactories or 0,
             facts.ReadyMexes or 0,

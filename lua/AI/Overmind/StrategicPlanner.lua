@@ -335,6 +335,7 @@ local function BuildSignals(aiBrain, runtime, now)
         ACUCrisisActive = acuCrisisActive,
         PrioritizeProduction = prioritizeProduction,
         ContestMapMode = contestMapMode,
+        FocusOnT1Spam = policy.FocusOnT1Spam == true,
         PreferTempoFromSurplus = preferTempoFromSurplus,
         StructuralContestMap = structuralContestMap,
         MacroObjective = macroObjective,
@@ -528,6 +529,14 @@ local function ScoreDirectives(signals, primaryTheater)
         scores.punish_greed = scores.punish_greed + 0.2
         scores.expand = scores.expand - 0.2
     end
+    if signals.FocusOnT1Spam then
+        scores.trade_tech_for_tempo = scores.trade_tech_for_tempo + 1.5
+        scores.punish_greed = scores.punish_greed + 0.7
+        scores.trade_map_for_tech = scores.trade_map_for_tech - 1.6
+        scores.expand = scores.expand - 0.55
+        scores.stabilize = scores.stabilize - 0.45
+        scores.force_air_answer = scores.force_air_answer - (signals.ApproachClose and 0.2 or 1.0)
+    end
     if signals.PreferTempoFromSurplus then
         scores.trade_tech_for_tempo = scores.trade_tech_for_tempo + 0.5
         scores.trade_map_for_tech = scores.trade_map_for_tech - 0.4
@@ -546,12 +555,15 @@ end
 local function BuildDirectiveState(signals, primaryTheater, directive)
     local punishGreed = directive == 'punish_greed'
         or signals.GreedWindow
+        or signals.FocusOnT1Spam
         or (signals.PrioritizeProduction and signals.AttackWindow)
     local tradeMapForTech = directive == 'trade_map_for_tech'
         and not signals.PrioritizeProduction
+        and not signals.FocusOnT1Spam
     local tradeTechForTempo = directive == 'trade_tech_for_tempo'
         or (directive == 'punish_greed' and not signals.DurableSurplus)
         or signals.PrioritizeProduction
+        or signals.FocusOnT1Spam
     local forceAirAnswer = (directive == 'force_air_answer' or signals.ForceAirAnswerCandidate)
         and not (signals.MacroObjective == 'first_land_hq' or signals.MacroObjective == 'first_t2_engineer')
         and not signals.TransitionLocked
@@ -583,8 +595,8 @@ local function BuildDirectiveState(signals, primaryTheater, directive)
         techBias = -0.35
     elseif tradeTechForTempo or punishGreed then
         tempoMode = 'tempo'
-        tempoBias = signals.PrioritizeProduction and 0.68 or 0.55
-        techBias = signals.PrioritizeProduction and -0.58 or -0.45
+        tempoBias = signals.FocusOnT1Spam and 0.82 or (signals.PrioritizeProduction and 0.68 or 0.55)
+        techBias = signals.FocusOnT1Spam and -0.72 or (signals.PrioritizeProduction and -0.58 or -0.45)
     elseif directive == 'expand' then
         tempoMode = 'balanced'
         tempoBias = 0.18
@@ -826,6 +838,7 @@ function Module.Update(aiBrain, now)
         RecoveryActive = signals.RecoveryActive,
         ApproachThreat = signals.ApproachThreat,
         ApproachDistance = signals.ApproachDistance,
+        FocusOnT1Spam = signals.FocusOnT1Spam and true or false,
         OuterRetentionActive = signals.OuterRetentionActive and true or false,
         ReclaimFirst = signals.ReclaimFirst and true or false,
         OuterContestValue = signals.OuterContestValue or 0,
@@ -835,7 +848,7 @@ function Module.Update(aiBrain, now)
 
     if now - (state.LastLogTime or -999) >= 30 then
         state.LastLogTime = now
-        LOG(string.format('*OVERMIND STRAT A%d t=%.1f theater=%s dir=%s raid=%s:%.2f tempo=%s tb=%.2f tech=%.2f air=%d greed=%d outer=%d reclaim=%.0f focus=%s conf=%.2f map=%.2f press=%.1f/%.1f/%.1f',
+        LOG(string.format('*OVERMIND STRAT A%d t=%.1f theater=%s dir=%s raid=%s:%.2f tempo=%s tb=%.2f tech=%.2f air=%d greed=%d spam=%d outer=%d reclaim=%.0f focus=%s conf=%.2f map=%.2f press=%.1f/%.1f/%.1f',
             aiBrain:GetArmyIndex(),
             now,
             state.PrimaryTheater or 'Front',
@@ -847,6 +860,7 @@ function Module.Update(aiBrain, now)
             state.TechBias or 0,
             state.ForceAirAnswer and 1 or 0,
             state.PunishGreed and 1 or 0,
+            state.FocusOnT1Spam and 1 or 0,
             state.OuterRetentionActive and 1 or 0,
             state.ReclaimFieldScore or 0,
             state.FocusReason or 'none',
