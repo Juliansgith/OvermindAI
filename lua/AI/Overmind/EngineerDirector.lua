@@ -1189,23 +1189,88 @@ local function GetPriorityPowerRecoveryTarget(aiBrain, runtime, mainPos, structu
     return best
 end
 
-local function ShouldForceFinishPower(aiBrain, runtime, mainPos, structureTargetObject, structureTask)
-    local powerTarget = GetPriorityPowerRecoveryTarget(aiBrain, runtime, mainPos, structureTargetObject, structureTask)
-    if not powerTarget or powerTarget.Dead then
-        return false, false
+local function GetPriorityMexRecoveryTarget(aiBrain, runtime, mainPos, structureTargetObject, structureTask)
+    if not aiBrain or not mainPos then
+        return false
     end
 
-    local fraction = GetFraction(powerTarget)
+    if structureTask and structureTask.Active and structureTask.Kind == 'Mex' and structureTargetObject and not structureTargetObject.Dead then
+        return structureTargetObject
+    end
+
+    local best = false
+    local bestScore = -999999
+    local units = aiBrain:GetListOfUnits(MexCategory, false, true) or {}
+    for _, unit in units do
+        if unit and not unit.Dead and not unit:IsUnitState('Upgrading') then
+            local pos = unit.GetPosition and unit:GetPosition() or false
+            if pos then
+                local dist = Distance2D(pos, mainPos)
+                if dist <= 520 then
+                    local fraction = GetFraction(unit)
+                    if fraction < 0.995 then
+                        local threat = aiBrain:GetThreatAtPosition(pos, 1, true, 'AntiSurface') or 0
+                        if threat <= 2.8 then
+                            local score = 300 + (fraction * 180) - (dist * 0.18)
+                            if fraction >= 0.35 then
+                                score = score + 120
+                            end
+                            if fraction >= 0.7 then
+                                score = score + 140
+                            end
+                            if score > bestScore then
+                                bestScore = score
+                                best = unit
+                            end
+                        end
+                    end
+                end
+            end
+        end
+    end
+
+    return best
+end
+
+local function ShouldForceFinishEcoStructure(aiBrain, runtime, mainPos, structureTargetObject, structureTask)
+    local powerTarget = GetPriorityPowerRecoveryTarget(aiBrain, runtime, mainPos, structureTargetObject, structureTask)
+    local mexTarget = GetPriorityMexRecoveryTarget(aiBrain, runtime, mainPos, structureTargetObject, structureTask)
     local eco = runtime and runtime.EcoState or {}
     local constraints = (((runtime or {}).ProductionDirector or {}).ConstraintState or {})
     local bootstrapPowerNeed = NeedsBootstrapPower(aiBrain, runtime)
+    local bestTarget = false
+    local bestKind = false
+    local bestScore = -999999
 
-    local forceFinish = bootstrapPowerNeed
-        or constraints.PowerBufferLow == true
-        or fraction >= 0.35
-        or (CountNearbyUnfinishedPower(aiBrain, mainPos, 220) > 0 and (eco.MassStorageRatio or 0) >= 0.06)
+    if powerTarget and not powerTarget.Dead then
+        local fraction = GetFraction(powerTarget)
+        local score = (bootstrapPowerNeed and 1000 or 0)
+            + ((constraints.PowerBufferLow == true) and 700 or 0)
+            + 500
+            + (fraction * 300)
+            + ((fraction >= 0.35) and 180 or 0)
+        if score > bestScore then
+            bestScore = score
+            bestTarget = powerTarget
+            bestKind = 'Power'
+        end
+    end
 
-    return forceFinish, powerTarget
+    if mexTarget and not mexTarget.Dead then
+        local fraction = GetFraction(mexTarget)
+        local score = 420
+            + (fraction * 260)
+            + ((fraction >= 0.35) and 180 or 0)
+            + ((fraction >= 0.7) and 120 or 0)
+            + (((eco.MassStorageRatio or 0) <= 0.18) and 120 or 0)
+        if score > bestScore then
+            bestScore = score
+            bestTarget = mexTarget
+            bestKind = 'Mex'
+        end
+    end
+
+    return bestTarget ~= false, bestTarget, bestKind
 end
 
 local function TryOpenPowerRecoveryBuild(aiBrain, runtime, eng, mainPos, now)
@@ -1216,7 +1281,7 @@ local function TryOpenPowerRecoveryBuild(aiBrain, runtime, eng, mainPos, now)
     if now < ((runtime.LastPowerRecoveryIssueTime or -999) + 8) then
         return false
     end
-    if CountNearbyUnfinishedPower(aiBrain, mainPos, 180) >= 1 then
+    if CountNearbyUnfinishedPower(aiBrain, mainPos, 260) >= 1 then
         return false
     end
 
@@ -1316,7 +1381,7 @@ local function TryOpenSurplusExpansionBuild(aiBrain, runtime, eng, mainPos, enem
     if now < ((runtime.LastSurplusExpansionIssueTime or -999) + 10) then
         return false
     end
-    if CountUnfinishedMexes(aiBrain, mainPos, math.max(520, safeExpandDistance)) >= 2 then
+    if CountUnfinishedMexes(aiBrain, mainPos, math.max(520, safeExpandDistance)) >= 1 then
         return false
     end
 
@@ -2133,12 +2198,16 @@ local function ProcessEngineer(aiBrain, runtime, eng, now, ctx)
 
     if isIdle and not constructing then
         if ctx.structureTask.Active
-            and ctx.structureTask.Kind == 'Power'
+            and (ctx.structureTask.Kind == 'Power' or ctx.structureTask.Kind == 'Mex')
             and ctx.structureTargetObject
             and localThreat < 2.2
             and dist <= 360
             and TryAssignAssistOrRepair(aiBrain, runtime, eng, ctx.structureTargetObject, false, now) then
-            ctx.powerRecoveryCount = ctx.powerRecoveryCount + 1
+            if ctx.structureTask.Kind == 'Power' then
+                ctx.powerRecoveryCount = ctx.powerRecoveryCount + 1
+            else
+                ctx.surplusSpendCount = ctx.surplusSpendCount + 1
+            end
             acted = true
         elseif ctx.macroPhase == 'starter_mex_claim'
             and localThreat < 1.8
@@ -2474,18 +2543,18 @@ function Update(aiBrain, now)
         reservedStructureBuilderIds[id] = value
     end
     local structureTargetObject = false
-    local forceFinishPower, forcedPowerTarget = ShouldForceFinishPower(aiBrain, runtime, mainPos, false, false)
-    if (not factoryTaskCritical) or forceFinishPower then
+    local forceFinishEco, forcedEcoTarget, forcedEcoKind = ShouldForceFinishEcoStructure(aiBrain, runtime, mainPos, false, false)
+    if (not factoryTaskCritical) or forceFinishEco then
         local trackedStructure, trackedPos, trackedFraction, trackedKind, trackedPriority = FindTrackedUnfinishedStructure(aiBrain, structureTask)
         local structure, structurePos, structureFraction, structureKind, structurePriority = FindBestUnfinishedStructure(aiBrain, runtime, mainPos)
 
-        if forceFinishPower and forcedPowerTarget and not forcedPowerTarget.Dead then
-            local forcedPos = forcedPowerTarget.GetPosition and forcedPowerTarget:GetPosition() or false
+        if forceFinishEco and forcedEcoTarget and not forcedEcoTarget.Dead then
+            local forcedPos = forcedEcoTarget.GetPosition and forcedEcoTarget:GetPosition() or false
             if forcedPos then
-                structure = forcedPowerTarget
+                structure = forcedEcoTarget
                 structurePos = forcedPos
-                structureFraction = GetFraction(forcedPowerTarget)
-                structureKind = 'Power'
+                structureFraction = GetFraction(forcedEcoTarget)
+                structureKind = forcedEcoKind or 'Structure'
                 structurePriority = 1000 + (structureFraction * 100)
             end
         end
@@ -2605,6 +2674,8 @@ function Update(aiBrain, now)
                 structureTask.StickyUntil = math.max(structureTask.StickyUntil or -999, now + stickyDuration + 10)
             elseif structureKind == 'Power' and structureFraction >= 0.35 then
                 structureTask.StickyUntil = math.max(structureTask.StickyUntil or -999, now + stickyDuration + 16)
+            elseif structureKind == 'Mex' and structureFraction >= 0.35 then
+                structureTask.StickyUntil = math.max(structureTask.StickyUntil or -999, now + stickyDuration + 14)
             end
             if transitionLock
                 and structureTask.Active

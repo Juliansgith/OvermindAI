@@ -175,6 +175,22 @@ local function FindNearbyStarterStructure(aiBrain, homePos, powerNeeded, radarNe
     return best
 end
 
+local function HasUnfinishedStarterEco(aiBrain, homePos)
+    local targets = aiBrain:GetListOfUnits(StarterPowerCategory + StarterMexCategory, false, true) or {}
+    for _, unit in targets do
+        if unit and not unit.Dead and not unit:IsUnitState('Upgrading') then
+            local fraction = GetFraction(unit)
+            if fraction < 0.995 then
+                local pos = unit.GetPosition and unit:GetPosition() or false
+                if pos and Distance2D(pos, homePos) <= 180 then
+                    return true
+                end
+            end
+        end
+    end
+    return false
+end
+
 local function HasFriendlyMexAtPos(aiBrain, pos)
     return (aiBrain:GetNumUnitsAroundPoint(categories.STRUCTURE * categories.MASSEXTRACTION, pos, 8, 'Ally') or 0) > 0
 end
@@ -302,7 +318,17 @@ local function TryExecuteStarterTask(aiBrain, runtime, acu, homePos, director, c
         and mexReady < mexFloor
     local mexPreferred = starterMexRush and not criticalPowerNeeded
 
-    if readyLandFactories >= 1 and IssueBuildMobile then
+    local repairTarget = FindNearbyStarterStructure(aiBrain, homePos, powerNeeded, radarNeeded, mexPreferred)
+    if repairTarget and IssueRepair then
+        IssueRepair({ acu }, repairTarget)
+        runtime.ACUSafetyLockUntil = math.max(runtime.ACUSafetyLockUntil or -999, now + 6)
+        runtime.ACUHardBuildLockUntil = math.max(runtime.ACUHardBuildLockUntil or -999, now + 10)
+        return true
+    end
+
+    local unfinishedStarterEco = HasUnfinishedStarterEco(aiBrain, homePos)
+
+    if readyLandFactories >= 1 and IssueBuildMobile and not unfinishedStarterEco then
         local issuedStarterQueue = false
         local anchor = GetStarterFactoryAnchor(aiBrain, homePos)
 
@@ -312,18 +338,21 @@ local function TryExecuteStarterTask(aiBrain, runtime, acu, homePos, director, c
             if powerBp and powerPos then
                 IssueBuildMobile({ acu }, powerPos, powerBp, {})
                 issuedStarterQueue = true
+                runtime.ACUSafetyLockUntil = math.max(runtime.ACUSafetyLockUntil or -999, now + 6)
+                runtime.ACUHardBuildLockUntil = math.max(runtime.ACUHardBuildLockUntil or -999, now + 20)
+                return true
             end
         end
 
         if mexReady < mexFloor then
             local mexBp = PickBuildableBlueprint(acu, StarterMexCategory)
-            local neededMexes = math.min(4, math.max(2, mexFloor - mexReady))
-            local mexQueue = mexBp and FindSafeMexSequence(aiBrain, homePos, 220, neededMexes)
-            if mexBp and mexQueue and table.getn(mexQueue) > 0 then
-                for _, mexPos in mexQueue do
-                    IssueBuildMobile({ acu }, mexPos, mexBp, {})
-                end
+            local mexPos = mexBp and FindClosestSafeMex(aiBrain, homePos, 220)
+            if mexBp and mexPos then
+                IssueBuildMobile({ acu }, mexPos, mexBp, {})
                 issuedStarterQueue = true
+                runtime.ACUSafetyLockUntil = math.max(runtime.ACUSafetyLockUntil or -999, now + 6)
+                runtime.ACUHardBuildLockUntil = math.max(runtime.ACUHardBuildLockUntil or -999, now + 20)
+                return true
             end
         end
 
@@ -334,28 +363,18 @@ local function TryExecuteStarterTask(aiBrain, runtime, acu, homePos, director, c
         end
     end
 
-    if mexPreferred and IssueBuildMobile then
+    if mexPreferred and IssueBuildMobile and not unfinishedStarterEco then
         local bp = PickBuildableBlueprint(acu, StarterMexCategory)
-        local mexQueue = bp and FindSafeMexSequence(aiBrain, homePos, 220, math.min(4, math.max(2, mexFloor - mexReady)))
-        if bp and mexQueue and table.getn(mexQueue) > 0 then
-            for _, mexPos in mexQueue do
-                IssueBuildMobile({ acu }, mexPos, bp, {})
-            end
+        local mexPos = bp and FindClosestSafeMex(aiBrain, homePos, 220)
+        if bp and mexPos then
+            IssueBuildMobile({ acu }, mexPos, bp, {})
             runtime.ACUSafetyLockUntil = math.max(runtime.ACUSafetyLockUntil or -999, now + 6)
             runtime.ACUHardBuildLockUntil = math.max(runtime.ACUHardBuildLockUntil or -999, now + 18)
             return true
         end
     end
 
-    local repairTarget = FindNearbyStarterStructure(aiBrain, homePos, powerNeeded, radarNeeded, mexPreferred)
-    if repairTarget and IssueRepair then
-        IssueRepair({ acu }, repairTarget)
-        runtime.ACUSafetyLockUntil = math.max(runtime.ACUSafetyLockUntil or -999, now + 6)
-        runtime.ACUHardBuildLockUntil = math.max(runtime.ACUHardBuildLockUntil or -999, now + 10)
-        return true
-    end
-
-    if powerNeeded and IssueBuildMobile then
+    if powerNeeded and IssueBuildMobile and not unfinishedStarterEco then
         local bp = PickBuildableBlueprint(acu, StarterPowerCategory)
         local anchor = GetStarterFactoryAnchor(aiBrain, homePos)
         local buildPos = bp and FindStarterBuildPos(aiBrain, anchor, StarterPowerCategory, categories.FACTORY * categories.STRUCTURE)
@@ -378,7 +397,7 @@ local function TryExecuteStarterTask(aiBrain, runtime, acu, homePos, director, c
         end
     end
 
-    if mexReady < mexFloor and IssueBuildMobile then
+    if mexReady < mexFloor and IssueBuildMobile and not unfinishedStarterEco then
         local bp = PickBuildableBlueprint(acu, StarterMexCategory)
         local mexPos = bp and FindClosestSafeMex(aiBrain, homePos, 220)
         if bp and mexPos then
