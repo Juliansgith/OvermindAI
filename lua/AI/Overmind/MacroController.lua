@@ -203,9 +203,21 @@ local function DetermineDesiredPhase(aiBrain, runtime, now)
     local starterMexTarget = contestTempoMap and 3 or 4
     local starterMexDeadline = contestTempoMap and 210 or 300
     local landFactoryFloorTarget = contestTempoMap and 2 or 3
+    local hqRecoveryWindow = t2LandFactories <= 0
+        and activeLandFactoryUpgrades <= 0
+        and readyLand >= 4
+        and totalLand >= 4
+        and readyMex >= (contestTempoMap and 5 or 6)
+        and readyPower >= 5
+        and massBudget >= (contestTempoMap and 5.4 or 5.9)
+        and not ecoCrash
+        and not acuCrisisActive
+        and basePressure < 0.18
+        and frontPressure < 0.30
     local hqPressureEscape = t2LandFactories <= 0
         and activeLandFactoryUpgrades <= 0
         and readyLand >= 2
+        and not hqRecoveryWindow
         and (
             acuCrisisActive
             or ((landPanic or underHarass or approachReal) and (frontPressure >= 0.18 or basePressure >= 0.14))
@@ -236,6 +248,7 @@ local function DetermineDesiredPhase(aiBrain, runtime, now)
         FrontPressure = frontPressure,
         BasePressure = basePressure,
         HQPressureEscape = hqPressureEscape and true or false,
+        HQRecoveryWindow = hqRecoveryWindow and true or false,
         ACUCrisisActive = acuCrisisActive and true or false,
     }
 
@@ -252,6 +265,9 @@ local function DetermineDesiredPhase(aiBrain, runtime, now)
     end
 
     if t2LandFactories <= 0 then
+        if hqRecoveryWindow then
+            return 'first_land_hq', 'delayed_t2_recovery', facts
+        end
         if hqPressureEscape then
             return 'mass_consolidation', 'hq_pressure_escape', facts
         end
@@ -311,8 +327,15 @@ local function ApplyLatch(state, desiredPhase, desiredReason, facts, now)
 
     if current == 'mass_consolidation'
         and facts.HQPressureEscape
+        and not facts.HQRecoveryWindow
         and facts.T2LandFactories <= 0 then
         return current, 'latched_hq_pressure_escape'
+    end
+
+    if current == 'mass_consolidation'
+        and facts.HQRecoveryWindow
+        and facts.T2LandFactories <= 0 then
+        return 'first_land_hq', 'recovered_hq_window'
     end
 
     if current == 'first_land_hq'

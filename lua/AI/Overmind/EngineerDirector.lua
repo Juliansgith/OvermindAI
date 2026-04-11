@@ -247,11 +247,12 @@ local function TryReclaimFieldZone(aiBrain, runtime, eng, targetPos, now)
     local taskSupport = outerTask.CurrentUnits or 0
     local taskStrength = outerTask.CurrentStrength or 0
     local supported = math.max(allySupport, taskSupport, math.floor(taskStrength / 7))
+    local outerBacked = taskSupport > 0 or taskStrength >= 8 or planner.OuterRetentionActive == true
     local reclaimTargets, reclaimMass = GetReclaimFieldTargets(targetPos, planner.ReclaimFirst and 22 or 20, planner.ReclaimFirst and 6 or 10)
     local supportWeightedThreat = math.max(0, localThreat - (supported * 0.18))
-    local threatCap = planner.ReclaimFirst and 2.0 or 1.5
-    local routeRiskCap = planner.ReclaimFirst and 3.5 or 3.0
-    local minSupport = planner.ReclaimFirst and 2 or 3
+    local threatCap = planner.ReclaimFirst and (outerBacked and 2.35 or 2.0) or (outerBacked and 1.8 or 1.5)
+    local routeRiskCap = planner.ReclaimFirst and (outerBacked and 4.0 or 3.5) or (outerBacked and 3.4 or 3.0)
+    local minSupport = planner.ReclaimFirst and (outerBacked and 1 or 2) or (outerBacked and 2 or 3)
 
     if table.getn(reclaimTargets) <= 0 or reclaimMass < (planner.ReclaimFirst and 80 or 120) then
         return false
@@ -268,10 +269,10 @@ local function TryReclaimFieldZone(aiBrain, runtime, eng, targetPos, now)
     if enemySupport > math.max(1, supported) then
         return false
     end
-    if supported < minSupport and distMain > 120 then
+    if supported < minSupport and distMain > (outerBacked and 180 or 120) then
         return false
     end
-    if HasEnemyCombatNear(aiBrain, targetPos, planner.ReclaimFirst and 20 or 24) and supported < (minSupport + 1) then
+    if HasEnemyCombatNear(aiBrain, targetPos, planner.ReclaimFirst and 20 or 24) and supported < (outerBacked and minSupport or (minSupport + 1)) then
         return false
     end
 
@@ -2205,6 +2206,12 @@ local function ProcessEngineer(aiBrain, runtime, eng, now, ctx)
         if ctx.structureTask.Active
             and (ctx.structureTask.Kind == 'Power' or ctx.structureTask.Kind == 'Mex')
             and ctx.structureTargetObject
+            and (
+                not ctx.fieldTaskWindow
+                or ctx.reclaimField >= ctx.fieldTaskQuota
+                or ctx.needBase > 0
+                or (ctx.structureTask.AssignedBuilders or 0) < math.max(1, math.min(2, (ctx.structureTask.RequiredBuilders or 0)))
+            )
             and localThreat < 2.2
             and dist <= 360
             and TryAssignAssistOrRepair(aiBrain, runtime, eng, ctx.structureTargetObject, false, now) then
@@ -2257,12 +2264,14 @@ local function ProcessEngineer(aiBrain, runtime, eng, now, ctx)
             end
         elseif ctx.contestFieldMode
             and ctx.fieldTaskWindow
+            and ctx.reclaimField < ctx.fieldTaskQuota
             and ctx.needBase <= 0
             and TryReclaimFieldZone(aiBrain, runtime, eng, ctx.reclaimFieldPos, now) then
             ctx.reclaimField = ctx.reclaimField + 1
             acted = true
         elseif ctx.contestFieldMode
             and ctx.fieldTaskWindow
+            and ctx.reclaimField < ctx.fieldTaskQuota
             and ctx.needBase <= 0
             and localThreat < 1.8
             and dist <= 380
@@ -2271,6 +2280,7 @@ local function ProcessEngineer(aiBrain, runtime, eng, now, ctx)
             acted = true
         elseif ctx.contestFieldMode
             and ctx.fieldTaskWindow
+            and ctx.reclaimField < ctx.fieldTaskQuota
             and ctx.needBase <= 0
             and localThreat < 1.9
             and dist <= 420
@@ -2492,6 +2502,10 @@ function Update(aiBrain, now)
     local transitionLock = macro.TransitionLocked == true
     local contestFieldMode = hqPressureEscape
         or ((((policy.ForwardContestBias == true) or (policy.ReclaimPressureMode == true)) and (macroPhase == 'mass_consolidation' or macroPhase == 'surplus_scale')))
+    local planner = runtime.StrategicPlanner or {}
+    local outerContestUnits = ((((runtime.ForceDirector or {}).Stats or {}).OuterContest) or 0)
+    local reclaimFieldPos = planner.ReclaimFieldPos
+    local reclaimFieldScore = planner.ReclaimFieldScore or 0
     local currentRadar = ((((runtime.ProductionDirector or {}).Current or {}).Structures or {}).Radar) or 0
     local bomberWatch = constraints.BomberWatch == true
     local bomberPanic = ((raid.BomberPanicUntil or -999) > now) or ((raid.LastBomberEnemyCount or 0) >= 1 and raid.UnderAirHarass)
@@ -2700,6 +2714,36 @@ function Update(aiBrain, now)
         end
     end
 
+    local factoryTaskStable = (not factoryTask.Active)
+        or (
+            (factoryTask.AssignedBuilders or 0) >= math.max(1, math.min(2, (factoryTask.RequiredBuilders or 0)))
+            and (factoryTask.StallTime or 0) < 18
+        )
+    local structureTaskStable = (not structureTask.Active)
+        or (
+            (structureTask.AssignedBuilders or 0) >= math.max(1, math.min(2, (structureTask.RequiredBuilders or 0)))
+            and (structureTask.StallTime or 0) < 20
+        )
+    local fieldBaseReady = baseEngineers >= math.max(3, baseFloor)
+    local fieldTaskQuota = 0
+    if contestFieldMode
+        and reclaimFieldPos
+        and fieldBaseReady
+        and not ecoCrash
+        and not severeFactoryStarve
+        and factoryTaskStable
+        and structureTaskStable then
+        if (planner.ReclaimFirst == true or planner.OuterRetentionActive == true or outerContestUnits > 0)
+            and reclaimFieldScore >= 90 then
+            fieldTaskQuota = 1
+        end
+        if reclaimFieldScore >= 180
+            and outerContestUnits >= 1
+            and baseEngineers >= (baseFloor + 2) then
+            fieldTaskQuota = 2
+        end
+    end
+
     local ctx = {
         bomberPanic = bomberPanic,
         constraints = constraints,
@@ -2719,7 +2763,7 @@ function Update(aiBrain, now)
         raid = raid,
         reclaimEnemyMex = 0,
         reclaimField = 0,
-        reclaimFieldPos = ((runtime.StrategicPlanner or {}).ReclaimFieldPos),
+        reclaimFieldPos = reclaimFieldPos,
         recoverCount = 0,
         safeExpandDistance = safeExpandDistance,
         severeFactoryStarve = severeFactoryStarve,
@@ -2728,6 +2772,7 @@ function Update(aiBrain, now)
         surplusSpendCount = 0,
         threatenedCount = 0,
         transitionLock = transitionLock,
+        fieldTaskQuota = fieldTaskQuota,
     }
     local factoryTaskCovered = (not factoryTask.Active)
         or (
@@ -2748,9 +2793,10 @@ function Update(aiBrain, now)
     ctx.fieldTaskWindow = contestFieldMode
         and not severeFactoryStarve
         and not ecoCrash
-        and factoryTaskCovered
-        and structureTaskCovered
-        and baseEngineers >= math.max(5, baseFloor + 2)
+        and factoryTaskStable
+        and structureTaskStable
+        and fieldBaseReady
+        and fieldTaskQuota > 0
     for _, eng in engineers do
         ProcessEngineer(aiBrain, runtime, eng, now, ctx)
     end

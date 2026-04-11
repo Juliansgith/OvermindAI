@@ -138,9 +138,13 @@ local function BuildBattlefieldObjectives(aiBrain, runtime, signals, state, now)
         end
     end
 
+    local outerContestAlive = (signals.OuterContestUnits or 0) >= 2
     local strongHomeCollapse = signals.ACUCrisisActive
-        or signals.ApproachClose
-        or signals.HomePressure >= math.max(6.0, (signals.FrontPressure * 1.45) + 1.6)
+        or (signals.ApproachClose and not outerContestAlive)
+        or signals.HomePressure >= math.max(
+            outerContestAlive and 7.2 or 6.0,
+            (signals.FrontPressure * (outerContestAlive and 1.7 or 1.45)) + (outerContestAlive and 2.4 or 1.6)
+        )
     local outerRetentionWanted =
         not strongHomeCollapse
         and not signals.RecoveryActive
@@ -155,7 +159,7 @@ local function BuildBattlefieldObjectives(aiBrain, runtime, signals, state, now)
 
     state.OuterRetentionUntil = state.OuterRetentionUntil or -999
     if outerRetentionWanted then
-        state.OuterRetentionUntil = now + 72
+        state.OuterRetentionUntil = now + (outerContestAlive and 96 or 72)
     elseif strongHomeCollapse and signals.HomePressure >= math.max(7.0, (signals.FrontPressure * 1.55) + 2.0) then
         state.OuterRetentionUntil = now - 1
     end
@@ -310,6 +314,7 @@ local function BuildSignals(aiBrain, runtime, now)
         BaseGuardUnits = forceStats.BaseGuard or 0,
         BomberUnits = forceStats.BomberStrike or 0,
         EscortUnits = forceStats.ACUEscort or 0,
+        OuterContestUnits = forceStats.OuterContest or 0,
         UnderLandHarass = raid.UnderLandHarass == true,
         UnderAirHarass = raid.UnderAirHarass == true,
         AttackWindow = (
@@ -470,6 +475,11 @@ local function ScoreDirectives(signals, primaryTheater)
         scores.expand = scores.expand + 1.0 + math.min(1.0, (signals.OuterContestValue or 0) * 0.12)
         scores.punish_greed = scores.punish_greed + 0.35 + math.min(0.8, (signals.OuterContestValue or 0) * 0.07)
         scores.trade_tech_for_tempo = scores.trade_tech_for_tempo + 0.45 + math.min(0.6, (signals.OuterContestValue or 0) * 0.05)
+    end
+    if (signals.OuterContestUnits or 0) >= 2 and not signals.ACUCrisisActive then
+        scores.stabilize = scores.stabilize - math.min(1.1, 0.45 + ((signals.OuterContestUnits or 0) * 0.12))
+        scores.expand = scores.expand + 0.35
+        scores.trade_tech_for_tempo = scores.trade_tech_for_tempo + 0.2
     end
     if signals.DesperationCounterstrike then
         scores.stabilize = scores.stabilize - 1.4
