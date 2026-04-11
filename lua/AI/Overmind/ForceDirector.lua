@@ -771,6 +771,14 @@ function Module.Update(aiBrain, now)
     local acuEscort = MergeLists(acuEscortDirect, acuEscortAA, {})
     local interceptUnits = MergeLists(interceptDirect, interceptAA, {})
     local raiders = MergeLists(raiderDirect, raiderScouts, {})
+    local function ShiftNamedUnits(source, destination, keepCount, moveCount)
+        local moved = 0
+        while moved < moveCount and table.getn(source) > keepCount do
+            table.insert(destination, table.remove(source, table.getn(source)))
+            moved = moved + 1
+        end
+        return moved
+    end
     local outerContest = {}
     if outerContestNeed > 0 then
         local need = outerContestNeed
@@ -783,14 +791,6 @@ function Module.Update(aiBrain, now)
         end
     end
     local acuEmergency = {}
-    local function ShiftNamedUnits(source, destination, keepCount, moveCount)
-        local moved = 0
-        while moved < moveCount and table.getn(source) > keepCount do
-            table.insert(destination, table.remove(source, table.getn(source)))
-            moved = moved + 1
-        end
-        return moved
-    end
     if acuEmergencyNeed > 0 then
         interceptDirectNeed = 0
         interceptAANeed = 0
