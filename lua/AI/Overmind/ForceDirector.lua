@@ -440,6 +440,7 @@ function Module.Update(aiBrain, now)
     local mainlineNeed = Clamp(8 + (contestedZones * 4), 8, 34)
     local airGuardNeed = Clamp(2 + (airThreatZones * 2) + (raid.UnderAirHarass and 2 or 0), 2, 10)
     local outerContestNeed = 0
+    local previousOuterCount = (previousTasks.outer_contest and (previousTasks.outer_contest.CurrentUnits or 0)) or 0
     if approachClose then
         baseGuardDirectNeed = Clamp(baseGuardDirectNeed + math.max(1, math.min(5, math.floor(approachThreat * 0.28))), 4, 16)
         mainlineNeed = Clamp(mainlineNeed + math.max(1, math.min(6, math.floor(approachThreat * 0.32))), 8, 40)
@@ -585,7 +586,7 @@ function Module.Update(aiBrain, now)
         and not acuCrisisActive
         and not approachTowardHome
         and not raid.UnderLandHarass
-        and not (primaryTheater == 'Home' and directive == 'stabilize' and homeThreat >= 6) then
+        and not (primaryTheater == 'Home' and directive == 'stabilize' and homeThreat >= 8 and not reclaimFirst) then
         outerContestNeed = Clamp(
             2
                 + math.floor(math.min(6, outerContestValue / 160))
@@ -597,8 +598,21 @@ function Module.Update(aiBrain, now)
             outerContestNeed = math.min(outerContestNeed, 3)
         end
         if frontCrisis or assetSiege then
-            outerContestNeed = math.max(0, outerContestNeed - 2)
+            outerContestNeed = math.max(reclaimFirst and 1 or 0, outerContestNeed - 1)
         end
+        local persistentOuterFloor = 0
+        if landCombatTotal >= 10 then
+            persistentOuterFloor = 2
+        elseif landCombatTotal >= 6 then
+            persistentOuterFloor = 1
+        end
+        if previousOuterCount > 0 then
+            persistentOuterFloor = math.max(persistentOuterFloor, math.min(3, previousOuterCount))
+        end
+        if reclaimFirst then
+            persistentOuterFloor = math.max(persistentOuterFloor, 2)
+        end
+        outerContestNeed = math.max(outerContestNeed, persistentOuterFloor)
     end
     if minimumMainlineCommit > 0 then
         local maxGuardTotal = landCombatTotal - acuEscortNeed - interceptNeed - minimumMainlineCommit
@@ -684,6 +698,29 @@ function Module.Update(aiBrain, now)
         previousTasks.artillery_support,
         { MaxRetainDistance = 170, MaxFillDistance = 220 })
 
+    local remainingDirect = CollectUnassigned(direct, used)
+    local outerContest = {}
+    if outerContestNeed > 0 then
+        outerContest, used = TakeTaskUnits(
+            remainingDirect,
+            outerContestPos,
+            math.min(outerContestNeed, table.getn(remainingDirect)),
+            used,
+            previousTasks.outer_contest,
+            { MaxRetainDistance = 180, MaxFillDistance = 250 })
+    end
+    local outerScouts = {}
+    if outerContestNeed > CountUnits(outerContest) then
+        outerScouts, used = TakeTaskUnits(
+            scouts,
+            outerContestPos,
+            math.min(2, math.max(0, outerContestNeed - CountUnits(outerContest))),
+            used,
+            previousTasks.outer_contest,
+            { MaxRetainDistance = 180, MaxFillDistance = 240 })
+    end
+    outerContest = MergeLists(outerContest, outerScouts, {})
+
     local raiderScouts = {}
     if raiderNeed > 0 then
         raiderScouts, used = TakeTaskUnits(
@@ -695,7 +732,7 @@ function Module.Update(aiBrain, now)
             { MaxRetainDistance = 170, MaxFillDistance = 210 })
     end
 
-    local remainingDirect = CollectUnassigned(direct, used)
+    remainingDirect = CollectUnassigned(direct, used)
     local raiderDirect = {}
     if raiderNeed > CountUnits(raiderScouts) then
         raiderDirect, used = TakeTaskUnits(
@@ -794,7 +831,6 @@ function Module.Update(aiBrain, now)
         end
         return moved
     end
-    local outerContest = {}
     if outerContestNeed > 0 then
         local need = outerContestNeed
         need = need - ShiftNamedUnits(raiders, outerContest, reclaimFirst and 0 or 1, need)

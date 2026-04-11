@@ -631,21 +631,8 @@ local function PickFactoryTarget(aiBrain, runtime, state)
     state.NeedsFirstLandHQ = needsFirstHQOverall and true or false
     state.Mandatory = needsFirstHQOverall and true or false
     state.PowerRecoveryWanted = constraints.PowerBufferLow and needsFirstHQOverall
-    local hqRecoveryWindow = needsFirstHQOverall
-        and readyLand >= 4
-        and totalLand >= 4
-        and mexReady >= 5
-        and powerReady >= 5
-        and not constraints.CriticalStructure
-        and not constraints.EcoCrash
-        and (constraints.BasePressure or 0) < 0.18
-        and (constraints.FrontPressure or 0) < 0.30
-        and (eco.MassIncome or 0) >= 4.2
-        and (eco.EnergyIncome or 0) >= 70
-        and (eco.MassTrend or 0) >= -0.35
-        and (eco.EnergyTrend or 0) >= -12
 
-    if macro.HQPressureEscape == true and needsFirstHQOverall and not hqRecoveryWindow then
+    if macro.HQPressureEscape == true and needsFirstHQOverall then
         state.Reason = 'pressure_escape'
         state.NeedsFirstLandHQ = true
         state.Mandatory = false
@@ -678,7 +665,6 @@ local function PickFactoryTarget(aiBrain, runtime, state)
         or macroObjective == 'first_t2_engineer'
         or macroObjective == 'first_t2_power'
         or macroObjective == 'surplus_scale'
-        or hqRecoveryWindow
     local mandatoryFirstHQ = stillNeedsFirstHQ
         and (stableLandFloor or (readyLand >= 4 and totalLand >= 4 and mexReady >= 3 and powerReady >= 3))
         and readyLand >= 3
@@ -687,9 +673,6 @@ local function PickFactoryTarget(aiBrain, runtime, state)
         and not constraints.CriticalStructure
         and not constraints.EcoCrash
     if stillNeedsFirstHQ and macroWantsHQ and readyLand >= 3 and totalLand >= 3 and mexReady >= 4 and powerReady >= 3 then
-        mandatoryFirstHQ = true
-    end
-    if hqRecoveryWindow then
         mandatoryFirstHQ = true
     end
     state.NeedsFirstLandHQ = stillNeedsFirstHQ and true or false

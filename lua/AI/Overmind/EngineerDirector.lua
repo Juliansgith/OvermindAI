@@ -1063,20 +1063,29 @@ local function ComputeFactoryTaskRequirements(domain, fraction, stallTime, ready
     if domain == 'Land' and readyFactories <= 0 then
         required = required + 1
     end
+    if domain == 'Land' and readyFactories <= 1 and fraction >= 0.15 then
+        required = required + 1
+    end
     if domain == 'Land' and readyFactories <= 1 and fraction >= 0.28 then
         required = required + 1
     end
     if fraction >= 0.4 then
         required = required + 1
     end
+    if domain == 'Land' and fraction >= 0.6 then
+        required = required + 1
+    end
     if stallTime >= 8 then
+        required = required + 1
+    end
+    if domain == 'Land' and stallTime >= 18 then
         required = required + 1
     end
     if (eco.MassStorageRatio or 0) <= 0.02 and required > 2 and readyFactories > 0 then
         required = required - 1
     end
     if domain == 'Land' then
-        return Clamp(required, 1, 3)
+        return Clamp(required, 2, 4)
     end
     return Clamp(required, 1, 4)
 end
@@ -1641,11 +1650,18 @@ local function AssignBuildersToUnfinishedFactory(aiBrain, runtime, now, target, 
         and mainPos
         and Distance2D(targetPos, mainPos) <= 120
         and not HasEnemyCombatNear(aiBrain, targetPos, 42)
+    local stickyLandFinish = string.lower(domain or 'none') == 'land'
+        and mainPos
+        and Distance2D(targetPos, mainPos) <= 260
+        and GetFraction(target) >= 0.18
+        and not HasEnemyCombatNear(aiBrain, targetPos, 52)
     local requiredBuilders = ComputeFactoryTaskRequirements(domain, GetFraction(target), stallTime, readyFactories, eco)
     if openingFactoryFloor then
         requiredBuilders = math.max(2, math.min(3, requiredBuilders))
+    elseif stickyLandFinish then
+        requiredBuilders = math.max(requiredBuilders, math.min(4, readyFactories <= 1 and 3 or 2))
     end
-    local forceInterrupt = stallTime >= 4 or readyFactories <= 0 or recovery.ForceFactoryRecovery or openingFactoryFloor
+    local forceInterrupt = stallTime >= 4 or readyFactories <= 0 or recovery.ForceFactoryRecovery or openingFactoryFloor or stickyLandFinish
 
     local dispatchRadius = 240
     if stallTime >= 6 then
@@ -1657,6 +1673,9 @@ local function AssignBuildersToUnfinishedFactory(aiBrain, runtime, now, target, 
     if stallTime >= 28 then
         dispatchRadius = 960
     end
+    if stickyLandFinish then
+        dispatchRadius = math.max(dispatchRadius, 620)
+    end
 
     local interruptQCap = 0
     if forceInterrupt then
@@ -1667,6 +1686,9 @@ local function AssignBuildersToUnfinishedFactory(aiBrain, runtime, now, target, 
     end
     if readyFactories <= 0 and domain == 'Land' then
         interruptQCap = math.max(interruptQCap, 8)
+    end
+    if stickyLandFinish then
+        interruptQCap = math.max(interruptQCap, 6)
     end
 
     local candidates = {}
@@ -1695,6 +1717,9 @@ local function AssignBuildersToUnfinishedFactory(aiBrain, runtime, now, target, 
                     if stallTime >= 18 then
                         safeCap = safeCap + 0.6
                     end
+                    if stickyLandFinish then
+                        safeCap = safeCap + 0.5
+                    end
                     local safe = localThreat <= safeCap and targetThreat <= (safeCap + 0.8)
                     local openerSafe = openingFactoryFloor
                         and mainPos
@@ -1713,6 +1738,8 @@ local function AssignBuildersToUnfinishedFactory(aiBrain, runtime, now, target, 
                         local reachableRadius = dispatchRadius
                         if isCommander then
                             reachableRadius = math.min(reachableRadius, 220)
+                        elseif stickyLandFinish then
+                            reachableRadius = math.max(reachableRadius, 640)
                         end
                         local focus = unit.GetFocusUnit and unit:GetFocusUnit() or false
                         local alreadyAssigned = focus and (GetEntityId(focus) == targetId)
@@ -1730,7 +1757,8 @@ local function AssignBuildersToUnfinishedFactory(aiBrain, runtime, now, target, 
                                 IsCommander = isCommander and true or false,
                                 Score = ScoreFactoryBuilder(unit, dist, busy, alreadyAssigned, isCommander, qLen, domain)
                                     + ((openingFactoryFloor and isCommander) and 240 or 0)
-                                    + ((openingFactoryFloor and not isCommander and dist <= 90) and 80 or 0),
+                                    + ((openingFactoryFloor and not isCommander and dist <= 90) and 80 or 0)
+                                    + ((stickyLandFinish and not isCommander and dist <= 160) and 90 or 0),
                             })
                         end
                     end
@@ -2725,6 +2753,9 @@ function Update(aiBrain, now)
             and (structureTask.StallTime or 0) < 20
         )
     local fieldBaseReady = baseEngineers >= math.max(3, baseFloor)
+    engState.ReclaimFieldStickyUntil = engState.ReclaimFieldStickyUntil or -999
+    engState.ReclaimFieldStickyQuota = engState.ReclaimFieldStickyQuota or 0
+    local fieldStickyActive = now < (engState.ReclaimFieldStickyUntil or -999)
     local fieldTaskQuota = 0
     if contestFieldMode
         and reclaimFieldPos
@@ -2742,6 +2773,24 @@ function Update(aiBrain, now)
             and baseEngineers >= (baseFloor + 2) then
             fieldTaskQuota = 2
         end
+    end
+    if fieldTaskQuota > 0 then
+        engState.ReclaimFieldStickyUntil = now + 48
+        engState.ReclaimFieldStickyQuota = math.max(engState.ReclaimFieldStickyQuota or 0, fieldTaskQuota)
+        fieldStickyActive = true
+    elseif fieldStickyActive
+        and contestFieldMode
+        and reclaimFieldPos
+        and fieldBaseReady
+        and not ecoCrash
+        and not severeFactoryStarve
+        and factoryTaskStable
+        and structureTaskStable then
+        fieldTaskQuota = math.max(1, engState.ReclaimFieldStickyQuota or 1)
+    else
+        engState.ReclaimFieldStickyUntil = -999
+        engState.ReclaimFieldStickyQuota = 0
+        fieldStickyActive = false
     end
 
     local ctx = {
