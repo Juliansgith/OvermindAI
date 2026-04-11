@@ -140,7 +140,7 @@ local function BuildBattlefieldObjectives(aiBrain, runtime, signals, state, now)
 
     local strongHomeCollapse = signals.ACUCrisisActive
         or signals.ApproachClose
-        or signals.HomePressure >= math.max(4.5, (signals.FrontPressure * 1.32) + 0.85)
+        or signals.HomePressure >= math.max(6.0, (signals.FrontPressure * 1.45) + 1.6)
     local outerRetentionWanted =
         not strongHomeCollapse
         and not signals.RecoveryActive
@@ -155,8 +155,8 @@ local function BuildBattlefieldObjectives(aiBrain, runtime, signals, state, now)
 
     state.OuterRetentionUntil = state.OuterRetentionUntil or -999
     if outerRetentionWanted then
-        state.OuterRetentionUntil = now + 48
-    elseif strongHomeCollapse then
+        state.OuterRetentionUntil = now + 72
+    elseif strongHomeCollapse and signals.HomePressure >= math.max(7.0, (signals.FrontPressure * 1.55) + 2.0) then
         state.OuterRetentionUntil = now - 1
     end
 
@@ -466,7 +466,7 @@ local function ScoreDirectives(signals, primaryTheater)
         scores.expand = scores.expand - 0.4
     end
     if signals.OuterRetentionActive then
-        scores.stabilize = scores.stabilize - (signals.StrongHomeCollapse and 0 or 1.3)
+        scores.stabilize = scores.stabilize - (signals.StrongHomeCollapse and 0.3 or 1.7)
         scores.expand = scores.expand + 1.0 + math.min(1.0, (signals.OuterContestValue or 0) * 0.12)
         scores.punish_greed = scores.punish_greed + 0.35 + math.min(0.8, (signals.OuterContestValue or 0) * 0.07)
         scores.trade_tech_for_tempo = scores.trade_tech_for_tempo + 0.45 + math.min(0.6, (signals.OuterContestValue or 0) * 0.05)
@@ -524,7 +524,7 @@ local function ScoreDirectives(signals, primaryTheater)
     end
     if signals.ReclaimFirst then
         scores.expand = scores.expand + 0.9
-        scores.stabilize = scores.stabilize - 0.45
+        scores.stabilize = scores.stabilize - 0.75
         scores.punish_greed = scores.punish_greed + 0.45
         scores.trade_map_for_tech = scores.trade_map_for_tech - 0.6
         scores.trade_tech_for_tempo = scores.trade_tech_for_tempo + 0.8

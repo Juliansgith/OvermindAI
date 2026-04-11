@@ -245,28 +245,33 @@ local function TryReclaimFieldZone(aiBrain, runtime, eng, targetPos, now)
     local enemySupport = aiBrain:GetNumUnitsAroundPoint(LandCombatCategory, targetPos, 28, 'Enemy') or 0
     local outerTask = (((runtime or {}).ForceDirector or {}).Tasks or {}).outer_contest or {}
     local taskSupport = outerTask.CurrentUnits or 0
-    local supported = math.max(allySupport, taskSupport)
-    local reclaimTargets, reclaimMass = GetReclaimFieldTargets(targetPos, 18, planner.ReclaimFirst and 8 or 12)
+    local taskStrength = outerTask.CurrentStrength or 0
+    local supported = math.max(allySupport, taskSupport, math.floor(taskStrength / 7))
+    local reclaimTargets, reclaimMass = GetReclaimFieldTargets(targetPos, planner.ReclaimFirst and 22 or 20, planner.ReclaimFirst and 6 or 10)
+    local supportWeightedThreat = math.max(0, localThreat - (supported * 0.18))
+    local threatCap = planner.ReclaimFirst and 2.0 or 1.5
+    local routeRiskCap = planner.ReclaimFirst and 3.5 or 3.0
+    local minSupport = planner.ReclaimFirst and 2 or 3
 
-    if table.getn(reclaimTargets) <= 0 or reclaimMass < (planner.ReclaimFirst and 100 or 140) then
+    if table.getn(reclaimTargets) <= 0 or reclaimMass < (planner.ReclaimFirst and 80 or 120) then
         return false
     end
     if distMain > (((runtime.EcoPolicy or {}).SafeExpandDistance or 680) + 100) then
         return false
     end
-    if localThreat > (planner.ReclaimFirst and 1.3 or 1.0) then
+    if supportWeightedThreat > threatCap then
         return false
     end
-    if routeRisk > (planner.ReclaimFirst and 2.8 or 2.4) then
+    if routeRisk > routeRiskCap then
         return false
     end
-    if enemySupport > math.max(0, supported - 1) then
+    if enemySupport > math.max(1, supported) then
         return false
     end
-    if supported < (planner.ReclaimFirst and 3 or 4) and distMain > 120 then
+    if supported < minSupport and distMain > 120 then
         return false
     end
-    if HasEnemyCombatNear(aiBrain, targetPos, 26) then
+    if HasEnemyCombatNear(aiBrain, targetPos, planner.ReclaimFirst and 20 or 24) and supported < (minSupport + 1) then
         return false
     end
 
@@ -2251,15 +2256,13 @@ local function ProcessEngineer(aiBrain, runtime, eng, now, ctx)
                 acted = true
             end
         elseif ctx.contestFieldMode
-            and not ctx.factoryTask.Active
-            and not ctx.structureTask.Active
+            and ctx.fieldTaskWindow
             and ctx.needBase <= 0
             and TryReclaimFieldZone(aiBrain, runtime, eng, ctx.reclaimFieldPos, now) then
             ctx.reclaimField = ctx.reclaimField + 1
             acted = true
         elseif ctx.contestFieldMode
-            and not ctx.factoryTask.Active
-            and not ctx.structureTask.Active
+            and ctx.fieldTaskWindow
             and ctx.needBase <= 0
             and localThreat < 1.8
             and dist <= 380
@@ -2267,8 +2270,7 @@ local function ProcessEngineer(aiBrain, runtime, eng, now, ctx)
             ctx.dispatchedExpand = ctx.dispatchedExpand + 1
             acted = true
         elseif ctx.contestFieldMode
-            and not ctx.factoryTask.Active
-            and not ctx.structureTask.Active
+            and ctx.fieldTaskWindow
             and ctx.needBase <= 0
             and localThreat < 1.9
             and dist <= 420
@@ -2727,6 +2729,28 @@ function Update(aiBrain, now)
         threatenedCount = 0,
         transitionLock = transitionLock,
     }
+    local factoryTaskCovered = (not factoryTask.Active)
+        or (
+            (factoryTask.AssignedBuilders or 0) >= math.max(1, (factoryTask.RequiredBuilders or 0))
+            and (factoryTask.StallTime or 0) < 16
+        )
+    local structureTaskCovered = (not structureTask.Active)
+        or (
+            (structureTask.Kind == 'Mex' or structureTask.Kind == 'Power')
+            and (structureTask.AssignedBuilders or 0) >= math.max(1, (structureTask.RequiredBuilders or 0))
+            and (structureTask.StallTime or 0) < 18
+        )
+        or (
+            (structureTask.Kind ~= 'Mex' and structureTask.Kind ~= 'Power')
+            and (structureTask.AssignedBuilders or 0) >= math.max(1, (structureTask.RequiredBuilders or 0))
+            and (structureTask.StallTime or 0) < 12
+        )
+    ctx.fieldTaskWindow = contestFieldMode
+        and not severeFactoryStarve
+        and not ecoCrash
+        and factoryTaskCovered
+        and structureTaskCovered
+        and baseEngineers >= math.max(5, baseFloor + 2)
     for _, eng in engineers do
         ProcessEngineer(aiBrain, runtime, eng, now, ctx)
     end
