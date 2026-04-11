@@ -717,7 +717,6 @@ function Module.Update(aiBrain, now)
     while table.getn(mainlineAA) > offensiveAACap do
         table.insert(baseGuardAA, table.remove(mainlineAA, table.getn(mainlineAA)))
     end
-    mainline = MergeLists(mainline, mainlineAA, {})
     local reserveScouts = CollectUnassigned(scouts, used)
     for _, scout in reserveScouts do
         table.insert(mainline, scout)
@@ -779,6 +778,22 @@ function Module.Update(aiBrain, now)
         end
         return moved
     end
+    local function AllocateSideEscortAA(destination, escortCap)
+        if escortCap <= 0 then
+            return 0
+        end
+        local airHarassPressure = raid.UnderAirHarass or airThreatZones > 0
+        if not airHarassPressure or table.getn(destination) <= 0 then
+            return 0
+        end
+        local moved = 0
+        moved = moved + ShiftNamedUnits(mainlineAA, destination, 0, escortCap - moved)
+        if moved < escortCap then
+            local keepBaseAA = Clamp(((homeThreat >= 5) and 1 or 0) + ((airThreatZones > 1) and 1 or 0), 0, 2)
+            moved = moved + ShiftNamedUnits(baseGuardAA, destination, keepBaseAA, escortCap - moved)
+        end
+        return moved
+    end
     local outerContest = {}
     if outerContestNeed > 0 then
         local need = outerContestNeed
@@ -789,6 +804,12 @@ function Module.Update(aiBrain, now)
         if need > 0 then
             need = need - ShiftNamedUnits(baseGuardDirect, outerContest, math.max(1, (homeThreat >= 4) and 2 or 1), need)
         end
+    end
+    if table.getn(raiders) > 0 then
+        AllocateSideEscortAA(raiders, Clamp(1 + ((table.getn(raiders) >= 5 or raid.UnderAirHarass) and 1 or 0), 1, 2))
+    end
+    if table.getn(outerContest) > 0 then
+        AllocateSideEscortAA(outerContest, Clamp(1 + ((table.getn(outerContest) >= 5 or airThreatZones > 1) and 1 or 0), 1, 2))
     end
     local acuEmergency = {}
     if acuEmergencyNeed > 0 then
@@ -817,12 +838,16 @@ function Module.Update(aiBrain, now)
             aaNeed = aaNeed - ShiftNamedUnits(interceptUnits, acuEmergency, 0, aaNeed)
         end
         if aaNeed > 0 then
+            aaNeed = aaNeed - ShiftNamedUnits(mainlineAA, acuEmergency, 0, aaNeed)
+        end
+        if aaNeed > 0 then
             aaNeed = aaNeed - ShiftNamedUnits(mainline, acuEmergency, math.max(2, minimumMainlineCommit - 10), aaNeed)
         end
         if acuCrisisActive and need > 0 then
             need = need - ShiftNamedUnits(artillery, acuEmergency, 1, need)
         end
     end
+    mainline = MergeLists(mainline, mainlineAA, {})
 
     state.Groups = {
         BaseGuard = baseGuard,
