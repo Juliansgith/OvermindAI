@@ -828,6 +828,18 @@ local function ShouldKeepTrackedStructureTask(now, task, trackedTargetId, tracke
     return keep
 end
 
+local function RecoveryNeedsBootstrapPower(aiBrain, runtime)
+    return Policy.NeedsBootstrapPower(aiBrain, runtime)
+end
+
+local function RecoveryNeedsCriticalRadar(runtime)
+    return Policy.NeedsCriticalRadar(runtime)
+end
+
+local function RecoveryGetRadarReservedBuilderIds(runtime, now)
+    return Policy.GetRadarReservedBuilderIds(runtime, now)
+end
+
 
 M.GetFactoryDomain = GetFactoryDomain
 M.GetStructureKind = GetStructureKind
@@ -853,8 +865,8 @@ M.TryOpenSurplusExpansionBuild = TryOpenSurplusExpansionBuild
 M.ComputeStructureTaskRequirements = ComputeStructureTaskRequirements
 M.FindTrackedUnfinishedStructure = FindTrackedUnfinishedStructure
 M.ShouldKeepTrackedStructureTask = ShouldKeepTrackedStructureTask
-M.NeedsBootstrapPower = Policy.NeedsBootstrapPower
-M.NeedsCriticalRadar = Policy.NeedsCriticalRadar
-M.GetRadarReservedBuilderIds = Policy.GetRadarReservedBuilderIds
+M.NeedsBootstrapPower = RecoveryNeedsBootstrapPower
+M.NeedsCriticalRadar = RecoveryNeedsCriticalRadar
+M.GetRadarReservedBuilderIds = RecoveryGetRadarReservedBuilderIds
 return M
 
