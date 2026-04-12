@@ -5,9 +5,6 @@ local OvermindMemory = import('/mods/OvermindAI/lua/AI/Overmind/Memory.lua')
 local EnemyMexCategory = categories.STRUCTURE * categories.MASSEXTRACTION
 local LandCombatCategory = categories.MOBILE * categories.LAND - categories.ENGINEER - categories.SCOUT - categories.COMMAND
 
-local Distance2D = Common.Distance2D
-local GetMainPos = Common.GetMainPos
-local HasEnemyCombatNear = Threat.HasEnemyCombatNear
 
 local M = {}
 
@@ -46,7 +43,7 @@ local function TryReclaimEnemyMex(aiBrain, runtime, eng, now)
         'Ally') or 0
     local localThreatCap = aggressiveContest and 1.05 or 0.8
     local minEscort = aggressiveContest and 3 or 4
-    if localThreat > localThreatCap or escort < minEscort or HasEnemyCombatNear(aiBrain, pos, aggressiveContest and 32 or 28) then
+    if localThreat > localThreatCap or escort < minEscort or Threat.HasEnemyCombatNear(aiBrain, pos, aggressiveContest and 32 or 28) then
         return false
     end
 
@@ -66,7 +63,7 @@ local function TryReclaimEnemyMex(aiBrain, runtime, eng, now)
             local routeRiskCap = aggressiveContest and 1.7 or 1.35
             local targetThreatCap = aggressiveContest and 0.85 or 0.6
             local enemyGuardCap = aggressiveContest and 1 or 0
-            if targetPos and routeRisk <= routeRiskCap and targetThreat <= targetThreatCap and enemyGuard <= enemyGuardCap and not HasEnemyCombatNear(aiBrain, targetPos, aggressiveContest and 28 or 24) then
+            if targetPos and routeRisk <= routeRiskCap and targetThreat <= targetThreatCap and enemyGuard <= enemyGuardCap and not Threat.HasEnemyCombatNear(aiBrain, targetPos, aggressiveContest and 28 or 24) then
                 table.insert(reclaimTargets, target)
             end
         end
@@ -126,12 +123,12 @@ local function TryReclaimFieldZone(aiBrain, runtime, eng, targetPos, now)
     end
 
     local pos = eng.GetPosition and eng:GetPosition() or false
-    local mainPos = GetMainPos(aiBrain, runtime)
+    local mainPos = Common.GetMainPos(aiBrain, runtime)
     if not pos or not mainPos then
         return false
     end
 
-    local distMain = Distance2D(targetPos, mainPos)
+    local distMain = Common.Distance2D(targetPos, mainPos)
     local localThreat = aiBrain:GetThreatAtPosition(targetPos, 1, true, 'AntiSurface') or 0
     local routeRisk = OvermindMemory.GetRouteRisk(aiBrain, pos, targetPos, 4, 44)
     local allySupport = aiBrain:GetNumUnitsAroundPoint(LandCombatCategory, targetPos, 28, 'Ally') or 0
@@ -165,14 +162,14 @@ local function TryReclaimFieldZone(aiBrain, runtime, eng, targetPos, now)
     if supported < minSupport and distMain > (outerBacked and 180 or 120) then
         return false
     end
-    if HasEnemyCombatNear(aiBrain, targetPos, planner.ReclaimFirst and 20 or 24) and supported < (outerBacked and minSupport or (minSupport + 1)) then
+    if Threat.HasEnemyCombatNear(aiBrain, targetPos, planner.ReclaimFirst and 20 or 24) and supported < (outerBacked and minSupport or (minSupport + 1)) then
         return false
     end
 
     table.sort(reclaimTargets, function(a, b)
         local apos = a.CachePosition or (a.GetPosition and a:GetPosition()) or targetPos
         local bpos = b.CachePosition or (b.GetPosition and b:GetPosition()) or targetPos
-        return Distance2D(apos, pos) < Distance2D(bpos, pos)
+        return Common.Distance2D(apos, pos) < Common.Distance2D(bpos, pos)
     end)
 
     if IssueClearCommands then
@@ -205,3 +202,4 @@ M.TryReclaimEnemyMex = TryReclaimEnemyMex
 M.GetReclaimFieldTargets = GetReclaimFieldTargets
 M.TryReclaimFieldZone = TryReclaimFieldZone
 return M
+

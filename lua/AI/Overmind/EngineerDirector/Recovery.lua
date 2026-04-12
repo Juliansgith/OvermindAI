@@ -12,19 +12,6 @@ local RadarCategory = categories.STRUCTURE * categories.RADAR
 local AADefenseCategory = categories.STRUCTURE * categories.DEFENSE * categories.ANTIAIR
 local DefenseCategory = categories.STRUCTURE * categories.DEFENSE
 
-local Distance2D = Common.Distance2D
-local Clamp = Common.Clamp
-local GetMainPos = Common.GetMainPos
-local GetFraction = Common.GetFraction
-local GetEntityId = Common.GetEntityId
-local HasEnemyCombatNear = Threat.HasEnemyCombatNear
-local ComputeAirThreatFlags = Threat.ComputeAirThreatFlags
-local NeedsBootstrapPower = Policy.NeedsBootstrapPower
-local NeedsCriticalRadar = Policy.NeedsCriticalRadar
-local GetRadarReservedBuilderIds = Policy.GetRadarReservedBuilderIds
-local PickMexBlueprint = Expansion.PickMexBlueprint
-local FindExpansionTarget = Expansion.FindExpansionTarget
-local ReserveExpansionTarget = Expansion.ReserveExpansionTarget
 
 local M = {}
 
@@ -58,7 +45,7 @@ local function CountReadyFactories(aiBrain, category)
     local units = aiBrain:GetListOfUnits(category, false, true) or {}
     local ready = 0
     for _, unit in units do
-        if unit and not unit.Dead and GetFraction(unit) >= 0.95 and not unit:IsUnitState('BeingBuilt') and not unit:IsUnitState('Upgrading') then
+        if unit and not unit.Dead and Common.GetFraction(unit) >= 0.95 and not unit:IsUnitState('BeingBuilt') and not unit:IsUnitState('Upgrading') then
             ready = ready + 1
         end
     end
@@ -70,14 +57,14 @@ local function ScoreStructureTarget(aiBrain, runtime, structure, kind, pos, frac
     local recovery = runtime.Recovery or {}
     local raid = runtime.RaidDefense or {}
     local constraints = ((runtime.ProductionDirector or {}).ConstraintState or {})
-    local distMain = Distance2D(pos, mainPos)
+    local distMain = Common.Distance2D(pos, mainPos)
     local localThreat = aiBrain:GetThreatAtPosition(pos, 1, true, 'AntiSurface') or 0
     local engineerLossRisk = OvermindMemory.GetEngineerLossRisk(aiBrain, pos, 42)
     local expansionRisk = OvermindMemory.GetExpansionRisk(aiBrain, pos, 56)
-    local bootstrapPowerNeed = NeedsBootstrapPower(aiBrain, runtime)
-    local radarCritical = NeedsCriticalRadar(runtime)
+    local bootstrapPowerNeed = Policy.NeedsBootstrapPower(aiBrain, runtime)
+    local radarCritical = Policy.NeedsCriticalRadar(runtime)
     local starterPhase = ((runtime.ProductionDirector or {}).ConstraintState or {}).StarterPhase == true
-    local bomberWatch, bomberPanic, exposedMexAirRaid = ComputeAirThreatFlags(runtime, GetGameTimeSeconds())
+    local bomberWatch, bomberPanic, exposedMexAirRaid = Threat.ComputeAirThreatFlags(runtime, GetGameTimeSeconds())
     local forceFinishPower = kind == 'Power'
         and fraction >= 0.8
         and (
@@ -169,7 +156,7 @@ local function ScoreStructureTarget(aiBrain, runtime, structure, kind, pos, frac
             score = score - 30
         end
     end
-    if exposedMexAirRaid and raid.ExposedMexThreatPos and Distance2D(pos, raid.ExposedMexThreatPos) < 44 then
+    if exposedMexAirRaid and raid.ExposedMexThreatPos and Common.Distance2D(pos, raid.ExposedMexThreatPos) < 44 then
         if kind == 'AA' then
             score = score + 180
         elseif kind == 'Radar' then
@@ -200,11 +187,11 @@ local function FindBestUnfinishedStructure(aiBrain, runtime, mainPos)
 
     for _, structure in structures do
         if structure and not structure.Dead and not structure:IsUnitState('Upgrading') then
-            local fraction = GetFraction(structure)
+            local fraction = Common.GetFraction(structure)
             if fraction < 0.995 then
                 local pos = structure.GetPosition and structure:GetPosition() or false
                 if pos then
-                    local distMain = Distance2D(pos, mainPos)
+                    local distMain = Common.Distance2D(pos, mainPos)
                     local kind = GetStructureKind(structure)
                     local maxDist = (kind == 'Mex') and math.max(300, safeExpandDistance * 0.95) or 240
                     if distMain <= maxDist then
@@ -244,7 +231,7 @@ local function FindBestUnfinishedFactory(aiBrain, runtime, mainPos)
     local bestScore = -999999
     for _, factory in factories do
         if factory and not factory.Dead then
-            local fraction = GetFraction(factory)
+            local fraction = Common.GetFraction(factory)
             if fraction < 0.95 and not factory:IsUnitState('Upgrading') then
                 local pos = factory.GetPosition and factory:GetPosition() or false
                 if pos then
@@ -258,7 +245,7 @@ local function FindBestUnfinishedFactory(aiBrain, runtime, mainPos)
                         readyInDomain = readySea
                     end
 
-                    local distMain = Distance2D(pos, mainPos)
+                    local distMain = Common.Distance2D(pos, mainPos)
                     local score = (fraction * 150) - (distMain * 0.18)
                     if domain == 'Land' then
                         score = score + 10
@@ -348,9 +335,9 @@ local function ComputeFactoryTaskRequirements(domain, fraction, stallTime, ready
         required = required - 1
     end
     if domain == 'Land' then
-        return Clamp(required, 2, 4)
+        return Common.Clamp(required, 2, 4)
     end
-    return Clamp(required, 1, 4)
+    return Common.Clamp(required, 1, 4)
 end
 
 local function PickPowerBlueprint(builder)
@@ -383,10 +370,10 @@ local function GetFactoryAnchor(aiBrain, mainPos)
     local best = mainPos
     local bestDist = 999999
     for _, unit in factories do
-        if unit and not unit.Dead and GetFraction(unit) >= 0.95 and not unit:IsUnitState('BeingBuilt') then
+        if unit and not unit.Dead and Common.GetFraction(unit) >= 0.95 and not unit:IsUnitState('BeingBuilt') then
             local pos = unit.GetPosition and unit:GetPosition() or false
             if pos then
-                local dist = Distance2D(pos, mainPos)
+                local dist = Common.Distance2D(pos, mainPos)
                 if dist < bestDist then
                     best = pos
                     bestDist = dist
@@ -406,7 +393,7 @@ local function FindPowerBuildPos(aiBrain, anchorPos)
         local pos = { (anchorPos[1] or 0) + offset[1], 0, (anchorPos[3] or 0) + offset[2] }
         local powerNearby = aiBrain:GetNumUnitsAroundPoint(EnergyCategory, pos, 8, 'Ally') or 0
         local factoryNearby = aiBrain:GetNumUnitsAroundPoint(categories.FACTORY * categories.STRUCTURE, pos, 6, 'Ally') or 0
-        if powerNearby <= 0 and factoryNearby <= 0 and not HasEnemyCombatNear(aiBrain, pos, 34) then
+        if powerNearby <= 0 and factoryNearby <= 0 and not Threat.HasEnemyCombatNear(aiBrain, pos, 34) then
             return pos
         end
     end
@@ -420,7 +407,7 @@ local function CountNearbyUnfinishedPower(aiBrain, mainPos, radius)
     for _, unit in units do
         if unit and not unit.Dead then
             local pos = unit.GetPosition and unit:GetPosition() or false
-            if pos and Distance2D(pos, mainPos) <= (radius or 180) and GetFraction(unit) < 0.995 and not unit:IsUnitState('Upgrading') then
+            if pos and Common.Distance2D(pos, mainPos) <= (radius or 180) and Common.GetFraction(unit) < 0.995 and not unit:IsUnitState('Upgrading') then
                 count = count + 1
             end
         end
@@ -444,9 +431,9 @@ local function GetPriorityPowerRecoveryTarget(aiBrain, runtime, mainPos, structu
         if unit and not unit.Dead and not unit:IsUnitState('Upgrading') then
             local pos = unit.GetPosition and unit:GetPosition() or false
             if pos then
-                local dist = Distance2D(pos, mainPos)
+                local dist = Common.Distance2D(pos, mainPos)
                 if dist <= 220 then
-                    local fraction = GetFraction(unit)
+                    local fraction = Common.GetFraction(unit)
                     local health = unit.GetHealth and unit:GetHealth() or 0
                     local maxHealth = unit.GetMaxHealth and unit:GetMaxHealth() or 0
                     local score = -999999
@@ -483,9 +470,9 @@ local function GetPriorityMexRecoveryTarget(aiBrain, runtime, mainPos, structure
         if unit and not unit.Dead and not unit:IsUnitState('Upgrading') then
             local pos = unit.GetPosition and unit:GetPosition() or false
             if pos then
-                local dist = Distance2D(pos, mainPos)
+                local dist = Common.Distance2D(pos, mainPos)
                 if dist <= 520 then
-                    local fraction = GetFraction(unit)
+                    local fraction = Common.GetFraction(unit)
                     if fraction < 0.995 then
                         local threat = aiBrain:GetThreatAtPosition(pos, 1, true, 'AntiSurface') or 0
                         if threat <= 2.8 then
@@ -515,13 +502,13 @@ local function ShouldForceFinishEcoStructure(aiBrain, runtime, mainPos, structur
     local mexTarget = GetPriorityMexRecoveryTarget(aiBrain, runtime, mainPos, structureTargetObject, structureTask)
     local eco = runtime and runtime.EcoState or {}
     local constraints = (((runtime or {}).ProductionDirector or {}).ConstraintState or {})
-    local bootstrapPowerNeed = NeedsBootstrapPower(aiBrain, runtime)
+    local bootstrapPowerNeed = Policy.NeedsBootstrapPower(aiBrain, runtime)
     local bestTarget = false
     local bestKind = false
     local bestScore = -999999
 
     if powerTarget and not powerTarget.Dead then
-        local fraction = GetFraction(powerTarget)
+        local fraction = Common.GetFraction(powerTarget)
         local score = (bootstrapPowerNeed and 1000 or 0)
             + ((constraints.PowerBufferLow == true) and 700 or 0)
             + 500
@@ -535,7 +522,7 @@ local function ShouldForceFinishEcoStructure(aiBrain, runtime, mainPos, structur
     end
 
     if mexTarget and not mexTarget.Dead then
-        local fraction = GetFraction(mexTarget)
+        local fraction = Common.GetFraction(mexTarget)
         local score = 420
             + (fraction * 260)
             + ((fraction >= 0.35) and 180 or 0)
@@ -605,9 +592,9 @@ local function CountUnfinishedMexes(aiBrain, mainPos, radius)
     local units = aiBrain:GetListOfUnits(MexCategory, false, true) or {}
     local count = 0
     for _, unit in units do
-        if unit and not unit.Dead and not unit:IsUnitState('Upgrading') and GetFraction(unit) < 0.995 then
+        if unit and not unit.Dead and not unit:IsUnitState('Upgrading') and Common.GetFraction(unit) < 0.995 then
             local pos = unit.GetPosition and unit:GetPosition() or false
-            if pos and (not mainPos or Distance2D(pos, mainPos) <= (radius or 520)) then
+            if pos and (not mainPos or Common.Distance2D(pos, mainPos) <= (radius or 520)) then
                 count = count + 1
             end
         end
@@ -663,23 +650,23 @@ local function TryOpenSurplusExpansionBuild(aiBrain, runtime, eng, mainPos, enem
         return false
     end
 
-    local engineerId = GetEntityId(eng)
+    local engineerId = Common.GetEntityId(eng)
     local pos = eng.GetPosition and eng:GetPosition() or false
     local sourcePos = pos and { pos[1], pos[2] or 0, pos[3], EngineerId = engineerId } or false
-    local target = FindExpansionTarget(aiBrain, runtime, mainPos, enemyPos, math.max(520, safeExpandDistance), 1.7, now, sourcePos)
+    local target = Expansion.FindExpansionTarget(aiBrain, runtime, mainPos, enemyPos, math.max(520, safeExpandDistance), 1.7, now, sourcePos)
     if not target then
-        target = FindExpansionTarget(aiBrain, runtime, mainPos, enemyPos, math.max(600, safeExpandDistance + 80), 1.95, now, sourcePos)
+        target = Expansion.FindExpansionTarget(aiBrain, runtime, mainPos, enemyPos, math.max(600, safeExpandDistance + 80), 1.95, now, sourcePos)
     end
     if not target then
         return false
     end
 
-    local bp = PickMexBlueprint(eng)
+    local bp = Expansion.PickMexBlueprint(eng)
     if not bp then
         return false
     end
 
-    ReserveExpansionTarget(runtime, now, target, engineerId)
+    Expansion.ReserveExpansionTarget(runtime, now, target, engineerId)
     IssueBuildMobile({ eng }, target, bp, {})
     runtime.LastSurplusExpansionIssueTime = now
     runtime.LastSurplusExpansionPos = target
@@ -714,7 +701,7 @@ local function ComputeStructureTaskRequirements(kind, fraction, stallTime, eco)
     if stallTime >= 24 then
         required = required + 1
     end
-    return Clamp(required, 1, 3)
+    return Common.Clamp(required, 1, 3)
 end
 
 local function FindTrackedUnfinishedStructure(aiBrain, task)
@@ -733,9 +720,9 @@ local function FindTrackedUnfinishedStructure(aiBrain, task)
         if structure and not structure.Dead and structure:IsUnitState('BeingBuilt') then
             local pos = structure:GetPosition()
             if pos then
-                local fraction = GetFraction(structure)
+                local fraction = Common.GetFraction(structure)
                 if fraction < 0.995 then
-                    local entityId = GetEntityId(structure)
+                    local entityId = Common.GetEntityId(structure)
                     local kind = GetStructureKind(structure)
                     local priority = 0
                     if kind == 'Mex' then
@@ -756,7 +743,7 @@ local function FindTrackedUnfinishedStructure(aiBrain, task)
                         return structure, pos, fraction, kind, priority
                     end
 
-                    if task.TargetPos and not fallback and Distance2D(pos, task.TargetPos) <= 8 then
+                    if task.TargetPos and not fallback and Common.Distance2D(pos, task.TargetPos) <= 8 then
                         fallback = structure
                         fallbackPos = pos
                         fallbackFraction = fraction
@@ -870,3 +857,4 @@ M.NeedsBootstrapPower = NeedsBootstrapPower
 M.NeedsCriticalRadar = NeedsCriticalRadar
 M.GetRadarReservedBuilderIds = GetRadarReservedBuilderIds
 return M
+

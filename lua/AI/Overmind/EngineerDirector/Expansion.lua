@@ -5,10 +5,6 @@ local OvermindMemory = import('/mods/OvermindAI/lua/AI/Overmind/Memory.lua')
 
 local T1MexCategory = categories.STRUCTURE * categories.MASSEXTRACTION * categories.TECH1
 
-local Distance2D = Common.Distance2D
-local GetEntityId = Common.GetEntityId
-local RecallEngineer = Common.RecallEngineer
-local HasEnemyCombatNear = Threat.HasEnemyCombatNear
 
 local M = {}
 
@@ -36,7 +32,7 @@ local function IsSafeExpansionTarget(aiBrain, runtime, pos, mainPos, enemyPos, m
         return false
     end
 
-    local distMain = Distance2D(pos, mainPos)
+    local distMain = Common.Distance2D(pos, mainPos)
     if distMain > maxDistance then
         return false
     end
@@ -68,17 +64,17 @@ local function IsSafeExpansionTarget(aiBrain, runtime, pos, mainPos, enemyPos, m
     end
 
     if enemyPos then
-        local distEnemy = Distance2D(pos, enemyPos)
+        local distEnemy = Common.Distance2D(pos, enemyPos)
         if distEnemy + 58 < distMain then
             return false
         end
     end
 
     local raid = runtime and runtime.RaidDefense or {}
-    if raid and raid.LastThreatMexPos and Distance2D(pos, raid.LastThreatMexPos) < 40 then
+    if raid and raid.LastThreatMexPos and Common.Distance2D(pos, raid.LastThreatMexPos) < 40 then
         return false
     end
-    if raid and raid.ExposedMexUnderAirRaid and raid.ExposedMexThreatPos and Distance2D(pos, raid.ExposedMexThreatPos) < 72 then
+    if raid and raid.ExposedMexUnderAirRaid and raid.ExposedMexThreatPos and Common.Distance2D(pos, raid.ExposedMexThreatPos) < 72 then
         return false
     end
     local routeRisk = OvermindMemory.GetRouteRisk(aiBrain, mainPos, pos, 5, 54)
@@ -86,7 +82,7 @@ local function IsSafeExpansionTarget(aiBrain, runtime, pos, mainPos, enemyPos, m
         return false
     end
 
-    if HasEnemyCombatNear(aiBrain, pos, 30) then
+    if Threat.HasEnemyCombatNear(aiBrain, pos, 30) then
         return false
     end
 
@@ -132,7 +128,7 @@ local function GetContestExpansionBias(runtime, pos, mainPos, enemyPos)
     end
 
     local bias = 0
-    local distMain = Distance2D(pos, mainPos)
+    local distMain = Common.Distance2D(pos, mainPos)
     local outerHoldShare = policy.OuterHoldShare or 0
     if distMain >= 120 then
         bias = bias + 14
@@ -144,7 +140,7 @@ local function GetContestExpansionBias(runtime, pos, mainPos, enemyPos)
     local graph = runtime.ZoneGraph or {}
     local bestExpansionPos = graph.BestExpansionPos or ((runtime.ZoneModel or {}).BestExpansionPos)
     if bestExpansionPos then
-        local distExpansion = Distance2D(pos, bestExpansionPos)
+        local distExpansion = Common.Distance2D(pos, bestExpansionPos)
         if distExpansion <= 36 then
             bias = bias + 30
         elseif distExpansion <= 80 then
@@ -154,7 +150,7 @@ local function GetContestExpansionBias(runtime, pos, mainPos, enemyPos)
 
     local bestRaidPos = graph.BestRaidPos or ((runtime.ZoneModel or {}).BestRaidPos)
     if bestRaidPos then
-        local distRaid = Distance2D(pos, bestRaidPos)
+        local distRaid = Common.Distance2D(pos, bestRaidPos)
         if distRaid <= 42 then
             bias = bias + 16
         elseif distRaid <= 90 then
@@ -187,7 +183,7 @@ local function GetContestExpansionBias(runtime, pos, mainPos, enemyPos)
     end
 
     if enemyPos then
-        local distEnemy = Distance2D(pos, enemyPos)
+        local distEnemy = Common.Distance2D(pos, enemyPos)
         if distEnemy > distMain then
             bias = bias + math.min(12, (distEnemy - distMain) * 0.08)
         end
@@ -260,7 +256,7 @@ local function NeedsBootstrapPower(aiBrain, runtime)
     local units = aiBrain:GetListOfUnits(categories.ENERGYPRODUCTION * categories.STRUCTURE, false, true) or {}
     local ready = 0
     for _, unit in units do
-        if unit and not unit.Dead and GetFraction(unit) >= 0.95 and not unit:IsUnitState('BeingBuilt') then
+        if unit and not unit.Dead and Common.GetFraction(unit) >= 0.95 and not unit:IsUnitState('BeingBuilt') then
             ready = ready + 1
         end
     end
@@ -324,8 +320,8 @@ local function FindExpansionTarget(aiBrain, runtime, mainPos, enemyPos, maxDista
             and not HasFriendlyMexAtPos(aiBrain, pos, 8)
             and not IsReservedExpansionTarget(runtime, now, pos, engineerId)
             and IsSafeExpansionTarget(aiBrain, runtime, pos, mainPos, enemyPos, maxDistance, threatCap) then
-            local distMain = Distance2D(pos, mainPos)
-            local distSource = Distance2D(pos, sourcePos)
+            local distMain = Common.Distance2D(pos, mainPos)
+            local distSource = Common.Distance2D(pos, sourcePos)
             local threat = aiBrain:GetThreatAtPosition(pos, 1, true, 'AntiSurface') or 0
             local score
             if now < 360 then
@@ -336,7 +332,7 @@ local function FindExpansionTarget(aiBrain, runtime, mainPos, enemyPos, maxDista
             score = score - (threat * 28)
             score = score + GetContestExpansionBias(runtime, pos, mainPos, enemyPos)
             if enemyPos then
-                local distEnemy = Distance2D(pos, enemyPos)
+                local distEnemy = Common.Distance2D(pos, enemyPos)
                 score = score + math.min(45, distEnemy * 0.12)
             end
             if score > bestScore then
@@ -361,23 +357,23 @@ local function FindFollowupExpansionTarget(aiBrain, runtime, mainPos, enemyPos, 
 
     local bestPos = false
     local bestScore = -99999
-    local anchorDistMain = Distance2D(anchorPos, mainPos)
+    local anchorDistMain = Common.Distance2D(anchorPos, mainPos)
     for _, marker in markers do
         local pos = marker and marker.Position
         if pos
             and not HasFriendlyMexAtPos(aiBrain, pos, 8)
             and not IsReservedExpansionTarget(runtime, now, pos, engineerId)
             and IsSafeExpansionTarget(aiBrain, runtime, pos, mainPos, enemyPos, maxDistance, threatCap) then
-            local distAnchor = Distance2D(pos, anchorPos)
+            local distAnchor = Common.Distance2D(pos, anchorPos)
             if distAnchor >= 28 and distAnchor <= 130 then
-                local distMain = Distance2D(pos, mainPos)
+                local distMain = Common.Distance2D(pos, mainPos)
                 local threat = aiBrain:GetThreatAtPosition(pos, 1, true, 'AntiSurface') or 0
                 local score = 280 - (distAnchor * 1.45) - (distMain * 0.25) - (threat * 30)
                 if distMain + 12 >= anchorDistMain then
                     score = score + 34
                 end
                 if enemyPos then
-                    local distEnemy = Distance2D(pos, enemyPos)
+                    local distEnemy = Common.Distance2D(pos, enemyPos)
                     score = score + math.min(30, distEnemy * 0.08)
                 end
                 if score > bestScore then
@@ -424,8 +420,8 @@ local function DispatchExpansionEngineer(aiBrain, runtime, now, engineers, mainP
     for _, eng in engineers do
         if eng and not eng.Dead and not IsConstructing(eng) and IsIdle(eng) then
             local pos = eng:GetPosition()
-            if pos and Distance2D(pos, mainPos) <= 220 then
-                local sourcePos = { pos[1], pos[2] or 0, pos[3], EngineerId = GetEntityId(eng) }
+            if pos and Common.Distance2D(pos, mainPos) <= 220 then
+                local sourcePos = { pos[1], pos[2] or 0, pos[3], EngineerId = Common.GetEntityId(eng) }
                 local target = FindExpansionTarget(aiBrain, runtime, mainPos, enemyPos, safeExpandDistance, threatCap, now, sourcePos)
                 if not target then
                     local relaxedCap = math.max(threatCap + 0.35, 1.55)
@@ -436,7 +432,7 @@ local function DispatchExpansionEngineer(aiBrain, runtime, now, engineers, mainP
                 end
                 local bp = PickMexBlueprint(eng)
                 if bp and IssueBuildMobile then
-                    local engineerId = GetEntityId(eng)
+                    local engineerId = Common.GetEntityId(eng)
                     ReserveExpansionTarget(runtime, now, target, engineerId)
                     IssueBuildMobile({ eng }, target, bp, {})
                     local landReady = ((((runtime.ProductionDirector or {}).Current or {}).Factories or {}).Land or {}).Ready or 0
@@ -484,3 +480,4 @@ M.FindExpansionTarget = FindExpansionTarget
 M.FindFollowupExpansionTarget = FindFollowupExpansionTarget
 M.DispatchExpansionEngineer = DispatchExpansionEngineer
 return M
+

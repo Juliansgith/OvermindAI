@@ -6,23 +6,6 @@ local OvermindMemory = import('/mods/OvermindAI/lua/AI/Overmind/Memory.lua')
 
 local BuilderCategory = categories.ENGINEER * categories.MOBILE + categories.COMMAND
 
-local Distance2D = Common.Distance2D
-local GetMainPos = Common.GetMainPos
-local GetFraction = Common.GetFraction
-local GetEntityId = Common.GetEntityId
-local IsIdle = Common.IsIdle
-local GetCommandQueueLength = Common.GetCommandQueueLength
-local IsConstructing = Common.IsConstructing
-local RecallEngineer = Common.RecallEngineer
-local HasEnemyCombatNear = Threat.HasEnemyCombatNear
-local TryReclaimEnemyMex = Reclaim.TryReclaimEnemyMex
-local TryReclaimFieldZone = Reclaim.TryReclaimFieldZone
-local TryOpenSurplusExpansionBuild = Recovery.TryOpenSurplusExpansionBuild
-local GetPriorityPowerRecoveryTarget = Recovery.GetPriorityPowerRecoveryTarget
-local TryOpenPowerRecoveryBuild = Recovery.TryOpenPowerRecoveryBuild
-local ShouldScaleBaseEco = Recovery.ShouldScaleBaseEco
-local ShouldPersistentSurplusSpend = Recovery.ShouldPersistentSurplusSpend
-local ComputeFactoryTaskRequirements = Recovery.ComputeFactoryTaskRequirements
 
 local M = {}
 
@@ -69,20 +52,20 @@ local function AssignBuildersToUnfinishedFactory(aiBrain, runtime, now, target, 
 
     local eco = runtime.EcoState or {}
     local recovery = runtime.Recovery or {}
-    local mainPos = GetMainPos(aiBrain, runtime)
+    local mainPos = Common.GetMainPos(aiBrain, runtime)
     local targetThreat = aiBrain:GetThreatAtPosition(targetPos, 1, true, 'AntiSurface') or 0
     local openingFactoryFloor = string.lower(domain or 'none') == 'land'
         and readyFactories <= 0
         and now < 180
         and mainPos
-        and Distance2D(targetPos, mainPos) <= 120
-        and not HasEnemyCombatNear(aiBrain, targetPos, 42)
+        and Common.Distance2D(targetPos, mainPos) <= 120
+        and not Threat.HasEnemyCombatNear(aiBrain, targetPos, 42)
     local stickyLandFinish = string.lower(domain or 'none') == 'land'
         and mainPos
-        and Distance2D(targetPos, mainPos) <= 260
-        and GetFraction(target) >= 0.18
-        and not HasEnemyCombatNear(aiBrain, targetPos, 52)
-    local requiredBuilders = ComputeFactoryTaskRequirements(domain, GetFraction(target), stallTime, readyFactories, eco)
+        and Common.Distance2D(targetPos, mainPos) <= 260
+        and Common.GetFraction(target) >= 0.18
+        and not Threat.HasEnemyCombatNear(aiBrain, targetPos, 52)
+    local requiredBuilders = Recovery.ComputeFactoryTaskRequirements(domain, Common.GetFraction(target), stallTime, readyFactories, eco)
     if openingFactoryFloor then
         requiredBuilders = math.max(2, math.min(3, requiredBuilders))
     elseif stickyLandFinish then
@@ -125,16 +108,16 @@ local function AssignBuildersToUnfinishedFactory(aiBrain, runtime, now, target, 
         Reachable = 0,
         Interruptible = 0,
     }
-    local targetId = GetEntityId(target)
+    local targetId = Common.GetEntityId(target)
 
     for _, unit in builders do
         if unit and not unit.Dead then
             debug.Total = debug.Total + 1
-            local entityId = GetEntityId(unit)
+            local entityId = Common.GetEntityId(unit)
             if not (reservedBuilderIds and entityId and reservedBuilderIds[entityId]) then
                 local pos = unit.GetPosition and unit:GetPosition() or false
                 if pos then
-                    local dist = Distance2D(pos, targetPos)
+                    local dist = Common.Distance2D(pos, targetPos)
                     local q = unit.GetCommandQueue and unit:GetCommandQueue() or false
                     local qLen = q and table.getn(q) or 0
                     local busy = qLen > 0 or unit:IsUnitState('Building') or unit:IsUnitState('Repairing') or unit:IsUnitState('Upgrading')
@@ -150,13 +133,13 @@ local function AssignBuildersToUnfinishedFactory(aiBrain, runtime, now, target, 
                     local safe = localThreat <= safeCap and targetThreat <= (safeCap + 0.8)
                     local openerSafe = openingFactoryFloor
                         and mainPos
-                        and Distance2D(pos, mainPos) <= 155
+                        and Common.Distance2D(pos, mainPos) <= 155
                         and dist <= 145
-                        and not HasEnemyCombatNear(aiBrain, pos, 40)
+                        and not Threat.HasEnemyCombatNear(aiBrain, pos, 40)
                     if openerSafe then
                         safe = true
                     end
-                    if isCommander and mainPos and Distance2D(pos, mainPos) > 190 then
+                    if isCommander and mainPos and Common.Distance2D(pos, mainPos) > 190 then
                         safe = false
                     end
 
@@ -169,7 +152,7 @@ local function AssignBuildersToUnfinishedFactory(aiBrain, runtime, now, target, 
                             reachableRadius = math.max(reachableRadius, 640)
                         end
                         local focus = unit.GetFocusUnit and unit:GetFocusUnit() or false
-                        local alreadyAssigned = focus and (GetEntityId(focus) == targetId)
+                        local alreadyAssigned = focus and (Common.GetEntityId(focus) == targetId)
                         local interruptible = alreadyAssigned or (not busy) or (forceInterrupt and qLen <= interruptQCap and not unit:IsUnitState('Upgrading'))
                         local reachable = dist <= reachableRadius or alreadyAssigned
                         if reachable then
@@ -207,7 +190,7 @@ local function AssignBuildersToUnfinishedFactory(aiBrain, runtime, now, target, 
         end
 
         local unit = candidate.Unit
-        local entityId = GetEntityId(unit)
+        local entityId = Common.GetEntityId(unit)
         if entityId and not claimed[entityId] then
             claimed[entityId] = true
             assigned = assigned + 1
@@ -242,13 +225,13 @@ local function AssignBuildersToUnfinishedStructure(aiBrain, runtime, now, target
     end
 
     local eco = runtime.EcoState or {}
-    local mainPos = GetMainPos(aiBrain, runtime)
+    local mainPos = Common.GetMainPos(aiBrain, runtime)
     local targetThreat = aiBrain:GetThreatAtPosition(targetPos, 1, true, 'AntiSurface') or 0
     local radarCritical = NeedsCriticalRadar(runtime)
     local bomberWatch, bomberPanic, exposedMexAirRaid = ComputeAirThreatFlags(runtime, now)
     local raid = runtime.RaidDefense or {}
     local airThreatened = bomberWatch or bomberPanic or raid.UnderAirHarass or exposedMexAirRaid
-    local targetFraction = GetFraction(target)
+    local targetFraction = Common.GetFraction(target)
     local requiredBuilders = ComputeStructureTaskRequirements(kind, targetFraction, stallTime, eco)
     local kindLower = string.lower(kind or 'none')
     local forceFinishPower = kind == 'Power'
@@ -333,16 +316,16 @@ local function AssignBuildersToUnfinishedStructure(aiBrain, runtime, now, target
         Reachable = 0,
         Interruptible = 0,
     }
-    local targetId = GetEntityId(target)
+    local targetId = Common.GetEntityId(target)
 
     for _, unit in builders do
         if unit and not unit.Dead then
-            local entityId = GetEntityId(unit)
+            local entityId = Common.GetEntityId(unit)
             if not (reservedBuilderIds and entityId and reservedBuilderIds[entityId]) then
                 debug.Total = debug.Total + 1
                 local pos = unit.GetPosition and unit:GetPosition() or false
                 if pos then
-                    local dist = Distance2D(pos, targetPos)
+                    local dist = Common.Distance2D(pos, targetPos)
                     local q = unit.GetCommandQueue and unit:GetCommandQueue() or false
                     local qLen = q and table.getn(q) or 0
                     local busy = qLen > 0 or unit:IsUnitState('Building') or unit:IsUnitState('Repairing') or unit:IsUnitState('Upgrading')
@@ -356,7 +339,7 @@ local function AssignBuildersToUnfinishedStructure(aiBrain, runtime, now, target
                         safeCap = safeCap + 0.5
                     end
                     local safe = localThreat <= safeCap and targetThreat <= (safeCap + 0.8)
-                    if isCommander and mainPos and Distance2D(pos, mainPos) > 170 then
+                    if isCommander and mainPos and Common.Distance2D(pos, mainPos) > 170 then
                         safe = false
                     end
 
@@ -364,7 +347,7 @@ local function AssignBuildersToUnfinishedStructure(aiBrain, runtime, now, target
                         debug.Safe = debug.Safe + 1
                         local reachableRadius = isCommander and math.min(dispatchRadius, 200) or dispatchRadius
                         local focus = unit.GetFocusUnit and unit:GetFocusUnit() or false
-                        local alreadyAssigned = focus and (GetEntityId(focus) == targetId)
+                        local alreadyAssigned = focus and (Common.GetEntityId(focus) == targetId)
                         local interruptible = alreadyAssigned or (not busy) or (forceInterrupt and qLen <= interruptQCap and not unit:IsUnitState('Upgrading'))
                         local reachable = dist <= reachableRadius or alreadyAssigned
                         if reachable then
@@ -399,7 +382,7 @@ local function AssignBuildersToUnfinishedStructure(aiBrain, runtime, now, target
         end
 
         local unit = candidate.Unit
-        local entityId = GetEntityId(unit)
+        local entityId = Common.GetEntityId(unit)
         if entityId and not claimed[entityId] then
             claimed[entityId] = true
             assigned = assigned + 1
@@ -452,7 +435,7 @@ local function GetPriorityUpgradeAssistTarget(aiBrain, runtime, mainPos)
         if unit and not unit.Dead and unit:IsUnitState('Upgrading') then
             local pos = unit.GetPosition and unit:GetPosition() or false
             if pos then
-                local dist = Distance2D(pos, mainPos)
+                local dist = Common.Distance2D(pos, mainPos)
                 if dist <= 360 then
                     local score = 0
                     if EntityCategoryContains(categories.MASSEXTRACTION, unit) then
@@ -493,7 +476,7 @@ local function GetPriorityRepairTarget(aiBrain, runtime, mainPos)
             if maxHealth > 0 and health > 0 and health < (maxHealth * 0.92) then
                 local pos = unit.GetPosition and unit:GetPosition() or false
                 if pos then
-                    local dist = Distance2D(pos, mainPos)
+                    local dist = Common.Distance2D(pos, mainPos)
                     if dist <= 320 then
                         local score = ((1 - (health / maxHealth)) * 220)
                         if EntityCategoryContains(categories.FACTORY, unit) then
@@ -533,7 +516,7 @@ local function GetPriorityBuildAssistTarget(aiBrain, runtime, mainPos)
         if unit and not unit.Dead and unit:IsUnitState('BeingBuilt') and not unit:IsUnitState('Upgrading') then
             local pos = unit.GetPosition and unit:GetPosition() or false
             if pos then
-                local dist = Distance2D(pos, mainPos)
+                local dist = Common.Distance2D(pos, mainPos)
                 if dist <= 360 then
                     local score = 0
                     if EntityCategoryContains(categories.FACTORY * categories.LAND, unit) then
@@ -549,7 +532,7 @@ local function GetPriorityBuildAssistTarget(aiBrain, runtime, mainPos)
                     else
                         score = score + 100
                     end
-                    score = score + ((1 - GetFraction(unit)) * 80)
+                    score = score + ((1 - Common.GetFraction(unit)) * 80)
                     score = score - dist
                     if score > bestScore then
                         bestScore = score
@@ -568,16 +551,16 @@ local function TryAssignAssistOrRepair(aiBrain, runtime, eng, target, isUpgrade,
         return false
     end
 
-    local mainPos = GetMainPos(aiBrain, runtime)
+    local mainPos = Common.GetMainPos(aiBrain, runtime)
     local engPos = eng.GetPosition and eng:GetPosition() or false
     local targetPos = target.GetPosition and target:GetPosition() or false
     if engPos and targetPos then
         local targetThreat = aiBrain:GetThreatAtPosition(targetPos, 1, true, 'AntiSurface') or 0
         local localThreat = aiBrain:GetThreatAtPosition(engPos, 1, true, 'AntiSurface') or 0
         local routeRisk = OvermindMemory.GetRouteRisk(aiBrain, engPos, targetPos, 4, 40)
-        local targetEnemyCombat = HasEnemyCombatNear(aiBrain, targetPos, 26)
-        local routeEnemyCombat = HasEnemyCombatNear(aiBrain, engPos, 20)
-        local nearMain = mainPos and Distance2D(targetPos, mainPos) <= 140
+        local targetEnemyCombat = Threat.HasEnemyCombatNear(aiBrain, targetPos, 26)
+        local routeEnemyCombat = Threat.HasEnemyCombatNear(aiBrain, engPos, 20)
+        local nearMain = mainPos and Common.Distance2D(targetPos, mainPos) <= 140
         if (targetEnemyCombat and not nearMain)
             or routeEnemyCombat
             or targetThreat > (nearMain and 2.0 or 1.1)
@@ -637,7 +620,7 @@ local function ProcessEngineer(aiBrain, runtime, eng, now, ctx)
         return
     end
 
-    local entityId = GetEntityId(eng)
+    local entityId = Common.GetEntityId(eng)
     local claimedByFactoryTask = ctx.factoryTask.Active and entityId and ctx.factoryTask.BuilderIds and ctx.factoryTask.BuilderIds[entityId]
     local claimedByStructureTask = ctx.structureTask.Active and entityId and ctx.structureTask.BuilderIds and ctx.structureTask.BuilderIds[entityId]
     local claimedByRadarOrder = entityId and ctx.radarReservedBuilderIds[entityId]
@@ -650,11 +633,11 @@ local function ProcessEngineer(aiBrain, runtime, eng, now, ctx)
         return
     end
 
-    local dist = Distance2D(pos, ctx.mainPos)
+    local dist = Common.Distance2D(pos, ctx.mainPos)
     local localThreat = aiBrain:GetThreatAtPosition(pos, 1, true, 'AntiSurface') or 0
     local escort = aiBrain:GetNumUnitsAroundPoint(categories.MOBILE * (categories.LAND + categories.AIR) - categories.ENGINEER - categories.SCOUT - categories.COMMAND, pos, 26, 'Ally') or 0
-    local isIdle = IsIdle(eng)
-    local constructing = IsConstructing(eng)
+    local isIdle = Common.IsIdle(eng)
+    local constructing = Common.IsConstructing(eng)
     local acted = false
 
     if isIdle and not constructing then
@@ -679,7 +662,7 @@ local function ProcessEngineer(aiBrain, runtime, eng, now, ctx)
         elseif ctx.macroPhase == 'starter_mex_claim'
             and localThreat < 1.8
             and dist <= 320
-            and TryOpenSurplusExpansionBuild(aiBrain, runtime, eng, ctx.mainPos, ctx.enemyPos, ctx.safeExpandDistance, now) then
+            and Recovery.TryOpenSurplusExpansionBuild(aiBrain, runtime, eng, ctx.mainPos, ctx.enemyPos, ctx.safeExpandDistance, now) then
             ctx.dispatchedExpand = ctx.dispatchedExpand + 1
             acted = true
         elseif (ctx.macroPhase == 'bootstrap_factory' or ctx.macroPhase == 'land_factory_floor')
@@ -701,11 +684,11 @@ local function ProcessEngineer(aiBrain, runtime, eng, now, ctx)
             elseif (ctx.hqPowerRecoveryWanted or ctx.macroNeedPowerRecovery)
                 and localThreat < 2.2
                 and dist <= 360 then
-                local powerTarget = GetPriorityPowerRecoveryTarget(aiBrain, runtime, ctx.mainPos, ctx.structureTargetObject, ctx.structureTask)
+                local powerTarget = Recovery.GetPriorityPowerRecoveryTarget(aiBrain, runtime, ctx.mainPos, ctx.structureTargetObject, ctx.structureTask)
                 if powerTarget and TryAssignAssistOrRepair(aiBrain, runtime, eng, powerTarget, false, now) then
                     ctx.powerRecoveryCount = ctx.powerRecoveryCount + 1
                     acted = true
-                elseif TryOpenPowerRecoveryBuild(aiBrain, runtime, eng, ctx.mainPos, now) then
+                elseif Recovery.TryOpenPowerRecoveryBuild(aiBrain, runtime, eng, ctx.mainPos, now) then
                     ctx.powerRecoveryCount = ctx.powerRecoveryCount + 1
                     acted = true
                 end
@@ -721,7 +704,7 @@ local function ProcessEngineer(aiBrain, runtime, eng, now, ctx)
             and ctx.fieldTaskWindow
             and ctx.reclaimField < ctx.fieldTaskQuota
             and ctx.needBase <= 0
-            and TryReclaimFieldZone(aiBrain, runtime, eng, ctx.reclaimFieldPos, now) then
+            and Reclaim.TryReclaimFieldZone(aiBrain, runtime, eng, ctx.reclaimFieldPos, now) then
             ctx.reclaimField = ctx.reclaimField + 1
             acted = true
         elseif ctx.contestFieldMode
@@ -730,7 +713,7 @@ local function ProcessEngineer(aiBrain, runtime, eng, now, ctx)
             and ctx.needBase <= 0
             and localThreat < 1.8
             and dist <= 380
-            and TryOpenSurplusExpansionBuild(aiBrain, runtime, eng, ctx.mainPos, ctx.enemyPos, ctx.safeExpandDistance, now) then
+            and Recovery.TryOpenSurplusExpansionBuild(aiBrain, runtime, eng, ctx.mainPos, ctx.enemyPos, ctx.safeExpandDistance, now) then
             ctx.dispatchedExpand = ctx.dispatchedExpand + 1
             acted = true
         elseif ctx.contestFieldMode
@@ -739,7 +722,7 @@ local function ProcessEngineer(aiBrain, runtime, eng, now, ctx)
             and ctx.needBase <= 0
             and localThreat < 1.9
             and dist <= 420
-            and TryReclaimEnemyMex(aiBrain, runtime, eng, now) then
+            and Reclaim.TryReclaimEnemyMex(aiBrain, runtime, eng, now) then
             ctx.reclaimEnemyMex = ctx.reclaimEnemyMex + 1
             acted = true
         end
@@ -748,14 +731,14 @@ local function ProcessEngineer(aiBrain, runtime, eng, now, ctx)
     if (not acted)
         and isIdle
         and not constructing
-        and (ctx.constraints.PowerBufferLow == true or ctx.hqPowerRecoveryWanted or ShouldScaleBaseEco(runtime, now))
+        and (ctx.constraints.PowerBufferLow == true or ctx.hqPowerRecoveryWanted or Recovery.ShouldScaleBaseEco(runtime, now))
         and localThreat < 2.2
         and dist <= 360 then
-        local powerTarget = GetPriorityPowerRecoveryTarget(aiBrain, runtime, ctx.mainPos, ctx.structureTargetObject, ctx.structureTask)
+        local powerTarget = Recovery.GetPriorityPowerRecoveryTarget(aiBrain, runtime, ctx.mainPos, ctx.structureTargetObject, ctx.structureTask)
         if powerTarget and TryAssignAssistOrRepair(aiBrain, runtime, eng, powerTarget, false, now) then
             ctx.powerRecoveryCount = ctx.powerRecoveryCount + 1
             acted = true
-        elseif TryOpenPowerRecoveryBuild(aiBrain, runtime, eng, ctx.mainPos, now) then
+        elseif Recovery.TryOpenPowerRecoveryBuild(aiBrain, runtime, eng, ctx.mainPos, now) then
             ctx.powerRecoveryCount = ctx.powerRecoveryCount + 1
             acted = true
         end
@@ -768,7 +751,7 @@ local function ProcessEngineer(aiBrain, runtime, eng, now, ctx)
         and localThreat < 2.2
         and dist <= 360
         and not eng:IsUnitState('Upgrading')
-        and ((isIdle and not constructing) or (not constructing and GetCommandQueueLength(eng) <= 2))
+        and ((isIdle and not constructing) or (not constructing and Common.GetCommandQueueLength(eng) <= 2))
         and TryAssignAssistOrRepair(aiBrain, runtime, eng, ctx.factoryTargetObject, false, now) then
         if entityId then
             ctx.factoryTask.BuilderIds = ctx.factoryTask.BuilderIds or {}
@@ -802,7 +785,7 @@ local function ProcessEngineer(aiBrain, runtime, eng, now, ctx)
         and ctx.structureTask.Active
         and ctx.structureTargetObject
         and (ctx.structureTask.Kind == 'Mex' or ctx.structureTask.Kind == 'Power')
-        and ShouldPersistentSurplusSpend(runtime, now)
+        and Recovery.ShouldPersistentSurplusSpend(runtime, now)
         and localThreat < 2.0
         and dist <= 360
         and TryAssignAssistOrRepair(aiBrain, runtime, eng, ctx.structureTargetObject, false, now) then
@@ -822,7 +805,7 @@ local function ProcessEngineer(aiBrain, runtime, eng, now, ctx)
         and isIdle
         and not constructing
         and (not ctx.transitionLock)
-        and (ShouldPersistentSurplusSpend(runtime, now) or ShouldScaleBaseEco(runtime, now))
+        and (Recovery.ShouldPersistentSurplusSpend(runtime, now) or Recovery.ShouldScaleBaseEco(runtime, now))
         and localThreat < 2.0
         and dist <= 360 then
         local buildAssistTarget = GetPriorityBuildAssistTarget(aiBrain, runtime, ctx.mainPos)
@@ -842,14 +825,14 @@ local function ProcessEngineer(aiBrain, runtime, eng, now, ctx)
     if (not acted)
         and isIdle
         and not constructing
-        and ShouldPersistentSurplusSpend(runtime, now)
+        and Recovery.ShouldPersistentSurplusSpend(runtime, now)
         and localThreat < 1.8
         and dist <= 260 then
-        if TryOpenSurplusExpansionBuild(aiBrain, runtime, eng, ctx.mainPos, ctx.enemyPos, ctx.safeExpandDistance, now) then
+        if Recovery.TryOpenSurplusExpansionBuild(aiBrain, runtime, eng, ctx.mainPos, ctx.enemyPos, ctx.safeExpandDistance, now) then
             ctx.dispatchedExpand = ctx.dispatchedExpand + 1
             ctx.surplusSpendCount = ctx.surplusSpendCount + 1
             acted = true
-        elseif ShouldScaleBaseEco(runtime, now) and TryOpenPowerRecoveryBuild(aiBrain, runtime, eng, ctx.mainPos, now) then
+        elseif Recovery.ShouldScaleBaseEco(runtime, now) and Recovery.TryOpenPowerRecoveryBuild(aiBrain, runtime, eng, ctx.mainPos, now) then
             ctx.powerRecoveryCount = ctx.powerRecoveryCount + 1
             ctx.surplusSpendCount = ctx.surplusSpendCount + 1
             acted = true
@@ -859,7 +842,7 @@ local function ProcessEngineer(aiBrain, runtime, eng, now, ctx)
     if isIdle
         and not constructing
         and (not acted)
-        and TryReclaimFieldZone(aiBrain, runtime, eng, ctx.reclaimFieldPos, now) then
+        and Reclaim.TryReclaimFieldZone(aiBrain, runtime, eng, ctx.reclaimFieldPos, now) then
         ctx.reclaimField = ctx.reclaimField + 1
         acted = true
     end
@@ -867,8 +850,8 @@ local function ProcessEngineer(aiBrain, runtime, eng, now, ctx)
     if isIdle
         and not constructing
         and (not acted)
-        and not (ShouldPersistentSurplusSpend(runtime, now) or ShouldScaleBaseEco(runtime, now))
-        and TryReclaimEnemyMex(aiBrain, runtime, eng, now) then
+        and not (Recovery.ShouldPersistentSurplusSpend(runtime, now) or Recovery.ShouldScaleBaseEco(runtime, now))
+        and Reclaim.TryReclaimEnemyMex(aiBrain, runtime, eng, now) then
         ctx.reclaimEnemyMex = ctx.reclaimEnemyMex + 1
         acted = true
     end
@@ -877,7 +860,7 @@ local function ProcessEngineer(aiBrain, runtime, eng, now, ctx)
     local earlyOverextend = now < 420 and dist > math.min(350, ctx.safeExpandDistance * 0.82) and escort < 2 and localThreat > 1.1
     local enemySideRisk = false
     if ctx.enemyPos then
-        local distEnemy = Distance2D(pos, ctx.enemyPos)
+        local distEnemy = Common.Distance2D(pos, ctx.enemyPos)
         enemySideRisk = dist > 160 and distEnemy < (dist * 0.95) and escort < 3
     end
     local severeThreat = localThreat > 3.3 and escort < 3
@@ -886,28 +869,28 @@ local function ProcessEngineer(aiBrain, runtime, eng, now, ctx)
         and escort < 2
         and (
             localThreat > 0.8
-            or (ctx.raid.ExposedMexThreatPos and Distance2D(pos, ctx.raid.ExposedMexThreatPos) < 70)
+            or (ctx.raid.ExposedMexThreatPos and Common.Distance2D(pos, ctx.raid.ExposedMexThreatPos) < 70)
         )
 
     if (not acted) and (severeThreat or farUnsafe or (not constructing and (earlyOverextend or enemySideRisk))) then
-        if RecallEngineer(runtime, eng, ctx.mainPos, now, 'threatened') then
+        if Common.RecallEngineer(runtime, eng, ctx.mainPos, now, 'threatened') then
             ctx.threatenedCount = ctx.threatenedCount + 1
         end
     elseif (not acted) and not constructing and airRaidRisk then
-        if RecallEngineer(runtime, eng, ctx.mainPos, now, 'air_raid') then
+        if Common.RecallEngineer(runtime, eng, ctx.mainPos, now, 'air_raid') then
             ctx.threatenedCount = ctx.threatenedCount + 1
         end
     elseif (not acted) and not constructing and ctx.needBase > 0 and dist > 130 and isIdle and localThreat < 1.9 then
-        if RecallEngineer(runtime, eng, ctx.mainPos, now, 'base_floor') then
+        if Common.RecallEngineer(runtime, eng, ctx.mainPos, now, 'base_floor') then
             ctx.recoverCount = ctx.recoverCount + 1
             ctx.needBase = ctx.needBase - 1
         end
     elseif (not acted) and not constructing and ctx.factoryTask.Active and (ctx.factoryTask.AssignedBuilders or 0) < (ctx.factoryTask.RequiredBuilders or 0) and dist > 140 and localThreat < 1.6 and ctx.forcedFactoryRecover < math.max(2, ctx.factoryTask.RequiredBuilders or 0) then
-        if RecallEngineer(runtime, eng, ctx.mainPos, now, 'factory_task') then
+        if Common.RecallEngineer(runtime, eng, ctx.mainPos, now, 'factory_task') then
             ctx.forcedFactoryRecover = ctx.forcedFactoryRecover + 1
         end
     elseif (not acted) and not constructing and ctx.severeFactoryStarve and dist > 140 and localThreat < 1.6 and ctx.forcedFactoryRecover < 2 then
-        if RecallEngineer(runtime, eng, ctx.mainPos, now, 'factory_starve') then
+        if Common.RecallEngineer(runtime, eng, ctx.mainPos, now, 'factory_starve') then
             ctx.forcedFactoryRecover = ctx.forcedFactoryRecover + 1
         end
     end
@@ -925,3 +908,4 @@ M.TryAssignAssistOrRepair = TryAssignAssistOrRepair
 M.DescribeStructureTaskTarget = DescribeStructureTaskTarget
 M.ProcessEngineer = ProcessEngineer
 return M
+
