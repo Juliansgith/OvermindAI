@@ -853,8 +853,8 @@ M.TryOpenSurplusExpansionBuild = TryOpenSurplusExpansionBuild
 M.ComputeStructureTaskRequirements = ComputeStructureTaskRequirements
 M.FindTrackedUnfinishedStructure = FindTrackedUnfinishedStructure
 M.ShouldKeepTrackedStructureTask = ShouldKeepTrackedStructureTask
-M.NeedsBootstrapPower = NeedsBootstrapPower
-M.NeedsCriticalRadar = NeedsCriticalRadar
-M.GetRadarReservedBuilderIds = GetRadarReservedBuilderIds
+M.NeedsBootstrapPower = Policy.NeedsBootstrapPower
+M.NeedsCriticalRadar = Policy.NeedsCriticalRadar
+M.GetRadarReservedBuilderIds = Policy.GetRadarReservedBuilderIds
 return M
 
