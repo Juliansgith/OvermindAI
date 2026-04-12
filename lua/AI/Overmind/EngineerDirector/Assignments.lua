@@ -227,12 +227,12 @@ local function AssignBuildersToUnfinishedStructure(aiBrain, runtime, now, target
     local eco = runtime.EcoState or {}
     local mainPos = Common.GetMainPos(aiBrain, runtime)
     local targetThreat = aiBrain:GetThreatAtPosition(targetPos, 1, true, 'AntiSurface') or 0
-    local radarCritical = NeedsCriticalRadar(runtime)
-    local bomberWatch, bomberPanic, exposedMexAirRaid = ComputeAirThreatFlags(runtime, now)
+    local radarCritical = Recovery.NeedsCriticalRadar(runtime)
+    local bomberWatch, bomberPanic, exposedMexAirRaid = Threat.ComputeAirThreatFlags(runtime, now)
     local raid = runtime.RaidDefense or {}
     local airThreatened = bomberWatch or bomberPanic or raid.UnderAirHarass or exposedMexAirRaid
     local targetFraction = Common.GetFraction(target)
-    local requiredBuilders = ComputeStructureTaskRequirements(kind, targetFraction, stallTime, eco)
+    local requiredBuilders = Recovery.ComputeStructureTaskRequirements(kind, targetFraction, stallTime, eco)
     local kindLower = string.lower(kind or 'none')
     local forceFinishPower = kind == 'Power'
         and targetFraction >= 0.8
@@ -908,4 +908,5 @@ M.TryAssignAssistOrRepair = TryAssignAssistOrRepair
 M.DescribeStructureTaskTarget = DescribeStructureTaskTarget
 M.ProcessEngineer = ProcessEngineer
 return M
+
 

@@ -17,65 +17,6 @@ local DefenseCategory = categories.STRUCTURE * categories.DEFENSE
 local BuilderCategory = categories.ENGINEER * categories.MOBILE + categories.COMMAND
 local LandCombatCategory = categories.MOBILE * categories.LAND - categories.ENGINEER - categories.SCOUT - categories.COMMAND
 
-local Distance2D = Common.Distance2D
-local Clamp = Common.Clamp
-local GetMainPos = Common.GetMainPos
-local GetFraction = Common.GetFraction
-local GetEntityId = Common.GetEntityId
-local IsIdle = Common.IsIdle
-local GetCommandQueueLength = Common.GetCommandQueueLength
-local IsConstructing = Common.IsConstructing
-local ShouldThrottle = Common.ShouldThrottle
-local RecallEngineer = Common.RecallEngineer
-
-local ComputeAirThreatFlags = Threat.ComputeAirThreatFlags
-local HasEnemyCombatNear = Threat.HasEnemyCombatNear
-
-local PickMexBlueprint = Expansion.PickMexBlueprint
-local CleanupExpansionReservations = Expansion.CleanupExpansionReservations
-local ReserveExpansionTarget = Expansion.ReserveExpansionTarget
-local FindExpansionTarget = Expansion.FindExpansionTarget
-local FindFollowupExpansionTarget = Expansion.FindFollowupExpansionTarget
-local DispatchExpansionEngineer = Expansion.DispatchExpansionEngineer
-
-local GetFactoryDomain = Recovery.GetFactoryDomain
-local GetStructureKind = Recovery.GetStructureKind
-local CountReadyFactories = Recovery.CountReadyFactories
-local ScoreStructureTarget = Recovery.ScoreStructureTarget
-local FindBestUnfinishedStructure = Recovery.FindBestUnfinishedStructure
-local FindBestUnfinishedFactory = Recovery.FindBestUnfinishedFactory
-local ResetFactoryTask = Recovery.ResetFactoryTask
-local ResetStructureTask = Recovery.ResetStructureTask
-local ComputeFactoryTaskRequirements = Recovery.ComputeFactoryTaskRequirements
-local PickPowerBlueprint = Recovery.PickPowerBlueprint
-local GetFactoryAnchor = Recovery.GetFactoryAnchor
-local FindPowerBuildPos = Recovery.FindPowerBuildPos
-local CountNearbyUnfinishedPower = Recovery.CountNearbyUnfinishedPower
-local GetPriorityPowerRecoveryTarget = Recovery.GetPriorityPowerRecoveryTarget
-local GetPriorityMexRecoveryTarget = Recovery.GetPriorityMexRecoveryTarget
-local ShouldForceFinishEcoStructure = Recovery.ShouldForceFinishEcoStructure
-local TryOpenPowerRecoveryBuild = Recovery.TryOpenPowerRecoveryBuild
-local ShouldScaleBaseEco = Recovery.ShouldScaleBaseEco
-local ShouldPersistentSurplusSpend = Recovery.ShouldPersistentSurplusSpend
-local TryOpenSurplusExpansionBuild = Recovery.TryOpenSurplusExpansionBuild
-local ComputeStructureTaskRequirements = Recovery.ComputeStructureTaskRequirements
-local FindTrackedUnfinishedStructure = Recovery.FindTrackedUnfinishedStructure
-local ShouldKeepTrackedStructureTask = Recovery.ShouldKeepTrackedStructureTask
-local NeedsBootstrapPower = Policy.NeedsBootstrapPower
-local NeedsCriticalRadar = Policy.NeedsCriticalRadar
-local GetRadarReservedBuilderIds = Policy.GetRadarReservedBuilderIds
-
-local ScoreFactoryBuilder = Assignments.ScoreFactoryBuilder
-local ScoreStructureBuilder = Assignments.ScoreStructureBuilder
-local AssignBuildersToUnfinishedFactory = Assignments.AssignBuildersToUnfinishedFactory
-local AssignBuildersToUnfinishedStructure = Assignments.AssignBuildersToUnfinishedStructure
-local GetPriorityUpgradeAssistTarget = Assignments.GetPriorityUpgradeAssistTarget
-local GetPriorityRepairTarget = Assignments.GetPriorityRepairTarget
-local GetPriorityBuildAssistTarget = Assignments.GetPriorityBuildAssistTarget
-local TryAssignAssistOrRepair = Assignments.TryAssignAssistOrRepair
-local DescribeStructureTaskTarget = Assignments.DescribeStructureTaskTarget
-local ProcessEngineer = Assignments.ProcessEngineer
-
 function Update(aiBrain, now)
     local runtime = aiBrain.OvermindRuntime
     if not runtime then
@@ -89,7 +30,7 @@ function Update(aiBrain, now)
 
     local engineers = aiBrain:GetListOfUnits(categories.ENGINEER * categories.MOBILE, false, true) or {}
     local policy = runtime.EcoPolicy or {}
-    local mainPos = GetMainPos(aiBrain, runtime)
+    local mainPos = Common.GetMainPos(aiBrain, runtime)
     local engState = runtime.EngineerState or {}
     runtime.EngineerState = engState
     local factoryTask = engState.UnfinishedFactoryTask or {}
@@ -97,7 +38,7 @@ function Update(aiBrain, now)
     local structureTask = engState.UnfinishedStructureTask or {}
     engState.UnfinishedStructureTask = structureTask
     engState.ExpansionReservations = engState.ExpansionReservations or {}
-    CleanupExpansionReservations(runtime, now)
+    Expansion.CleanupExpansionReservations(runtime, now)
 
     local baseFloor = policy.BaseEngineerFloor or 3
     if now < 300 then
@@ -111,7 +52,7 @@ function Update(aiBrain, now)
     local severeFactoryStarve = recovery.ForceFactoryRecovery and ((recovery.FactoryQueueStarvationTime or 0) >= 26)
     local eco = runtime.EcoState or {}
     local ecoCrash = (eco.MassStorageRatio or 0) <= 0.005 and (eco.EnergyStorageRatio or 0) <= 0.005
-    local radarCritical = NeedsCriticalRadar(runtime)
+    local radarCritical = Policy.NeedsCriticalRadar(runtime)
     local raid = runtime.RaidDefense or {}
     local constraints = ((runtime.ProductionDirector or {}).ConstraintState or {})
     local macro = runtime.MacroController or {}
@@ -127,13 +68,13 @@ function Update(aiBrain, now)
     local currentRadar = ((((runtime.ProductionDirector or {}).Current or {}).Structures or {}).Radar) or 0
     local bomberWatch = constraints.BomberWatch == true
     local bomberPanic = ((raid.BomberPanicUntil or -999) > now) or ((raid.LastBomberEnemyCount or 0) >= 1 and raid.UnderAirHarass)
-    local radarReservedBuilderIds = GetRadarReservedBuilderIds(runtime, now)
+    local radarReservedBuilderIds = Policy.GetRadarReservedBuilderIds(runtime, now)
     local hqPowerRecoveryWanted = ((((runtime.UpgradeDirector or {}).Factory) or {}).PowerRecoveryWanted) == true
 
-    local target, targetPos, fraction, domain, readyFactories = FindBestUnfinishedFactory(aiBrain, runtime, mainPos)
+    local target, targetPos, fraction, domain, readyFactories = Recovery.FindBestUnfinishedFactory(aiBrain, runtime, mainPos)
     local factoryTargetObject = target
     if target and targetPos then
-        local targetId = GetEntityId(target)
+        local targetId = Common.GetEntityId(target)
         if factoryTask.TargetId ~= targetId or fraction > ((factoryTask.TargetFraction or 0) + 0.01) then
             factoryTask.TargetId = targetId
             factoryTask.TargetPos = targetPos
@@ -144,11 +85,11 @@ function Update(aiBrain, now)
         factoryTask.Domain = domain
         factoryTask.ReadyFactories = readyFactories
         factoryTask.StallTime = now - (factoryTask.LastProgressTime or now)
-        factoryTask.RequiredBuilders = ComputeFactoryTaskRequirements(domain, fraction, factoryTask.StallTime or 0, readyFactories, eco)
+        factoryTask.RequiredBuilders = Recovery.ComputeFactoryTaskRequirements(domain, fraction, factoryTask.StallTime or 0, readyFactories, eco)
         factoryTask.TargetPos = targetPos
         factoryTask.TargetFraction = fraction
 
-        local assignedBuilders, claimedBuilders, usedCommander, debug = AssignBuildersToUnfinishedFactory(
+        local assignedBuilders, claimedBuilders, usedCommander, debug = Assignments.AssignBuildersToUnfinishedFactory(
             aiBrain,
             runtime,
             now,
@@ -163,7 +104,7 @@ function Update(aiBrain, now)
         factoryTask.UsedCommander = usedCommander and true or false
         factoryTask.CandidateDebug = debug
     else
-        ResetFactoryTask(factoryTask)
+        Recovery.ResetFactoryTask(factoryTask)
     end
 
     local factoryTaskCritical = factoryTask.Active
@@ -177,26 +118,26 @@ function Update(aiBrain, now)
         reservedStructureBuilderIds[id] = value
     end
     local structureTargetObject = false
-    local forceFinishEco, forcedEcoTarget, forcedEcoKind = ShouldForceFinishEcoStructure(aiBrain, runtime, mainPos, false, false)
+    local forceFinishEco, forcedEcoTarget, forcedEcoKind = Recovery.ShouldForceFinishEcoStructure(aiBrain, runtime, mainPos, false, false)
     if (not factoryTaskCritical) or forceFinishEco then
-        local trackedStructure, trackedPos, trackedFraction, trackedKind, trackedPriority = FindTrackedUnfinishedStructure(aiBrain, structureTask)
-        local structure, structurePos, structureFraction, structureKind, structurePriority = FindBestUnfinishedStructure(aiBrain, runtime, mainPos)
+        local trackedStructure, trackedPos, trackedFraction, trackedKind, trackedPriority = Recovery.FindTrackedUnfinishedStructure(aiBrain, structureTask)
+        local structure, structurePos, structureFraction, structureKind, structurePriority = Recovery.FindBestUnfinishedStructure(aiBrain, runtime, mainPos)
 
         if forceFinishEco and forcedEcoTarget and not forcedEcoTarget.Dead then
             local forcedPos = forcedEcoTarget.GetPosition and forcedEcoTarget:GetPosition() or false
             if forcedPos then
                 structure = forcedEcoTarget
                 structurePos = forcedPos
-                structureFraction = GetFraction(forcedEcoTarget)
+                structureFraction = Common.GetFraction(forcedEcoTarget)
                 structureKind = forcedEcoKind or 'Structure'
                 structurePriority = 1000 + (structureFraction * 100)
             end
         end
 
         if trackedStructure and trackedPos then
-            local trackedTargetId = GetEntityId(trackedStructure)
-            local bestTargetId = structure and GetEntityId(structure) or false
-            if ShouldKeepTrackedStructureTask(
+            local trackedTargetId = Common.GetEntityId(trackedStructure)
+            local bestTargetId = structure and Common.GetEntityId(structure) or false
+            if Recovery.ShouldKeepTrackedStructureTask(
                 now,
                 structureTask,
                 trackedTargetId,
@@ -217,7 +158,7 @@ function Update(aiBrain, now)
 
         if structure and structurePos then
             structureTargetObject = structure
-            local targetId = GetEntityId(structure)
+            local targetId = Common.GetEntityId(structure)
             if structureTask.TargetId ~= targetId or structureFraction > ((structureTask.TargetFraction or 0) + 0.01) then
                 structureTask.TargetId = targetId
                 structureTask.TargetPos = structurePos
@@ -228,11 +169,11 @@ function Update(aiBrain, now)
             structureTask.Kind = structureKind
             structureTask.Priority = structurePriority
             structureTask.StallTime = now - (structureTask.LastProgressTime or now)
-            structureTask.RequiredBuilders = ComputeStructureTaskRequirements(structureKind, structureFraction, structureTask.StallTime or 0, eco)
+            structureTask.RequiredBuilders = Recovery.ComputeStructureTaskRequirements(structureKind, structureFraction, structureTask.StallTime or 0, eco)
             structureTask.TargetPos = structurePos
             structureTask.TargetFraction = structureFraction
 
-            local assignedBuilders, claimedBuilders, usedCommander, debug = AssignBuildersToUnfinishedStructure(
+            local assignedBuilders, claimedBuilders, usedCommander, debug = Assignments.AssignBuildersToUnfinishedStructure(
                 aiBrain,
                 runtime,
                 now,
@@ -245,8 +186,8 @@ function Update(aiBrain, now)
             if assignedBuilders <= 0
                 and trackedStructure
                 and trackedPos
-                and GetEntityId(trackedStructure) ~= targetId then
-                local fallbackAssigned, fallbackClaimed, fallbackCommander, fallbackDebug = AssignBuildersToUnfinishedStructure(
+                and Common.GetEntityId(trackedStructure) ~= targetId then
+                local fallbackAssigned, fallbackClaimed, fallbackCommander, fallbackDebug = Assignments.AssignBuildersToUnfinishedStructure(
                     aiBrain,
                     runtime,
                     now,
@@ -262,7 +203,7 @@ function Update(aiBrain, now)
                     structureFraction = trackedFraction
                     structureKind = trackedKind
                     structurePriority = trackedPriority
-                    targetId = GetEntityId(trackedStructure)
+                    targetId = Common.GetEntityId(trackedStructure)
                     structureTask.TargetId = targetId
                     structureTask.TargetPos = trackedPos
                     structureTask.TargetFraction = trackedFraction
@@ -315,18 +256,18 @@ function Update(aiBrain, now)
                 and structureTask.Active
                 and (structureTask.Kind == 'AA' or structureTask.Kind == 'Defense' or string.lower(structureTask.Kind or 'none') == 'structure')
                 and not radarCritical then
-                ResetStructureTask(structureTask)
+                Recovery.ResetStructureTask(structureTask)
                 structureTargetObject = false
             end
         else
-            ResetStructureTask(structureTask)
+            Recovery.ResetStructureTask(structureTask)
         end
     else
-        ResetStructureTask(structureTask)
+        Recovery.ResetStructureTask(structureTask)
     end
 
     if structureTask.Active and structureTask.TargetId then
-        local trackedStructure, trackedPos = FindTrackedUnfinishedStructure(aiBrain, structureTask)
+        local trackedStructure, trackedPos = Recovery.FindTrackedUnfinishedStructure(aiBrain, structureTask)
         if trackedStructure and trackedPos then
             structureTargetObject = trackedStructure
         end
@@ -437,7 +378,7 @@ function Update(aiBrain, now)
         and fieldBaseReady
         and fieldTaskQuota > 0
     for _, eng in engineers do
-        ProcessEngineer(aiBrain, runtime, eng, now, ctx)
+        Assignments.ProcessEngineer(aiBrain, runtime, eng, now, ctx)
     end
 
     local radarOrderActive = next(radarReservedBuilderIds) ~= nil
@@ -470,7 +411,7 @@ function Update(aiBrain, now)
         if (policy.ForwardContestBias == true) or hqPressureEscape then
             threatCap = threatCap + 0.15
         end
-        ctx.dispatchedExpand = DispatchExpansionEngineer(aiBrain, runtime, now, engineers, mainPos, enemyPos, math.max(420, safeExpandDistance), threatCap)
+        ctx.dispatchedExpand = Expansion.DispatchExpansionEngineer(aiBrain, runtime, now, engineers, mainPos, enemyPos, math.max(420, safeExpandDistance), threatCap)
     end
 
     runtime.LastEngineerRecovered = ctx.recoverCount
@@ -490,7 +431,7 @@ function Update(aiBrain, now)
         or structureTask.Active
     if shouldLog and (now - (runtime.LastEngineerDirectorLogTime or -999)) >= 20 then
         runtime.LastEngineerDirectorLogTime = now
-        local structureTaskMode = structureTask.Active and DescribeStructureTaskTarget(structureTargetObject) or 'none'
+        local structureTaskMode = structureTask.Active and Assignments.DescribeStructureTaskTarget(structureTargetObject) or 'none'
         local structureNearby = 0
         local sx = 0
         local sz = 0
