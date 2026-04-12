@@ -1,7 +1,5 @@
 local Common = import('/mods/OvermindAI/lua/AI/Overmind/EngineerDirector/Common.lua')
 
-local GetFraction = Common.GetFraction
-
 local M = {}
 
 local function NeedsBootstrapPower(aiBrain, runtime)
@@ -14,7 +12,7 @@ local function NeedsBootstrapPower(aiBrain, runtime)
     local units = aiBrain:GetListOfUnits(categories.ENERGYPRODUCTION * categories.STRUCTURE, false, true) or {}
     local ready = 0
     for _, unit in units do
-        if unit and not unit.Dead and GetFraction(unit) >= 0.95 and not unit:IsUnitState('BeingBuilt') then
+        if unit and not unit.Dead and Common.GetFraction(unit) >= 0.95 and not unit:IsUnitState('BeingBuilt') then
             ready = ready + 1
         end
     end
