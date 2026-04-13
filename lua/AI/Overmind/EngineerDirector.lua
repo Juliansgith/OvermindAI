@@ -11,8 +11,9 @@ local function SetImplementation(aiBrain, runtime, mode, detail)
         runtime.EngineerDirectorImplementation = mode
         runtime.EngineerDirectorImplementationDetail = detail or mode
     end
-    if aiBrain and runtime and runtime.EngineerDirectorImplLogged ~= mode then
-        runtime.EngineerDirectorImplLogged = mode
+    local logKey = tostring(mode) .. ':' .. tostring(detail or mode)
+    if aiBrain and runtime and runtime.EngineerDirectorImplLogged ~= logKey then
+        runtime.EngineerDirectorImplLogged = logKey
         LOG(string.format('*OVERMIND ENGDIR IMPL A%d mode=%s detail=%s',
             aiBrain:GetArmyIndex(),
             tostring(mode),
@@ -57,7 +58,7 @@ function Update(aiBrain, now)
         if okLegacy and type(legacy) == 'table' and type(legacy.Update) == 'function' then
             ActiveModule = legacy
             LastModularError = tostring(result)
-            SetImplementation(aiBrain, runtime, 'legacy', 'runtime-fallback')
+            SetImplementation(aiBrain, runtime, 'legacy', 'runtime-fallback:' .. LastModularError)
             return legacy.Update(aiBrain, now)
         end
     end

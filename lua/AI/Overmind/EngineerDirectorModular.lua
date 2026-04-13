@@ -17,32 +17,40 @@ local DefenseCategory = categories.STRUCTURE * categories.DEFENSE
 local BuilderCategory = categories.ENGINEER * categories.MOBILE + categories.COMMAND
 local LandCombatCategory = categories.MOBILE * categories.LAND - categories.ENGINEER - categories.SCOUT - categories.COMMAND
 
+local function ResolveMethod(moduleTable, methodName, moduleName)
+    local fn = moduleTable and moduleTable[methodName]
+    if type(fn) ~= 'function' then
+        error(string.format('EngineerDirectorModular missing %s[%s]', tostring(moduleName), tostring(methodName)))
+    end
+    return fn
+end
+
 function Update(aiBrain, now)
     local runtime = aiBrain.OvermindRuntime
     if not runtime then
         return
     end
 
-    local GetMainPos = Common.GetMainPos
-    local GetEntityId = Common.GetEntityId
-    local GetFraction = Common.GetFraction
-    local CleanupExpansionReservations = Expansion.CleanupExpansionReservations
-    local NeedsCriticalRadar = Policy.NeedsCriticalRadar
-    local GetRadarReservedBuilderIds = Policy.GetRadarReservedBuilderIds
-    local FindBestUnfinishedFactory = Recovery.FindBestUnfinishedFactory
-    local ComputeFactoryTaskRequirements = Recovery.ComputeFactoryTaskRequirements
-    local ResetFactoryTask = Recovery.ResetFactoryTask
-    local ShouldForceFinishEcoStructure = Recovery.ShouldForceFinishEcoStructure
-    local FindTrackedUnfinishedStructure = Recovery.FindTrackedUnfinishedStructure
-    local FindBestUnfinishedStructure = Recovery.FindBestUnfinishedStructure
-    local ShouldKeepTrackedStructureTask = Recovery.ShouldKeepTrackedStructureTask
-    local ComputeStructureTaskRequirements = Recovery.ComputeStructureTaskRequirements
-    local ResetStructureTask = Recovery.ResetStructureTask
-    local AssignBuildersToUnfinishedFactory = Assignments.AssignBuildersToUnfinishedFactory
-    local AssignBuildersToUnfinishedStructure = Assignments.AssignBuildersToUnfinishedStructure
-    local ProcessEngineer = Assignments.ProcessEngineer
-    local DescribeStructureTaskTarget = Assignments.DescribeStructureTaskTarget
-    local DispatchExpansionEngineer = Expansion.DispatchExpansionEngineer
+    local GetMainPos = ResolveMethod(Common, 'GetMainPos', 'Common')
+    local GetEntityId = ResolveMethod(Common, 'GetEntityId', 'Common')
+    local GetFraction = ResolveMethod(Common, 'GetFraction', 'Common')
+    local CleanupExpansionReservations = ResolveMethod(Expansion, 'CleanupExpansionReservations', 'Expansion')
+    local NeedsCriticalRadar = ResolveMethod(Policy, 'NeedsCriticalRadar', 'Policy')
+    local GetRadarReservedBuilderIds = ResolveMethod(Policy, 'GetRadarReservedBuilderIds', 'Policy')
+    local FindBestUnfinishedFactory = ResolveMethod(Recovery, 'FindBestUnfinishedFactory', 'Recovery')
+    local ComputeFactoryTaskRequirements = ResolveMethod(Recovery, 'ComputeFactoryTaskRequirements', 'Recovery')
+    local ResetFactoryTask = ResolveMethod(Recovery, 'ResetFactoryTask', 'Recovery')
+    local ShouldForceFinishEcoStructure = ResolveMethod(Recovery, 'ShouldForceFinishEcoStructure', 'Recovery')
+    local FindTrackedUnfinishedStructure = ResolveMethod(Recovery, 'FindTrackedUnfinishedStructure', 'Recovery')
+    local FindBestUnfinishedStructure = ResolveMethod(Recovery, 'FindBestUnfinishedStructure', 'Recovery')
+    local ShouldKeepTrackedStructureTask = ResolveMethod(Recovery, 'ShouldKeepTrackedStructureTask', 'Recovery')
+    local ComputeStructureTaskRequirements = ResolveMethod(Recovery, 'ComputeStructureTaskRequirements', 'Recovery')
+    local ResetStructureTask = ResolveMethod(Recovery, 'ResetStructureTask', 'Recovery')
+    local AssignBuildersToUnfinishedFactory = ResolveMethod(Assignments, 'AssignBuildersToUnfinishedFactory', 'Assignments')
+    local AssignBuildersToUnfinishedStructure = ResolveMethod(Assignments, 'AssignBuildersToUnfinishedStructure', 'Assignments')
+    local ProcessEngineer = ResolveMethod(Assignments, 'ProcessEngineer', 'Assignments')
+    local DescribeStructureTaskTarget = ResolveMethod(Assignments, 'DescribeStructureTaskTarget', 'Assignments')
+    local DispatchExpansionEngineer = ResolveMethod(Expansion, 'DispatchExpansionEngineer', 'Expansion')
 
     if now - (runtime.LastEngineerDirectorTime or -999) < 3 then
         return
