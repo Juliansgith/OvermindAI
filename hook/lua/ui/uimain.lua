@@ -16,10 +16,10 @@ function NoteGameOver()
         return
     end
 
-    if _G.__OvermindBenchExitQueued then
+    if rawget(_G, '__OvermindBenchExitQueued') then
         return
     end
-    _G.__OvermindBenchExitQueued = true
+    rawset(_G, '__OvermindBenchExitQueued', true)
 
     local exitDelay = tonumber(ReadSingleArg('/bench_exit_delay') or '') or 8
     exitDelay = math.max(1, exitDelay)

@@ -1,6 +1,7 @@
 local OldCreateUI = CreateUI
 local BenchIO = import('/mods/OvermindAI/lua/AI/Overmind/BenchIO.lua')
 
+BenchIO.Emit('*OVERMIND_BENCH_META|phase=main_hook_loaded')
 BenchIO.Probe('*OVERMIND_HOOK|phase=main_hook_loaded')
 
 local function ReadSingleArg(argName)
@@ -43,6 +44,7 @@ end
 function CreateUI()
     OldCreateUI()
 
+    BenchIO.Emit('*OVERMIND_BENCH_META|phase=create_ui|bench=' .. tostring(IsBenchmarkMode()))
     BenchIO.Probe('*OVERMIND_HOOK|phase=create_ui|bench=' .. tostring(IsBenchmarkMode()))
 
     if not IsBenchmarkMode() then

@@ -118,6 +118,12 @@ local function IsBenchmarkMode()
         return true
     end
 
+    -- Some launcher / init combinations drop boolean flags but keep valued args.
+    -- Treat the benchmark payload arguments as an implicit benchmark-mode signal.
+    if ReadCommandLineArg('/benchout') or ReadCommandLineArg('/benchid') or ReadCommandLineArg('/bench_ai') then
+        return true
+    end
+
     local mode = ReadControlArg('mode')
     if mode and IsTruthy(mode) then
         return true

@@ -82,3 +82,45 @@
 - Archive standout run logs under:
   - `C:\Users\Sepgi\AppData\Roaming\Forged Alliance Forever\logs\archived_runs`
 - Keep one short notes file for any "best so far" run.
+
+## Iteration Test Protocol (Required)
+- Optimization priority is `win rate` first.
+- Standard batch size is `100` games per iteration (unless explicitly overridden).
+- Always enforce a smoke gate before a full batch:
+  - Run exactly `1` game first.
+  - Only continue with the remaining planned runs if smoke passes.
+  - If smoke fails, stop and fix the launch/runtime issue before any large batch.
+- Use benchmark scripts from:
+  - `tools\overmind-bench\run_bench.ps1`
+  - `tools\overmind-bench\analyze_bench.ps1`
+  - `tools\overmind-bench\analyze_runs_matrix.ps1`
+  - `autorun\bin\analyze_autorun_logs.ps1` for deep log triage when needed.
+
+## Known-Good Launch Commands (Current)
+- Canonical 1-game smoke (full game, no forced timeout):
+  - `powershell -ExecutionPolicy Bypass -File .\autorun\bin\start_autorun_parallel.ps1 -Instances 1 -TargetSpeed 10 -ExitDelaySeconds 3 -MapName SCMP_004 -MaxRealSeconds 0 -MaxGameSeconds 0`
+- Timed smoke (quick validation):
+  - `powershell -ExecutionPolicy Bypass -File .\autorun\bin\start_autorun_parallel.ps1 -Instances 1 -TargetSpeed 10 -ExitDelaySeconds 3 -MapName SCMP_004 -MaxRealSeconds 45 -MaxGameSeconds 240`
+- Parallel launch:
+  - `powershell -ExecutionPolicy Bypass -File .\autorun\bin\start_autorun_parallel.ps1 -Instances 2 -TargetSpeed 10 -ExitDelaySeconds 3 -MapName SCMP_004 -MaxRealSeconds 0 -MaxGameSeconds 0`
+- Verify successful setup in log:
+  - `Loading game configuration from: /lua/generated/...`
+  - `Autorun: no human army configured`
+  - `AIPersonality= overmind`
+  - `AIPersonality= m27ai`
+  - `Setting game speed to be: 10`
+
+## Hardware Profile (Planning Baseline)
+- CPU: Ryzen 9 5900X
+- GPU: RTX 4090
+- RAM: 128 GB
+- Treat this as high-capacity local test hardware, but do not skip the smoke gate.
+- Prefer stable serial validation first, then scale batch throughput once launch reliability is confirmed.
+
+## Replay/Log Capacity Rules
+- Long batches can exceed replay limits or create unnecessary replay churn.
+- Keep replay retention bounded during benchmark runs (use configured replay pruning in `run_bench.ps1`).
+- Do not rely on replay files as the only source of truth; primary artifacts are:
+  - `benchmarks\latest\runs.jsonl`
+  - `benchmarks\latest\logs\*.log`
+  - analyzer outputs (`leaderboard`, matrix, failure tables).

@@ -101,6 +101,45 @@ During benchmark mode the mod will:
   - `*OVERMIND_BENCH_RESULT|...`
 - auto-exit the game client after match end.
 
+## Recommended Local Run Path (Stable)
+
+For local AI-vs-AI iteration, use the Softles-style `autorun` launcher from the FA root.
+
+### Preconditions
+
+1. Work from FA root:
+   - `C:\Program Files (x86)\Steam\steamapps\common\Supreme Commander Forged Alliance`
+2. Enable multi-instance support in `Game.prefs`:
+   - `debug = { enable_debug_facilities = true }`
+
+### Canonical Smoke Run (1 game)
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\autorun\bin\start_autorun_parallel.ps1 -Instances 1 -TargetSpeed 10 -ExitDelaySeconds 3 -MapName SCMP_004 -MaxRealSeconds 0 -MaxGameSeconds 0
+```
+
+Expected log markers:
+- `Loading game configuration from: /lua/generated/...`
+- `Autorun: no human army configured; local client should enter as observer.`
+- `Autorun slot: 1 ... AIPersonality= overmind`
+- `Autorun slot: 2 ... AIPersonality= m27ai`
+- `Setting game speed to be: 10`
+
+### Timed Smoke Variant (fast validation)
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\autorun\bin\start_autorun_parallel.ps1 -Instances 1 -TargetSpeed 10 -ExitDelaySeconds 3 -MapName SCMP_004 -MaxRealSeconds 45 -MaxGameSeconds 240
+```
+
+This intentionally ends with:
+- `Maximum game or real time reached, exiting.`
+
+### Parallel Runs
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\autorun\bin\start_autorun_parallel.ps1 -Instances 2 -TargetSpeed 10 -ExitDelaySeconds 3 -MapName SCMP_004 -MaxRealSeconds 0 -MaxGameSeconds 0
+```
+
 ## Log Auto-Tuning
 
 After a game finishes, regenerate tuning thresholds from logs:
