@@ -640,9 +640,6 @@ local function ProcessEngineer(aiBrain, runtime, eng, now, ctx)
         ctx.structureReclaimPreempts = (ctx.structureReclaimPreempts or 0) + 1
         return
     end
-    if claimedByFactoryTask or claimedByStructureTask or claimedByRadarOrder then
-        return
-    end
 
     local pos = eng:GetPosition()
     if not pos then
@@ -651,6 +648,23 @@ local function ProcessEngineer(aiBrain, runtime, eng, now, ctx)
 
     local dist = Common.Distance2D(pos, ctx.mainPos)
     local localThreat = aiBrain:GetThreatAtPosition(pos, 1, true, 'AntiSurface') or 0
+    if ctx.macroPhase == 'first_t2_power'
+        and EntityCategoryContains(categories.ENGINEER * categories.MOBILE * (categories.TECH2 + categories.TECH3), eng)
+        and localThreat < 2.2
+        and dist <= 420
+        and Recovery.TryOpenFirstT2PowerBuild(aiBrain, runtime, eng, ctx.mainPos, now) then
+        if claimedByFactoryTask and ctx.factoryTask.BuilderIds and entityId then
+            ctx.factoryTask.BuilderIds[entityId] = nil
+            ctx.factoryTask.AssignedBuilders = math.max(0, (ctx.factoryTask.AssignedBuilders or 1) - 1)
+        end
+        ctx.powerRecoveryCount = ctx.powerRecoveryCount + 1
+        return
+    end
+
+    if claimedByFactoryTask or claimedByStructureTask or claimedByRadarOrder then
+        return
+    end
+
     local escort = aiBrain:GetNumUnitsAroundPoint(categories.MOBILE * (categories.LAND + categories.AIR) - categories.ENGINEER - categories.SCOUT - categories.COMMAND, pos, 26, 'Ally') or 0
     local isIdle = Common.IsIdle(eng)
     local constructing = Common.IsConstructing(eng)

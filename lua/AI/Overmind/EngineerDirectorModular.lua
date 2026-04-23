@@ -255,6 +255,21 @@ function Update(aiBrain, now)
         factoryTask.TargetPos = targetPos
         factoryTask.TargetFraction = fraction
 
+        local factoryReservedBuilderIds = radarReservedBuilderIds
+        if macroPhase == 'first_t2_power' then
+            factoryReservedBuilderIds = {}
+            for id, value in pairs(radarReservedBuilderIds) do
+                factoryReservedBuilderIds[id] = value
+            end
+            local techEngineers = aiBrain:GetListOfUnits(categories.ENGINEER * categories.MOBILE * (categories.TECH2 + categories.TECH3), false, true) or {}
+            for _, unit in techEngineers do
+                local id = GetEntityId(unit)
+                if id then
+                    factoryReservedBuilderIds[id] = true
+                end
+            end
+        end
+
         local assignedBuilders, claimedBuilders, usedCommander, debug = AssignBuildersToUnfinishedFactory(
             aiBrain,
             runtime,
@@ -264,7 +279,7 @@ function Update(aiBrain, now)
             domain,
             readyFactories,
             factoryTask.StallTime or 0,
-            radarReservedBuilderIds)
+            factoryReservedBuilderIds)
         factoryTask.AssignedBuilders = assignedBuilders
         factoryTask.BuilderIds = claimedBuilders
         factoryTask.UsedCommander = usedCommander and true or false
