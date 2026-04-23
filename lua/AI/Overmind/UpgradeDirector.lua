@@ -344,11 +344,16 @@ local function PickMexTarget(aiBrain, runtime, state)
 
     local hasLandHQ = (aiBrain:GetCurrentUnits(categories.FACTORY * categories.LAND * categories.STRUCTURE * (categories.TECH2 + categories.TECH3)) or 0) > 0
     local hqPressureEscape = ((runtime.MacroController or {}).HQPressureEscape == true)
+    local factoryDirective = ((runtime.UpgradeDirector or {}).Factory) or {}
+    local firstHQObjective = macroObjective == 'starter_mex_claim'
+        or macroObjective == 'mass_consolidation'
+        or macroObjective == 'first_land_hq'
+        or macroObjective == 'first_t2_engineer'
+        or macroObjective == 'first_t2_power'
     local reserveForFirstHQ = not hasLandHQ
-        and (hqPressureEscape or macroObjective == 'mass_consolidation' or macroObjective == 'first_land_hq')
+        and (hqPressureEscape or factoryDirective.NeedsFirstLandHQ == true or firstHQObjective)
         and readyLand >= 2
-        and mexReady <= 7
-        and not strongSurplusWindow
+        and mexReady <= 8
 
     local allowBudgetThroughFactoryRecovery = constraints.CriticalFactory
         and budgetT2Cap >= 1
@@ -671,8 +676,8 @@ local function PickFactoryTarget(aiBrain, runtime, state, now)
         and not constraints.EcoCrash
     local forceFirstHQAfterEscape = firstHQEscapeFloorReady
         and (
-            now >= 660
-            or readyLand >= 5
+            now >= 480
+            or readyLand >= 4
             or macro.NeedFirstLandHQ == true
         )
     if macro.HQPressureEscape == true and needsFirstHQOverall and not forceFirstHQAfterEscape then
@@ -923,9 +928,9 @@ local function UpdateDirector(aiBrain, now)
     state.Extractor = state.Extractor or {}
     state.Factory = state.Factory or {}
 
+    PickFactoryTarget(aiBrain, runtime, state.Factory, now)
     PickMexTarget(aiBrain, runtime, state.Extractor)
     MaybeStartMexUpgrade(aiBrain, now, state.Extractor)
-    PickFactoryTarget(aiBrain, runtime, state.Factory, now)
 
     OvermindEconomyLedger.PublishUpgradeActivity(aiBrain, runtime, now, {
         ActiveMexUpgrades = state.Extractor.InFlight or 0,
