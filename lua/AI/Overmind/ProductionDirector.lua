@@ -2432,6 +2432,7 @@ local function DecideTechPlan(runtime, current, constraints, confidence, mode)
     local contestMapMode = policy.ContestMapMode == true
     local focusOnT1Spam = policy.FocusOnT1Spam == true
     local preferTempoFromSurplus = policy.PreferTempoFromSurplus == true
+    local mexReady = (((current.Eco or {}).Mex or {}).Ready) or 0
     local readyLand = (((current.Factories or {}).Land or {}).Ready) or 0
     local frontCovered = constraints.FrontPressure <= 0.18 and constraints.BasePressure <= 0.14 and constraints.AirGuardPressure <= 0.16
     local scoutClean = constraints.StaleZones <= 2 and constraints.ScoutPressure <= 0.25 and confidence.Global >= 0.55

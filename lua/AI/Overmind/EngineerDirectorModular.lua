@@ -19,9 +19,6 @@ local BuilderCategory = categories.ENGINEER * categories.MOBILE + categories.COM
 local LandCombatCategory = categories.MOBILE * categories.LAND - categories.ENGINEER - categories.SCOUT - categories.COMMAND
 
 local function SafeDistance2D(a, b)
-    if Common and Common.Distance2D then
-        return Common.Distance2D(a, b)
-    end
     local ax = (a and a[1]) or 0
     local az = (a and a[3]) or 0
     local bx = (b and b[1]) or 0
@@ -32,9 +29,6 @@ local function SafeDistance2D(a, b)
 end
 
 local function SafeGetFraction(unit)
-    if Common and Common.GetFraction then
-        return Common.GetFraction(unit)
-    end
     if not unit or unit.Dead or not unit.GetFractionComplete then
         return 1
     end
