@@ -347,6 +347,37 @@ local function ShouldReserveMexUpgradesForFirstHQ(aiBrain)
     return readyLand >= 2 and mexReady <= 8
 end
 
+local function IsFirstT2PowerPriorityState(aiBrain)
+    if not aiBrain then
+        return false
+    end
+
+    local t2PowerReady = GetCompletedUnitCount(aiBrain, categories.ENERGYPRODUCTION * categories.STRUCTURE * (categories.TECH2 + categories.TECH3))
+    if t2PowerReady > 0 then
+        return false
+    end
+
+    local t2LandReady = GetCompletedUnitCount(aiBrain, categories.FACTORY * categories.LAND * categories.STRUCTURE * (categories.TECH2 + categories.TECH3))
+    local t2plusEngineers = GetCompletedUnitCount(aiBrain, categories.ENGINEER * categories.MOBILE * (categories.TECH2 + categories.TECH3))
+    if t2LandReady < 1 or t2plusEngineers < 1 then
+        return false
+    end
+
+    local runtime = aiBrain.OvermindRuntime or {}
+    local production = runtime.ProductionDirector or {}
+    local macro = runtime.MacroController or {}
+    local macroPhase = macro.Phase or production.MacroObjective or 'none'
+
+    return macro.NeedFirstT2Power == true
+        or macroPhase == 'first_t2_power'
+        or production.MacroObjective == 'first_t2_power'
+end
+
+local function ShouldReserveMexUpgradesForTransition(aiBrain)
+    return ShouldReserveMexUpgradesForFirstHQ(aiBrain)
+        or IsFirstT2PowerPriorityState(aiBrain)
+end
+
 local function IsLowTechDefenseCapped(aiBrain, bomberPanic)
     if not aiBrain then
         return false
@@ -363,6 +394,9 @@ local function IsLowTechDefenseCapped(aiBrain, bomberPanic)
     local t2MexReady = GetCompletedUnitCount(aiBrain, categories.MASSEXTRACTION * categories.STRUCTURE * (categories.TECH2 + categories.TECH3))
     local defenseCount = GetExistingUnitCount(aiBrain, categories.STRUCTURE * categories.DEFENSE * categories.TECH1)
     local cap = bomberPanic and 4 or 3
+    if macroPhase == 'first_t2_power' and t2PowerReady <= 0 then
+        return defenseCount >= cap
+    end
     local techTransition = macroPhase == 'first_t2_power'
         or macroPhase == 'first_t2_engineer'
         or (t2PowerReady <= 0 and t2MexReady <= 0)
@@ -1084,6 +1118,9 @@ local function IsFactoryGrowthHardBlocked(aiBrain, capacity, domain)
     if IsFirstHQPriorityState(aiBrain, 3) and totalFactories >= 3 then
         return true
     end
+    if IsFirstT2PowerPriorityState(aiBrain) and totalFactories >= 3 then
+        return true
+    end
 
     local readyMex = GetCompletedUnitCount(aiBrain, categories.MASSEXTRACTION * categories.STRUCTURE)
     local readyT2Mex = GetCompletedUnitCount(aiBrain, categories.MASSEXTRACTION * categories.STRUCTURE * (categories.TECH2 + categories.TECH3))
@@ -1205,6 +1242,9 @@ local function ApproveFactoryBuildRequest(aiBrain, domain)
         if firstHQPriority and totalFactories >= 3 then
             return false
         end
+        if IsFirstT2PowerPriorityState(aiBrain) and totalFactories >= 3 then
+            return false
+        end
         local preHQCap = recovery.ForceFactoryRecovery and 5 or 4
         if not hasLandHQ and totalFactories >= preHQCap then
             return false
@@ -1215,6 +1255,9 @@ local function ApproveFactoryBuildRequest(aiBrain, domain)
     runtime.FactoryBuildGate = gate
     local totalFactories = GetExistingUnitCount(aiBrain, categories.FACTORY * categories.STRUCTURE)
     if firstHQPriority and totalFactories >= 3 and not HasCriticalFactoryTask(aiBrain, domain) then
+        return false
+    end
+    if IsFirstT2PowerPriorityState(aiBrain) and totalFactories >= 3 and not HasCriticalFactoryTask(aiBrain, domain) then
         return false
     end
     local strictCap = hasLandHQ and 5 or 4
@@ -1881,6 +1924,7 @@ function ShouldPrioritizeFirstTech2Power(aiBrain)
     local unfinishedT2plusPower = GetUnfinishedUnitCount(aiBrain, categories.ENERGYPRODUCTION * (categories.TECH2 + categories.TECH3))
     local t1PowerReady = GetExistingUnitCount(aiBrain, categories.ENERGYPRODUCTION * categories.TECH1)
     local t2LandReady = GetExistingUnitCount(aiBrain, categories.FACTORY * categories.LAND * categories.TECH2)
+    local firstT2PowerPriority = IsFirstT2PowerPriorityState(aiBrain)
 
     if t2LandReady < 1 or t2plusEngineers < 1 then
         return false
@@ -1890,6 +1934,15 @@ function ShouldPrioritizeFirstTech2Power(aiBrain)
     end
     if land.Ready < 1 or (power.Ready or 0) < 4 or t1PowerReady < 5 then
         return false
+    end
+    if firstT2PowerPriority then
+        if constraints.EcoCrash and (econ.EnergyStorageRatio or 0) <= 0.02 and (econ.EnergyTrend or 0) <= -32 then
+            return false
+        end
+        if (econ.EnergyIncome or 0) < 55 and (econ.EnergyTrend or 0) < -12 then
+            return false
+        end
+        return true
     end
     if constraints.EcoCrash or constraints.CriticalFactory or constraints.CriticalStructure then
         return false
@@ -2000,7 +2053,7 @@ function ShouldUpgradeExtractors(aiBrain, minMassIncome, minEnergyIncome, minMas
         return false
     end
 
-    if ShouldReserveMexUpgradesForFirstHQ(aiBrain) then
+    if ShouldReserveMexUpgradesForTransition(aiBrain) then
         return false
     end
 
@@ -2073,7 +2126,7 @@ function ShouldUpgradeExtractorsAggressive(aiBrain)
     if not IsOvermindBrain(aiBrain) then
         return false
     end
-    if ShouldReserveMexUpgradesForFirstHQ(aiBrain) then
+    if ShouldReserveMexUpgradesForTransition(aiBrain) then
         return false
     end
     local upgradeDirector = GetUpgradeDirector(aiBrain)
@@ -2093,7 +2146,7 @@ function ShouldUpgradeLocalExtractors(aiBrain, targetTech, radius)
     if not IsOvermindBrain(aiBrain) then
         return false
     end
-    if ShouldReserveMexUpgradesForFirstHQ(aiBrain) then
+    if ShouldReserveMexUpgradesForTransition(aiBrain) then
         return false
     end
     local upgradeDirector = GetUpgradeDirector(aiBrain)
@@ -2118,7 +2171,7 @@ function ShouldUpgradeRemoteExtractors(aiBrain, targetTech, minRadius)
     if not IsOvermindBrain(aiBrain) then
         return false
     end
-    if ShouldReserveMexUpgradesForFirstHQ(aiBrain) then
+    if ShouldReserveMexUpgradesForTransition(aiBrain) then
         return false
     end
     local upgradeDirector = GetUpgradeDirector(aiBrain)
@@ -2610,6 +2663,13 @@ function ShouldForceDefenseRecovery(aiBrain)
         ClaimStructureBuild(aiBrain, 'defense', 30, now)
     end
     return need
+end
+
+function ShouldAllowThreatBaseDefense(aiBrain)
+    if not IsOvermindBrain(aiBrain) then
+        return false
+    end
+    return not IsLowTechDefenseCapped(aiBrain, IsBomberPanic(aiBrain))
 end
 
 function ShouldForceBaseEngineerRecovery(aiBrain)

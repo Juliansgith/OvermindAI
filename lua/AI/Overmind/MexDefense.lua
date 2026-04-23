@@ -87,6 +87,9 @@ local function IsLowTechDefenseCapped(runtime, aiBrain, bomberPanic)
     local aaTotal = aiBrain:GetCurrentUnits(T1AAStructureCategory) or 0
     local pdTotal = aiBrain:GetCurrentUnits(T1PDStructureCategory) or 0
     local cap = bomberPanic and 4 or 3
+    if phase == 'first_t2_power' then
+        return (aaTotal + pdTotal) >= cap
+    end
     local techTransition = phase == 'first_t2_power'
         or phase == 'first_t2_engineer'
         or (t2PowerReady <= 0 and t2MexReady <= 0)

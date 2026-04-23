@@ -1437,7 +1437,7 @@ BuilderGroup {
     Builder {
         BuilderName = 'Overmind First T2 Power Spike',
         PlatoonTemplate = 'T2EngineerBuilder',
-        Priority = 1095,
+        Priority = 1160,
         InstanceCount = 1,
         BuilderConditions = {
             { OMBC, 'IsOvermindBrain', {} },
@@ -1660,6 +1660,7 @@ BuilderGroup {
         InstanceCount = 1,
         BuilderConditions = {
             { OMBC, 'IsOvermindBrain', {} },
+            { OMBC, 'ShouldAllowThreatBaseDefense', {} },
             { OMBC, 'IsUnderAirHarass', { 1 } },
             { UCBC, 'LocationEngineersBuildingLess', { 'LocationType', 1, 'DEFENSE ANTIAIR' } },
             { UCBC, 'UnitsLessAtLocation', { 'LocationType', 10, 'DEFENSE ANTIAIR TECH1 STRUCTURE' } },
@@ -1681,6 +1682,7 @@ BuilderGroup {
         InstanceCount = 1,
         BuilderConditions = {
             { OMBC, 'IsOvermindBrain', {} },
+            { OMBC, 'ShouldAllowThreatBaseDefense', {} },
             { OMBC, 'IsUnderBomberHarass', { 1 } },
             { UCBC, 'LocationEngineersBuildingLess', { 'LocationType', 2, 'DEFENSE ANTIAIR' } },
             { UCBC, 'UnitsLessAtLocation', { 'LocationType', 14, 'DEFENSE ANTIAIR TECH1 STRUCTURE' } },
@@ -1758,6 +1760,7 @@ BuilderGroup {
         InstanceCount = 1,
         BuilderConditions = {
             { OMBC, 'IsOvermindBrain', {} },
+            { OMBC, 'ShouldAllowThreatBaseDefense', {} },
             { TBC, 'EnemyThreatGreaterThanValueAtBase', { 'LocationType', 2, 'Air', 6 } },
             { UCBC, 'UnitsLessAtLocation', { 'LocationType', 5, 'DEFENSE ANTIAIR' } },
             { OMBC, 'HasSafeEnergy', { 0.1, -8 } },
@@ -1779,6 +1782,7 @@ BuilderGroup {
         InstanceCount = 1,
         BuilderConditions = {
             { OMBC, 'IsOvermindBrain', {} },
+            { OMBC, 'ShouldAllowThreatBaseDefense', {} },
             { TBC, 'EnemyThreatGreaterThanValueAtBase', { 'LocationType', 3, 'Land', 6 } },
             { UCBC, 'UnitsLessAtLocation', { 'LocationType', 5, 'DEFENSE DIRECTFIRE' } },
             { OMBC, 'HasSafeEnergy', { 0.1, -8 } },

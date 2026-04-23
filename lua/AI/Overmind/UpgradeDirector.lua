@@ -116,6 +116,17 @@ local function CountActiveLandFactoryUpgrades(aiBrain)
     return count
 end
 
+local function CountReadyUnits(aiBrain, category)
+    local units = aiBrain:GetListOfUnits(category, false, true) or {}
+    local count = 0
+    for _, unit in units do
+        if unit and not unit.Dead and IsReadyStructure(unit) then
+            count = count + 1
+        end
+    end
+    return count
+end
+
 local function GetFactoryClusterPos(aiBrain, fallbackPos)
     local factories = aiBrain:GetListOfUnits(categories.FACTORY * categories.STRUCTURE, false, true) or {}
     local sx = 0
@@ -360,6 +371,17 @@ local function PickMexTarget(aiBrain, runtime, state)
         state.LocalInFlight = activeUpgradeScopes.Local or 0
         state.RemoteInFlight = activeUpgradeScopes.Remote or 0
         state.Reason = 'first_hq_reserved'
+        state.Cap = 0
+        return
+    end
+
+    local techPowerReady = CountReadyUnits(aiBrain, categories.ENERGYPRODUCTION * categories.STRUCTURE * (categories.TECH2 + categories.TECH3))
+    local techEngineers = aiBrain:GetCurrentUnits(categories.ENGINEER * categories.MOBILE * (categories.TECH2 + categories.TECH3)) or 0
+    if hasLandHQ and macroObjective == 'first_t2_power' and techPowerReady <= 0 and techEngineers >= 1 then
+        state.InFlight = activeMexUpgrades
+        state.LocalInFlight = activeUpgradeScopes.Local or 0
+        state.RemoteInFlight = activeUpgradeScopes.Remote or 0
+        state.Reason = 'first_t2_power_reserved'
         state.Cap = 0
         return
     end
