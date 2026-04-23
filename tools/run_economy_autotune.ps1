@@ -463,8 +463,8 @@ function Score-Candidate {
         $fieldOrders = if ($kpi.Count -gt 0) { To-Double $kpi[0].reclaim_field_orders_total } else { 0 }
 
         $runScore = 0.0
-        $runScore += $gameTime * 2.0
-        $runScore += $massRatio * 5600.0
+        $runScore += $gameTime * 1.2
+        $runScore += $massRatio * 10500.0
         $runScore += $spendRatio * 2600.0
         $runScore += $mex120 * 55.0
         $runScore += $mex240 * 45.0
@@ -475,8 +475,12 @@ function Score-Candidate {
         $runScore += $fieldOrders * 9.0
         $runScore += $raw.MaxReclaimOrders * 10.0
         $runScore += $raw.MaxReclaimMass * 0.14
+        if ($massRatio -lt 0.22) { $runScore -= (0.22 - $massRatio) * 18000.0 }
+        if ($massRatio -lt 0.18) { $runScore -= (0.18 - $massRatio) * 32000.0 }
+        if ($massRatio -ge 0.28) { $runScore += ($massRatio - 0.28) * 9000.0 }
+        if ($gameTime -gt 900 -and $massRatio -lt 0.22) { $runScore -= [math]::Min(2500.0, ($gameTime - 900.0) * 4.0) }
         if ($win) { $runScore += 12000.0 }
-        if ($gameTime -ge 2100) { $runScore += 3000.0 }
+        if ($gameTime -ge 2100 -and $massRatio -ge 0.25) { $runScore += 3000.0 }
         if ($gameTime -lt 900) { $runScore -= (900.0 - $gameTime) * 5.0 }
         if ($gameTime -lt 600) { $runScore -= (600.0 - $gameTime) * 10.0 }
         if ($raw.MinEngAfter240 -gt 0 -and $raw.MinEngAfter240 -lt 3) { $runScore -= (3 - $raw.MinEngAfter240) * 420.0 }
