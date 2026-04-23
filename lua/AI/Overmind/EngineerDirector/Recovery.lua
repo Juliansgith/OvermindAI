@@ -389,7 +389,7 @@ local function GetFactoryAnchor(aiBrain, mainPos)
     return best
 end
 
-local function FindPowerBuildPos(aiBrain, anchorPos, bp, spacingRadius)
+local function FindPowerBuildPos(aiBrain, anchorPos, bp, spacingRadius, ignoreThreat)
     if not aiBrain or not anchorPos then
         return false
     end
@@ -408,12 +408,26 @@ local function FindPowerBuildPos(aiBrain, anchorPos, bp, spacingRadius)
         if bp and aiBrain.CanBuildStructureAt then
             buildable = aiBrain:CanBuildStructureAt(bp, pos) == true
         end
-        if buildable and structureNearby <= 0 and not Threat.HasEnemyCombatNear(aiBrain, pos, 34) then
+        if buildable and structureNearby <= 0 and (ignoreThreat or not Threat.HasEnemyCombatNear(aiBrain, pos, 34)) then
             return pos
         end
     end
 
     return false
+end
+
+local function LogFirstT2PowerFailure(aiBrain, runtime, now, reason)
+    if not runtime then
+        return
+    end
+    if now < ((runtime.LastFirstT2PowerDebugLogTime or -999) + 12) then
+        return
+    end
+    runtime.LastFirstT2PowerDebugLogTime = now
+    LOG(string.format('*OVERMIND ENGDIR T2POWER A%d t=%.1f issued=0 reason=%s',
+        aiBrain:GetArmyIndex(),
+        now,
+        reason or 'unknown'))
 end
 
 local function CountNearbyUnfinishedPower(aiBrain, mainPos, radius, category)
@@ -589,19 +603,31 @@ local function TryOpenFirstT2PowerBuild(aiBrain, runtime, eng, mainPos, now)
         return false
     end
     if (aiBrain:GetCurrentUnits(Tech2PowerCategory) or 0) > 0 then
+        LogFirstT2PowerFailure(aiBrain, runtime, now, 'existing_t2_power')
         return false
     end
     if CountNearbyUnfinishedPower(aiBrain, mainPos, 320, Tech2PowerCategory) >= 1 then
+        LogFirstT2PowerFailure(aiBrain, runtime, now, 'unfinished_t2_power')
         return false
     end
     if now < ((runtime.LastFirstT2PowerIssueTime or -999) + 10) then
+        LogFirstT2PowerFailure(aiBrain, runtime, now, 'cooldown')
         return false
     end
 
     local bp = PickPowerBlueprint(eng, 'tech2')
     local anchor = bp and GetFactoryAnchor(aiBrain, mainPos) or false
-    local buildPos = bp and anchor and FindPowerBuildPos(aiBrain, anchor, bp, 14) or false
-    if not bp or not buildPos then
+    local buildPos = bp and anchor and FindPowerBuildPos(aiBrain, anchor, bp, 10, true) or false
+    if not bp then
+        LogFirstT2PowerFailure(aiBrain, runtime, now, 'no_blueprint')
+        return false
+    end
+    if not anchor then
+        LogFirstT2PowerFailure(aiBrain, runtime, now, 'no_anchor')
+        return false
+    end
+    if not buildPos then
+        LogFirstT2PowerFailure(aiBrain, runtime, now, 'no_build_pos')
         return false
     end
 

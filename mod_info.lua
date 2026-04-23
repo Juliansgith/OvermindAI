@@ -1,6 +1,6 @@
 name = "Overmind AI"
 uid = "A51D4E33-13D8-4F4E-B7B1-OVERMIND0001"
-version = 237
+version = 238
 copyright = "2026"
 description = "Adds Overmind AI and Overmind AIx with strategic zoning, opponent modeling, economy optimization, tactical control, telemetry tuning, and automated benchmark hooks."
 author = "Codex + Sepgi"
