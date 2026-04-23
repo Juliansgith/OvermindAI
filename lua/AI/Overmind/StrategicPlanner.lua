@@ -100,10 +100,19 @@ local function ScoreBattlefieldTarget(aiBrain, runtime, ownPos, pos, baseScore, 
     return score, reclaimMass
 end
 
-local function BuildBattlefieldObjectives(aiBrain, runtime, signals, state, now)
+local function BuildBattlefieldObjectives(aiBrain, runtime, signals, state, now, tune)
     local ownPos = GetOwnMainPos(aiBrain, runtime)
     local policy = runtime.EcoPolicy or {}
     local structure = ((runtime.EconomySignals or {}).Structure) or {}
+    local outerRetentionBias = (tune and tune.StrategyOuterRetentionBias) or 0
+    local collapseResistanceBias = (tune and tune.StrategyCollapseResistanceBias) or 0
+    local reclaimFieldBias = (tune and tune.StrategyReclaimFieldBias) or 0
+    local reclaimStickyThreshold = Clamp(110 - (reclaimFieldBias * 18), 75, 150)
+    local reclaimActivateThreshold = Clamp(140 - (reclaimFieldBias * 26), 95, 185)
+    local outerContestScoreThreshold = 1.8 - (outerRetentionBias * 0.22)
+    local outerHoldThreshold = Clamp(0.58 - (outerRetentionBias * 0.05), 0.42, 0.72)
+    local collapseBuffer = (collapseResistanceBias * 1.15) + (outerRetentionBias * 0.55)
+    local retentionExtension = math.max(0, math.floor((outerRetentionBias * 18) + (collapseResistanceBias * 10)))
     local candidateList = {}
     local reclaimFieldPos = false
     local reclaimFieldScore = 0
@@ -131,19 +140,19 @@ local function BuildBattlefieldObjectives(aiBrain, runtime, signals, state, now)
     end)
 
     local best = candidateList[1]
-    if best and best.Score > 1.8 then
+    if best and best.Score > outerContestScoreThreshold then
         outerContestPos = best.Pos
         outerContestValue = best.Score
-        if (best.ReclaimMass or 0) >= 110 then
+        if (best.ReclaimMass or 0) >= reclaimStickyThreshold then
             reclaimFieldPos = best.Pos
             reclaimFieldScore = best.ReclaimMass
         end
     end
 
-    if reclaimFieldPos and reclaimFieldScore >= 110 then
+    if reclaimFieldPos and reclaimFieldScore >= reclaimStickyThreshold then
         state.StickyReclaimFieldPos = reclaimFieldPos
         state.StickyReclaimFieldScore = reclaimFieldScore
-        state.StickyReclaimFieldUntil = now + (reclaimFieldScore >= 220 and 150 or 105)
+        state.StickyReclaimFieldUntil = now + (reclaimFieldScore >= 220 and (150 + retentionExtension) or (105 + math.floor(retentionExtension * 0.6)))
     elseif state.StickyReclaimFieldPos and now < (state.StickyReclaimFieldUntil or -999) then
         local stickyMass = EstimateReclaimMassAtPos(state.StickyReclaimFieldPos, 46)
         if stickyMass >= 45 and not signals.ACUCrisisActive then
@@ -161,11 +170,12 @@ local function BuildBattlefieldObjectives(aiBrain, runtime, signals, state, now)
     end
 
     local outerContestAlive = (signals.OuterContestUnits or 0) >= 2
+    local collapseApproachThreshold = Clamp(5.0 + (collapseBuffer * 0.45), 4.2, 6.8)
     local strongHomeCollapse = signals.ACUCrisisActive
-        or (signals.ApproachClose and not outerContestAlive)
+        or (signals.ApproachClose and not outerContestAlive and signals.HomePressure >= collapseApproachThreshold)
         or signals.HomePressure >= math.max(
-            outerContestAlive and 7.2 or 6.0,
-            (signals.FrontPressure * (outerContestAlive and 1.7 or 1.45)) + (outerContestAlive and 2.4 or 1.6)
+            (outerContestAlive and 7.2 or 6.0) + collapseBuffer,
+            (signals.FrontPressure * (outerContestAlive and 1.7 or 1.45)) + (outerContestAlive and 2.4 or 1.6) + (collapseResistanceBias * 0.65)
         )
     local outerRetentionWanted =
         not strongHomeCollapse
@@ -173,16 +183,17 @@ local function BuildBattlefieldObjectives(aiBrain, runtime, signals, state, now)
         and (signals.PrioritizeProduction or signals.ContestMapMode or signals.StructuralContestMap)
         and (
             (signals.ContestedZones or 0) >= 2
-            or (structure.OuterHoldShare or policy.OuterHoldShare or 0) < 0.58
+            or (structure.OuterHoldShare or policy.OuterHoldShare or 0) < outerHoldThreshold
             or (structure.SafeForwardMexCount or policy.SafeForwardMexCount or 0) >= 2
-            or (outerContestValue >= 3.0)
-            or (reclaimFieldScore >= 160)
+            or (outerContestValue >= (3.0 - (outerRetentionBias * 0.35)))
+            or (reclaimFieldScore >= (160 - (reclaimFieldBias * 24)))
+            or ((signals.OuterContestUnits or 0) >= ((outerRetentionBias >= 0.35) and 1 or 2))
         )
 
     state.OuterRetentionUntil = state.OuterRetentionUntil or -999
     if outerRetentionWanted then
-        state.OuterRetentionUntil = now + (outerContestAlive and 96 or 72)
-    elseif strongHomeCollapse and signals.HomePressure >= math.max(7.0, (signals.FrontPressure * 1.55) + 2.0) then
+        state.OuterRetentionUntil = now + (outerContestAlive and (96 + retentionExtension) or (72 + math.floor(retentionExtension * 0.8)))
+    elseif strongHomeCollapse and signals.HomePressure >= math.max(7.0 + collapseBuffer, (signals.FrontPressure * 1.55) + 2.0 + (collapseResistanceBias * 0.4)) then
         state.OuterRetentionUntil = now - 1
     end
 
@@ -192,8 +203,8 @@ local function BuildBattlefieldObjectives(aiBrain, runtime, signals, state, now)
     )
     local reclaimFirst = outerRetentionActive
         and reclaimFieldPos ~= false
-        and reclaimFieldScore >= 140
-        and signals.HomePressure < 4.5
+        and reclaimFieldScore >= reclaimActivateThreshold
+        and signals.HomePressure < (4.5 + (collapseResistanceBias * 0.45))
         and not signals.ACUCrisisActive
 
     if not outerContestPos and outerRetentionActive then
@@ -441,9 +452,12 @@ local function ScoreTheaters(signals, tune)
     end
 
     local forwardBias = (tune and tune.StrategyForwardTheaterBias) or 0
+    local outerBias = (tune and tune.StrategyOuterRetentionBias) or 0
+    local collapseResistance = (tune and tune.StrategyCollapseResistanceBias) or 0
     scores.Home = scores.Home - (forwardBias * 0.45)
-    scores.Front = scores.Front + (forwardBias * 0.65)
-    scores.Enemy = scores.Enemy + (forwardBias * 0.8)
+    scores.Home = scores.Home - (outerBias * 0.2) - (collapseResistance * 0.3)
+    scores.Front = scores.Front + (forwardBias * 0.65) + (outerBias * 0.35)
+    scores.Enemy = scores.Enemy + (forwardBias * 0.8) + (outerBias * 0.18)
 
     return scores
 end
@@ -611,10 +625,16 @@ local function ScoreDirectives(signals, primaryTheater, tune)
     local tempoBias = (tune and tune.StrategyTempoBias) or 0
     local techBias = (tune and tune.StrategyTechBias) or 0
     local airBias = (tune and tune.StrategyAirBias) or 0
+    local outerBias = (tune and tune.StrategyOuterRetentionBias) or 0
+    local collapseResistance = (tune and tune.StrategyCollapseResistanceBias) or 0
+    local reclaimFieldBias = (tune and tune.StrategyReclaimFieldBias) or 0
     scores.expand = scores.expand + expandBias
     scores.stabilize = scores.stabilize + stabilizeBias
+    scores.stabilize = scores.stabilize - (collapseResistance * 0.35)
+    scores.expand = scores.expand + (outerBias * 0.28) + (reclaimFieldBias * 0.18)
     scores.punish_greed = scores.punish_greed + (tempoBias * 0.55) + (expandBias * 0.15)
-    scores.trade_tech_for_tempo = scores.trade_tech_for_tempo + tempoBias
+    scores.punish_greed = scores.punish_greed + (outerBias * 0.12)
+    scores.trade_tech_for_tempo = scores.trade_tech_for_tempo + tempoBias + (outerBias * 0.18) + (reclaimFieldBias * 0.22)
     scores.trade_map_for_tech = scores.trade_map_for_tech + techBias
     scores.force_air_answer = scores.force_air_answer + airBias
 
@@ -813,6 +833,9 @@ local function BuildGoalBiases(primaryTheater, directiveState, directive, tune)
         bias.raid = bias.raid + ((tune.StrategyTempoBias or 0) * 0.35) + ((tune.StrategyForwardTheaterBias or 0) * 0.25)
         bias.all_in = bias.all_in + ((tune.StrategyTempoBias or 0) * 0.25)
         bias.tech = bias.tech + ((tune.StrategyTechBias or 0) * 0.45)
+        bias.expand = bias.expand + ((tune.StrategyOuterRetentionBias or 0) * 0.32) + ((tune.StrategyReclaimFieldBias or 0) * 0.22)
+        bias.raid = bias.raid + ((tune.StrategyOuterRetentionBias or 0) * 0.14) + ((tune.StrategyReclaimFieldBias or 0) * 0.12)
+        bias.hold = bias.hold - ((tune.StrategyCollapseResistanceBias or 0) * 0.2)
     end
 
     return bias
@@ -866,7 +889,7 @@ function Module.Update(aiBrain, now)
     local state = runtime.StrategicPlanner
     local tune = OvermindAutoTune.GetConfig(aiBrain)
     local signals = BuildSignals(aiBrain, runtime, now)
-    local battlefield = BuildBattlefieldObjectives(aiBrain, runtime, signals, state, now)
+    local battlefield = BuildBattlefieldObjectives(aiBrain, runtime, signals, state, now, tune)
     for key, value in pairs(battlefield) do
         signals[key] = value
     end

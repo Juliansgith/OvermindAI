@@ -186,20 +186,31 @@ function New-TuneSpecs {
         StrategyTechBias = @{ Min = -1.5; Max = 1.5; Step = 0.05; Kind = 'double'; Sigma = 0.35 }
         StrategyAirBias = @{ Min = -1.6; Max = 1.4; Step = 0.05; Kind = 'double'; Sigma = 0.35 }
         StrategyForwardTheaterBias = @{ Min = -1.2; Max = 1.5; Step = 0.05; Kind = 'double'; Sigma = 0.3 }
+        StrategyOuterRetentionBias = @{ Min = -1.4; Max = 1.8; Step = 0.05; Kind = 'double'; Sigma = 0.35 }
+        StrategyCollapseResistanceBias = @{ Min = -1.6; Max = 1.4; Step = 0.05; Kind = 'double'; Sigma = 0.32 }
+        StrategyReclaimFieldBias = @{ Min = -1.2; Max = 1.6; Step = 0.05; Kind = 'double'; Sigma = 0.3 }
+        ForceOuterContestBias = @{ Min = -1.2; Max = 1.8; Step = 0.05; Kind = 'double'; Sigma = 0.35 }
+        ForceHomeGuardBias = @{ Min = -1.4; Max = 1.4; Step = 0.05; Kind = 'double'; Sigma = 0.32 }
+        ForceRaidBias = @{ Min = -1.4; Max = 1.6; Step = 0.05; Kind = 'double'; Sigma = 0.35 }
         ReclaimRiskBias = @{ Min = -0.45; Max = 0.75; Step = 0.025; Kind = 'double'; Sigma = 0.12 }
         ReclaimSupportBias = @{ Min = -1; Max = 1; Step = 0.25; Kind = 'double'; Sigma = 0.35 }
         ReclaimNearbyBias = @{ Min = -0.35; Max = 0.65; Step = 0.025; Kind = 'double'; Sigma = 0.12 }
+        ReclaimFieldRadiusBias = @{ Min = -18; Max = 24; Step = 2; Kind = 'int'; Sigma = 6 }
+        ReclaimFieldMassBias = @{ Min = -28; Max = 36; Step = 2; Kind = 'int'; Sigma = 8 }
+        ReclaimRouteRiskBias = @{ Min = -1.0; Max = 1.4; Step = 0.05; Kind = 'double'; Sigma = 0.24 }
+        ReclaimEnemyMexBias = @{ Min = -1.0; Max = 1.8; Step = 0.05; Kind = 'double'; Sigma = 0.3 }
         MexUpgradeBudgetBias = @{ Min = -2.5; Max = 3; Step = 0.1; Kind = 'double'; Sigma = 0.65 }
         MexUpgradeRiskBias = @{ Min = -0.45; Max = 0.7; Step = 0.025; Kind = 'double'; Sigma = 0.12 }
         MexUpgradeCapBias = @{ Min = -1; Max = 2; Step = 1; Kind = 'int'; Sigma = 1 }
         FactoryHQTimingBias = @{ Min = -120; Max = 180; Step = 10; Kind = 'int'; Sigma = 40 }
         FactoryHQEcoBias = @{ Min = -1; Max = 1; Step = 0.05; Kind = 'double'; Sigma = 0.28 }
+        EarlyAirUnlockBias = @{ Min = -1.4; Max = 1.4; Step = 0.05; Kind = 'double'; Sigma = 0.32 }
     }
 }
 
 function Get-DefaultTuneConfig {
     $cfg = [ordered]@{
-        Version = 4
+        Version = 5
         CandidateId = 'baseline'
         ParentCandidateId = 'manual'
         ParentSource = 'manual'
@@ -694,11 +705,14 @@ function Get-FailureMutationHints {
         'no_expansion' {
             $directions['StrategyExpandBias'] = 1
             $directions['StrategyForwardTheaterBias'] = 1
+            $directions['StrategyOuterRetentionBias'] = 1
             $directions['StrategyStabilizeBias'] = -1
             $directions['ExpansionQuotaBias'] = 1
             $directions['SafeExpandDistanceBias'] = 1
             $directions['SafeExpandThreatCapBias'] = 1
             $directions['SafeExpandEnemyBufferBias'] = -1
+            $directions['ForceOuterContestBias'] = 1
+            $directions['ForceHomeGuardBias'] = -1
         }
         'reclaim_failure' {
             $directions['ReclaimQuotaBias'] = 1
@@ -707,6 +721,11 @@ function Get-FailureMutationHints {
             $directions['ReclaimSupportBias'] = 1
             $directions['ReclaimNearbyBias'] = 1
             $directions['StrategyForwardTheaterBias'] = 1
+            $directions['StrategyReclaimFieldBias'] = 1
+            $directions['ReclaimFieldRadiusBias'] = 1
+            $directions['ReclaimFieldMassBias'] = 1
+            $directions['ReclaimRouteRiskBias'] = 1
+            $directions['ReclaimEnemyMexBias'] = 1
         }
         'factory_spend_stall' {
             $directions['FactoryMassIncomeBias'] = -1
@@ -722,8 +741,14 @@ function Get-FailureMutationHints {
             $directions['StrategyExpandBias'] = 1
             $directions['StrategyTempoBias'] = 1
             $directions['StrategyForwardTheaterBias'] = 1
+            $directions['StrategyOuterRetentionBias'] = 1
+            $directions['StrategyCollapseResistanceBias'] = 1
             $directions['ReclaimRiskBias'] = 1
             $directions['FactoryTempoBias'] = 1
+            $directions['ForceOuterContestBias'] = 1
+            $directions['ForceHomeGuardBias'] = -1
+            $directions['ForceRaidBias'] = 1
+            $directions['EarlyAirUnlockBias'] = 1
         }
         'over_greedy_collapse' {
             $directions['StrategyStabilizeBias'] = 1
@@ -732,15 +757,25 @@ function Get-FailureMutationHints {
             $directions['ReclaimRiskBias'] = -1
             $directions['SafeExpandThreatCapBias'] = -1
             $directions['FactoryToMexCapBias'] = -1
+            $directions['StrategyCollapseResistanceBias'] = -1
+            $directions['ForceOuterContestBias'] = -1
+            $directions['ForceHomeGuardBias'] = 1
+            $directions['ForceRaidBias'] = -1
+            $directions['EarlyAirUnlockBias'] = -1
         }
         'map_control_collapse' {
             $directions['StrategyExpandBias'] = 1
             $directions['StrategyTempoBias'] = 1
             $directions['StrategyForwardTheaterBias'] = 1
+            $directions['StrategyOuterRetentionBias'] = 1
+            $directions['StrategyReclaimFieldBias'] = 1
             $directions['StrategyTechBias'] = -1
             $directions['StrategyAirBias'] = -1
             $directions['ExpansionQuotaBias'] = 1
             $directions['ReclaimQuotaBias'] = 1
+            $directions['ForceOuterContestBias'] = 1
+            $directions['ForceRaidBias'] = 1
+            $directions['ReclaimEnemyMexBias'] = 1
         }
         'engineer_collapse' {
             $directions['BaseEngineerFloorMin'] = 1
@@ -748,6 +783,7 @@ function Get-FailureMutationHints {
             $directions['EngineerFactoryRatioBias'] = 1
             $directions['StrategyStabilizeBias'] = 1
             $directions['ReclaimRiskBias'] = -1
+            $directions['ForceHomeGuardBias'] = 1
         }
         default {
             return [pscustomobject]@{
@@ -784,7 +820,7 @@ function New-MutatedConfig {
         $cfg[$key] = $Parent[$key]
     }
 
-    $cfg.Version = 4
+    $cfg.Version = 5
     $cfg.CandidateId = "candidate-$CandidateIndex"
     $cfg.ParentCandidateId = [string]($Parent.CandidateId)
     $cfg.ParentSource = [string](Get-ObjectPropertyValue -Object $Parent -Name 'ParentSource')

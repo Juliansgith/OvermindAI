@@ -363,6 +363,10 @@ function Module.Update(aiBrain, now)
         or runtime.StrategyGoal == 'raid'
         or runtime.StrategyGoal == 'all_in'
     local raidCentrality = planner.RaidCentrality or 0
+    local policy = runtime.EcoPolicy or {}
+    local outerForceBias = policy.ForceOuterContestBias or 0
+    local homeGuardBias = policy.ForceHomeGuardBias or 0
+    local raidBias = policy.ForceRaidBias or 0
     local forceAirAnswer = planner.ForceAirAnswer == true
     local punishGreed = planner.PunishGreed == true
     local tradeMapForTech = planner.TradeMapForTech == true
@@ -435,8 +439,8 @@ function Module.Update(aiBrain, now)
         and (approachClose or contestedZones >= 2 or approachThreat >= 5.5 or assetSiege)
     local interceptPos = approachCluster.StagePos or approachCluster.Pos or frontPos
 
-    local baseGuardDirectNeed = Clamp(4 + math.floor(homeThreat / 2) + contestedZones, 4, 12)
-    local baseGuardAANeed = Clamp(1 + math.min(2, airThreatZones) + (raid.UnderAirHarass and 2 or 0) + (severeBomberRaid and 1 or 0), 1, 7)
+    local baseGuardDirectNeed = Clamp(4 + math.floor(homeThreat / 2) + contestedZones + math.floor(homeGuardBias * 2), 3, 12)
+    local baseGuardAANeed = Clamp(1 + math.min(2, airThreatZones) + (raid.UnderAirHarass and 2 or 0) + (severeBomberRaid and 1 or 0) + math.floor(math.max(0, homeGuardBias) * 0.75), 1, 7)
     local acuEscortNeed = 0
     if acuDist > 8 or localAcuThreat > (homeThreat + 1) or runtime.ACURole == 'push' then
         acuEscortNeed = Clamp(2 + math.floor(acuDist / 12) + ((localAcuThreat > 2) and 2 or 0), 2, 8)
@@ -450,6 +454,7 @@ function Module.Update(aiBrain, now)
     if raidPos and (intel.BestRaidZoneKey or false) then
         raiderNeed = Clamp(2 + math.floor(staleZones / 2) + math.min(3, table.getn(scouts)), 2, 8)
     end
+    raiderNeed = Clamp(raiderNeed + math.floor(raidBias * 2), 0, 10)
     local mainlineNeed = Clamp(8 + (contestedZones * 4), 8, 34)
     local airGuardNeed = Clamp(2 + (airThreatZones * 2) + (raid.UnderAirHarass and 2 or 0) + (severeBomberRaid and 2 or 0), 2, 12)
     local outerContestNeed = 0
@@ -639,7 +644,8 @@ function Module.Update(aiBrain, now)
             2
                 + math.floor(math.min(6, outerContestValue / 160))
                 + (reclaimFirst and 1 or 0)
-                + ((primaryTheater ~= 'Home') and 1 or 0),
+                + ((primaryTheater ~= 'Home') and 1 or 0)
+                + math.floor(outerForceBias * 2),
             2,
             8)
         if landCombatTotal < 10 then
@@ -659,6 +665,9 @@ function Module.Update(aiBrain, now)
         end
         if reclaimFirst then
             persistentOuterFloor = math.max(persistentOuterFloor, 2)
+        end
+        if outerForceBias > 0 then
+            persistentOuterFloor = math.max(persistentOuterFloor, math.min(4, 1 + math.floor(outerForceBias)))
         end
         outerContestNeed = math.max(outerContestNeed, persistentOuterFloor)
     end
@@ -1099,7 +1108,7 @@ function Module.Update(aiBrain, now)
     }, now)
     UpdateTask(state, 'raid', {
         Role = 'raid',
-        Priority = 50 + math.floor((intel.StaleZones or 0) * 4) + ((intel.BestRaidZoneKey and 1 or 0) * 10) + math.floor(raidCentrality * 14) + ((primaryTheater == 'Enemy') and 6 or 0),
+        Priority = 50 + math.floor((intel.StaleZones or 0) * 4) + ((intel.BestRaidZoneKey and 1 or 0) * 10) + math.floor(raidCentrality * 14) + ((primaryTheater == 'Enemy') and 6 or 0) + math.floor(raidBias * 8),
         AnchorPos = ownPos,
         TargetPos = raidPos,
         StagingPos = intel.RaidStagePos or frontPos or ownPos,
@@ -1116,7 +1125,7 @@ function Module.Update(aiBrain, now)
     }, now)
     UpdateTask(state, 'outer_contest', {
         Role = 'outer_contest',
-        Priority = 58 + math.floor(math.min(18, outerContestValue / 40)) + (reclaimFirst and 8 or 0) + (expansionEscortWanted and 12 or 0) + ((primaryTheater ~= 'Home') and 4 or 0),
+        Priority = 58 + math.floor(math.min(18, outerContestValue / 40)) + (reclaimFirst and 8 or 0) + (expansionEscortWanted and 12 or 0) + ((primaryTheater ~= 'Home') and 4 or 0) + math.floor(outerForceBias * 8),
         AnchorPos = ownPos,
         TargetPos = outerContestPos,
         StagingPos = LerpPos(ownPos, outerContestPos or frontPos, 0.48),

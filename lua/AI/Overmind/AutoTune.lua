@@ -12,7 +12,7 @@ local function ClampNumber(value, minV, maxV, fallback)
 end
 
 local DefaultConfig = {
-    Version = 3,
+    Version = 5,
     CandidateId = 'baseline',
     ParentCandidateId = 'manual',
     Score = 0,
@@ -52,14 +52,25 @@ local DefaultConfig = {
     StrategyTechBias = 0,
     StrategyAirBias = 0,
     StrategyForwardTheaterBias = 0,
+    StrategyOuterRetentionBias = 0,
+    StrategyCollapseResistanceBias = 0,
+    StrategyReclaimFieldBias = 0,
+    ForceOuterContestBias = 0,
+    ForceHomeGuardBias = 0,
+    ForceRaidBias = 0,
     ReclaimRiskBias = 0,
     ReclaimSupportBias = 0,
     ReclaimNearbyBias = 0,
+    ReclaimFieldRadiusBias = 0,
+    ReclaimFieldMassBias = 0,
+    ReclaimRouteRiskBias = 0,
+    ReclaimEnemyMexBias = 0,
     MexUpgradeBudgetBias = 0,
     MexUpgradeRiskBias = 0,
     MexUpgradeCapBias = 0,
     FactoryHQTimingBias = 0,
     FactoryHQEcoBias = 0,
+    EarlyAirUnlockBias = 0,
 }
 
 local CachedConfig = false
@@ -112,14 +123,25 @@ local function MergeConfig(source)
     cfg.StrategyTechBias = ClampNumber(cfg.StrategyTechBias, -1.5, 1.5, DefaultConfig.StrategyTechBias)
     cfg.StrategyAirBias = ClampNumber(cfg.StrategyAirBias, -1.6, 1.4, DefaultConfig.StrategyAirBias)
     cfg.StrategyForwardTheaterBias = ClampNumber(cfg.StrategyForwardTheaterBias, -1.2, 1.5, DefaultConfig.StrategyForwardTheaterBias)
+    cfg.StrategyOuterRetentionBias = ClampNumber(cfg.StrategyOuterRetentionBias, -1.4, 1.8, DefaultConfig.StrategyOuterRetentionBias)
+    cfg.StrategyCollapseResistanceBias = ClampNumber(cfg.StrategyCollapseResistanceBias, -1.6, 1.4, DefaultConfig.StrategyCollapseResistanceBias)
+    cfg.StrategyReclaimFieldBias = ClampNumber(cfg.StrategyReclaimFieldBias, -1.2, 1.6, DefaultConfig.StrategyReclaimFieldBias)
+    cfg.ForceOuterContestBias = ClampNumber(cfg.ForceOuterContestBias, -1.2, 1.8, DefaultConfig.ForceOuterContestBias)
+    cfg.ForceHomeGuardBias = ClampNumber(cfg.ForceHomeGuardBias, -1.4, 1.4, DefaultConfig.ForceHomeGuardBias)
+    cfg.ForceRaidBias = ClampNumber(cfg.ForceRaidBias, -1.4, 1.6, DefaultConfig.ForceRaidBias)
     cfg.ReclaimRiskBias = ClampNumber(cfg.ReclaimRiskBias, -0.45, 0.75, DefaultConfig.ReclaimRiskBias)
     cfg.ReclaimSupportBias = ClampNumber(cfg.ReclaimSupportBias, -1, 1, DefaultConfig.ReclaimSupportBias)
     cfg.ReclaimNearbyBias = ClampNumber(cfg.ReclaimNearbyBias, -0.35, 0.65, DefaultConfig.ReclaimNearbyBias)
+    cfg.ReclaimFieldRadiusBias = ClampNumber(cfg.ReclaimFieldRadiusBias, -18, 24, DefaultConfig.ReclaimFieldRadiusBias)
+    cfg.ReclaimFieldMassBias = ClampNumber(cfg.ReclaimFieldMassBias, -28, 36, DefaultConfig.ReclaimFieldMassBias)
+    cfg.ReclaimRouteRiskBias = ClampNumber(cfg.ReclaimRouteRiskBias, -1.0, 1.4, DefaultConfig.ReclaimRouteRiskBias)
+    cfg.ReclaimEnemyMexBias = ClampNumber(cfg.ReclaimEnemyMexBias, -1.0, 1.8, DefaultConfig.ReclaimEnemyMexBias)
     cfg.MexUpgradeBudgetBias = ClampNumber(cfg.MexUpgradeBudgetBias, -2.5, 3, DefaultConfig.MexUpgradeBudgetBias)
     cfg.MexUpgradeRiskBias = ClampNumber(cfg.MexUpgradeRiskBias, -0.45, 0.7, DefaultConfig.MexUpgradeRiskBias)
     cfg.MexUpgradeCapBias = ClampNumber(cfg.MexUpgradeCapBias, -1, 2, DefaultConfig.MexUpgradeCapBias)
     cfg.FactoryHQTimingBias = ClampNumber(cfg.FactoryHQTimingBias, -120, 180, DefaultConfig.FactoryHQTimingBias)
     cfg.FactoryHQEcoBias = ClampNumber(cfg.FactoryHQEcoBias, -1, 1, DefaultConfig.FactoryHQEcoBias)
+    cfg.EarlyAirUnlockBias = ClampNumber(cfg.EarlyAirUnlockBias, -1.4, 1.4, DefaultConfig.EarlyAirUnlockBias)
 
     return cfg
 end
@@ -143,7 +165,7 @@ function GetConfig(aiBrain)
     CachedConfig = cfg
 
     if aiBrain and aiBrain.GetArmyIndex and LOG then
-        LOG(string.format('*OVERMIND AUTOTUNE A%d id=%s score=%.1f floor=%d/%d/%d scout=%d acu=%d/%d/%d facBias=%.2f reclaimBias=%.2f quotaBias=%.1f expandBias=%.1f riskBias=%.2f strat=%.2f/%.2f/%.2f recRisk=%.2f upg=%.2f/%.2f',
+        LOG(string.format('*OVERMIND AUTOTUNE A%d id=%s score=%.1f floor=%d/%d/%d scout=%d acu=%d/%d/%d facBias=%.2f reclaimBias=%.2f quotaBias=%.1f expandBias=%.1f riskBias=%.2f strat=%.2f/%.2f/%.2f outer=%.2f raid=%.2f air=%.2f recRisk=%.2f upg=%.2f/%.2f',
             aiBrain:GetArmyIndex(),
             tostring(cfg.CandidateId or 'baseline'),
             cfg.Score or 0,
@@ -162,6 +184,9 @@ function GetConfig(aiBrain)
             cfg.StrategyExpandBias or 0,
             cfg.StrategyTempoBias or 0,
             cfg.StrategyTechBias or 0,
+            cfg.StrategyOuterRetentionBias or 0,
+            cfg.ForceRaidBias or 0,
+            cfg.EarlyAirUnlockBias or 0,
             cfg.ReclaimRiskBias or 0,
             cfg.MexUpgradeBudgetBias or 0,
             cfg.FactoryHQTimingBias or 0))

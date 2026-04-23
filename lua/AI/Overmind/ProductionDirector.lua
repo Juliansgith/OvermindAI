@@ -1615,6 +1615,9 @@ local function DecideCapacityPlan(runtime, current, constraints, rolePlan)
         and powerReady >= math.max(7, constraints.StarterPowerFloor or 2)
         and engineerUnits >= math.max(10, constraints.StarterEngineerFloor or 6)
     local needsFirstLandHQ = factoryUpgrade.NeedsFirstLandHQ == true
+    local earlyAirUnlockBias = policy.EarlyAirUnlockBias or 0
+    local earlyAirRelax = math.max(0, earlyAirUnlockBias)
+    local earlyAirConservatism = math.max(0, -earlyAirUnlockBias)
     local landCrisisAirVeto = planner.ForceAirAnswer == true
         and (
             constraints.LandPanic
@@ -1667,9 +1670,7 @@ local function DecideCapacityPlan(runtime, current, constraints, rolePlan)
         )
         and not deepMassStall
         and not constraints.EcoCrash
-    local preHQAirClamp = needsFirstLandHQ
-        and current.Factories.Land.Ready >= 4
-        and not preserveAirWindow
+    local preHQAirClamp = false
     local objectivePreHQ = macroObjective == 'mass_consolidation'
         or macroObjective == 'first_land_hq'
         or macroObjective == 'first_t2_engineer'
@@ -1680,7 +1681,7 @@ local function DecideCapacityPlan(runtime, current, constraints, rolePlan)
     local contestMapMode = policy.ContestMapMode == true
     local focusOnT1Spam = policy.FocusOnT1Spam == true
     local relaxedFactoryTempo = policy.RelaxedFactoryTempo == true
-    local suppressEarlyAir = policy.SuppressEarlyAir == true
+    local suppressEarlyAir = policy.SuppressEarlyAir == true and earlyAirUnlockBias < 0.6
     local hqPressureEscape = (runtime.MacroController or {}).HQPressureEscape == true
     local outerRetentionActive = planner.OuterRetentionActive == true
     local reclaimFirst = planner.ReclaimFirst == true
@@ -1688,22 +1689,27 @@ local function DecideCapacityPlan(runtime, current, constraints, rolePlan)
     local outerControlStable = frontSecure and (policy.OuterHoldShare or 0) >= 0.55
     local outerMexShare = policy.OuterMexShare or 0
     local safeForwardMexCount = policy.SafeForwardMexCount or 0
+    local contestScoutLandReadyMin = earlyAirRelax >= 0.75 and 1 or 2
+    local contestScoutMexMin = Clamp(4 - math.floor(earlyAirRelax * 1.4) + math.floor(earlyAirConservatism * 1.2), 3, 6)
+    local contestScoutPowerMin = Clamp(3 - math.floor(earlyAirRelax * 1.2) + math.floor(earlyAirConservatism), 2, 5)
+    local contestScoutForwardMexMin = Clamp(3 - math.floor(earlyAirRelax), 1, 4)
+    local contestScoutOuterMexMin = Clamp(0.34 - (earlyAirUnlockBias * 0.05), 0.22, 0.46)
     local contestScoutAirWindow = (contestMapMode or prioritizeProduction)
-        and current.Factories.Land.Ready >= 2
-        and mexReady >= 4
-        and powerReady >= 3
+        and current.Factories.Land.Ready >= contestScoutLandReadyMin
+        and mexReady >= contestScoutMexMin
+        and powerReady >= contestScoutPowerMin
         and not constraints.EcoCrash
         and not constraints.QueueStarved
         and not constraints.CriticalFactory
         and not constraints.CriticalStructure
-        and (frontSecure or safeForwardMexCount >= 3 or outerMexShare >= 0.34)
+        and (frontSecure or safeForwardMexCount >= contestScoutForwardMexMin or outerMexShare >= contestScoutOuterMexMin)
     local contestScoutAirFloor = contestScoutAirWindow and 1 or 0
     local contestStarterTempo = (contestMapMode or prioritizeProduction)
         and current.Factories.Land.Ready >= 1
         and current.Factories.Air.Total <= 0
-        and mexReady >= math.max(4, (constraints.StarterMexFloor or 5) - 1)
-        and powerReady >= math.max(2, (constraints.StarterPowerFloor or 2) - 1)
-        and engineerUnits >= math.max(4, (constraints.StarterEngineerFloor or 6) - 2)
+        and mexReady >= math.max(3, math.max(4, (constraints.StarterMexFloor or 5) - 1) - math.floor(earlyAirRelax))
+        and powerReady >= math.max(2, math.max(2, (constraints.StarterPowerFloor or 2) - 1) - math.floor(earlyAirRelax))
+        and engineerUnits >= math.max(3, math.max(4, (constraints.StarterEngineerFloor or 6) - 2) - math.floor(earlyAirRelax))
         and not constraints.EcoCrash
         and not constraints.CriticalFactory
         and not constraints.CriticalStructure
@@ -1715,6 +1721,12 @@ local function DecideCapacityPlan(runtime, current, constraints, rolePlan)
             or constraints.FrontPressure >= 0.14
             or constraints.BasePressure >= 0.12
         )
+    if earlyAirUnlockBias >= 0.95 and (contestScoutAirWindow or contestStarterTempo) then
+        preserveAirWindow = true
+    end
+    preHQAirClamp = needsFirstLandHQ
+        and current.Factories.Land.Ready >= (earlyAirUnlockBias >= 0.75 and 5 or 4)
+        and not preserveAirWindow
 
     local landCap = math.max(
         6,
@@ -1743,7 +1755,7 @@ local function DecideCapacityPlan(runtime, current, constraints, rolePlan)
         seaCap = seaCap + 1
     end
     if preHQAirClamp then
-        airCap = math.min(airCap, math.min(current.Factories.Air.Total, 1))
+        airCap = math.min(airCap, math.min(current.Factories.Air.Total, earlyAirUnlockBias >= 0.85 and 2 or 1))
     end
 
     local landTarget = Clamp(math.max(1, math.ceil(landRoleLoad / 9.5), math.ceil(landRoleUnits / 12)), 1, landCap)
