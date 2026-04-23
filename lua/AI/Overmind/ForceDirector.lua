@@ -454,15 +454,13 @@ function Module.Update(aiBrain, now)
     local airGuardNeed = Clamp(2 + (airThreatZones * 2) + (raid.UnderAirHarass and 2 or 0) + (severeBomberRaid and 2 or 0), 2, 12)
     local outerContestNeed = 0
     local previousOuterCount = (previousTasks.outer_contest and (previousTasks.outer_contest.CurrentUnits or 0)) or 0
-    local expansionEscortBlockedRecent = (runtime.LastExpansionEscortBlockedTime or -999) >= (now - 85)
     local expansionEscortWanted = outerContestPos
         and not acuCrisisActive
-        and (not approachTowardHome or landCombatTotal >= 8 or engineerState.MexEmergencyActive == true or expansionEscortBlockedRecent)
+        and not approachTowardHome
         and landCombatTotal >= 4
         and (
             engineerState.MexEmergencyActive == true
             or reclaimFirst
-            or expansionEscortBlockedRecent
             or (now < 1200 and mexReady < 9 and mapControl < 0.42)
         )
     if approachClose then
@@ -519,7 +517,7 @@ function Module.Update(aiBrain, now)
     end
     if expansionEscortWanted then
         local escortNeed = 2 + math.floor(math.min(10, landCombatTotal) * 0.18)
-        if mexReady < 6 or mapControl < 0.28 or expansionEscortBlockedRecent then
+        if mexReady < 6 or mapControl < 0.28 then
             escortNeed = escortNeed + 1
         end
         outerContestNeed = math.max(outerContestNeed, Clamp(escortNeed, 2, landCombatTotal < 8 and 3 or 6))

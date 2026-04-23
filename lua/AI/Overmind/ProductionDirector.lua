@@ -1669,7 +1669,6 @@ local function DecideCapacityPlan(runtime, current, constraints, rolePlan)
     local reclaimFirst = planner.ReclaimFirst == true
     local frontSecure = policy.FrontSecure == true
     local outerControlStable = frontSecure and (policy.OuterHoldShare or 0) >= 0.55
-    local mapControl = ((runtime.ZoneModel or {}).MapControl) or 0.5
     local outerMexShare = policy.OuterMexShare or 0
     local safeForwardMexCount = policy.SafeForwardMexCount or 0
     local contestScoutAirWindow = (contestMapMode or prioritizeProduction)
@@ -2244,28 +2243,10 @@ local function DecideCapacityPlan(runtime, current, constraints, rolePlan)
     local preHQFactoryCap = ((macroFacts.T2LandFactories or 0) <= 0)
         and (mexReady or 0) < 8
         and (now or 0) < 1200
-    local preHQLandFactoryCap = 4
-    if preHQFactoryCap
-        and current.Factories.Land.Ready >= 4
-        and (now or 0) >= 540
-        and not constraints.EcoCrash
-        and not constraints.QueueStarved
-        and not powerBufferLow
-        and not deepMassStall then
-        if mapControl < 0.32 or landRoleGap >= 42 or constraints.FrontPressure >= 0.24 then
-            preHQLandFactoryCap = 5
-        end
-        if (now or 0) >= 780
-            and (mexReady or 0) >= 6
-            and landRoleGap >= 60
-            and (massTrend or 0) >= -0.16 then
-            preHQLandFactoryCap = 6
-        end
-    end
-    if preHQFactoryCap and current.Factories.Land.Total >= preHQLandFactoryCap then
+    if preHQFactoryCap and current.Factories.Land.Total >= 4 then
         landTarget = math.min(landTarget, current.Factories.Land.Total)
     elseif preHQFactoryCap then
-        landTarget = math.min(landTarget, preHQLandFactoryCap)
+        landTarget = math.min(landTarget, 4)
     end
     local ecoFactoryCap = math.max(
         4,
