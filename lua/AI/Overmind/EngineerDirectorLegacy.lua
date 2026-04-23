@@ -2737,14 +2737,7 @@ local function ProcessEngineer(aiBrain, runtime, eng, now, ctx)
     local acted = false
 
     if isIdle and not constructing then
-        if secondLandFactoryDebt
-            and not ctx.factoryTask.Active
-            and localThreat < 2.0
-            and dist <= 340
-            and TryOpenSecondLandFactoryBuild(aiBrain, runtime, eng, ctx.mainPos, now) then
-            ctx.directSecondFactory = ctx.directSecondFactory + 1
-            acted = true
-        elseif ctx.contestFieldMode
+        if ctx.contestFieldMode
             and ctx.fieldTaskWindow
             and ctx.reclaimField < ctx.fieldTaskQuota
             and ctx.needBase <= 0
