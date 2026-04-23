@@ -111,6 +111,25 @@ local function ResolveMethod(moduleTable, methodName, moduleName)
     return fn
 end
 
+local function OptionalMethod(moduleTable, methodName, fallback)
+    local fn = false
+    if type(moduleTable) == 'table' then
+        fn = rawget(moduleTable, methodName)
+        if type(fn) ~= 'function' then
+            local ok, resolved = pcall(function()
+                return moduleTable[methodName]
+            end)
+            if ok and type(resolved) == 'function' then
+                fn = resolved
+            end
+        end
+    end
+    if type(fn) == 'function' then
+        return fn
+    end
+    return fallback
+end
+
 function Update(aiBrain, now)
     local runtime = aiBrain.OvermindRuntime
     if not runtime then
@@ -120,12 +139,12 @@ function Update(aiBrain, now)
     local GetMainPos = ResolveMethod(Common, 'GetMainPos', 'Common')
     local GetEntityId = ResolveMethod(Common, 'GetEntityId', 'Common')
     local GetFraction = ResolveMethod(Common, 'GetFraction', 'Common')
-    local CleanupExpansionReservations = (type(Expansion) == 'table' and Expansion.CleanupExpansionReservations) or function() end
-    local NeedsCriticalRadar = (type(Policy) == 'table' and Policy.NeedsCriticalRadar) or function() return false end
-    local GetRadarReservedBuilderIds = (type(Policy) == 'table' and Policy.GetRadarReservedBuilderIds) or function() return {} end
-    local FindBestUnfinishedFactory = (type(Recovery) == 'table' and Recovery.FindBestUnfinishedFactory) or function() return false, false, 1, 'none', 0 end
-    local ComputeFactoryTaskRequirements = (type(Recovery) == 'table' and Recovery.ComputeFactoryTaskRequirements) or function() return 1 end
-    local ResetFactoryTask = (type(Recovery) == 'table' and Recovery.ResetFactoryTask) or function(task)
+    local CleanupExpansionReservations = OptionalMethod(Expansion, 'CleanupExpansionReservations', function() end)
+    local NeedsCriticalRadar = OptionalMethod(Policy, 'NeedsCriticalRadar', function() return false end)
+    local GetRadarReservedBuilderIds = OptionalMethod(Policy, 'GetRadarReservedBuilderIds', function() return {} end)
+    local FindBestUnfinishedFactory = OptionalMethod(Recovery, 'FindBestUnfinishedFactory', function() return false, false, 1, 'none', 0 end)
+    local ComputeFactoryTaskRequirements = OptionalMethod(Recovery, 'ComputeFactoryTaskRequirements', function() return 1 end)
+    local ResetFactoryTask = OptionalMethod(Recovery, 'ResetFactoryTask', function(task)
         if task then
             task.Active = false
             task.TargetId = false
@@ -138,13 +157,13 @@ function Update(aiBrain, now)
             task.BuilderIds = {}
             task.CandidateDebug = { Total = 0, Safe = 0, Reachable = 0, Interruptible = 0 }
         end
-    end
-    local ShouldForceFinishEcoStructure = (type(Recovery) == 'table' and Recovery.ShouldForceFinishEcoStructure) or function() return false, false, false end
-    local FindTrackedUnfinishedStructure = (type(Recovery) == 'table' and Recovery.FindTrackedUnfinishedStructure) or function() return false, false, 1, 'none', 0 end
-    local FindBestUnfinishedStructure = (type(Recovery) == 'table' and Recovery.FindBestUnfinishedStructure) or function() return false, false, 1, 'none', 0 end
-    local ShouldKeepTrackedStructureTask = (type(Recovery) == 'table' and Recovery.ShouldKeepTrackedStructureTask) or function() return false end
-    local ComputeStructureTaskRequirements = (type(Recovery) == 'table' and Recovery.ComputeStructureTaskRequirements) or function() return 1 end
-    local ResetStructureTask = (type(Recovery) == 'table' and Recovery.ResetStructureTask) or function(task)
+    end)
+    local ShouldForceFinishEcoStructure = OptionalMethod(Recovery, 'ShouldForceFinishEcoStructure', function() return false, false, false end)
+    local FindTrackedUnfinishedStructure = OptionalMethod(Recovery, 'FindTrackedUnfinishedStructure', function() return false, false, 1, 'none', 0 end)
+    local FindBestUnfinishedStructure = OptionalMethod(Recovery, 'FindBestUnfinishedStructure', function() return false, false, 1, 'none', 0 end)
+    local ShouldKeepTrackedStructureTask = OptionalMethod(Recovery, 'ShouldKeepTrackedStructureTask', function() return false end)
+    local ComputeStructureTaskRequirements = OptionalMethod(Recovery, 'ComputeStructureTaskRequirements', function() return 1 end)
+    local ResetStructureTask = OptionalMethod(Recovery, 'ResetStructureTask', function(task)
         if task then
             task.Active = false
             task.TargetId = false
@@ -157,12 +176,12 @@ function Update(aiBrain, now)
             task.BuilderIds = {}
             task.CandidateDebug = { Total = 0, Safe = 0, Reachable = 0, Interruptible = 0 }
         end
-    end
-    local AssignBuildersToUnfinishedFactory = (type(Assignments) == 'table' and Assignments.AssignBuildersToUnfinishedFactory) or function() return 0, {}, false, { Total = 0, Safe = 0, Reachable = 0, Interruptible = 0 } end
-    local AssignBuildersToUnfinishedStructure = (type(Assignments) == 'table' and Assignments.AssignBuildersToUnfinishedStructure) or function() return 0, {}, false, { Total = 0, Safe = 0, Reachable = 0, Interruptible = 0 } end
-    local ProcessEngineer = (type(Assignments) == 'table' and Assignments.ProcessEngineer) or function() end
-    local DescribeStructureTaskTarget = (type(Assignments) == 'table' and Assignments.DescribeStructureTaskTarget) or function() return 'none' end
-    local DispatchExpansionEngineer = (type(Expansion) == 'table' and Expansion.DispatchExpansionEngineer) or function() return 0 end
+    end)
+    local AssignBuildersToUnfinishedFactory = OptionalMethod(Assignments, 'AssignBuildersToUnfinishedFactory', function() return 0, {}, false, { Total = 0, Safe = 0, Reachable = 0, Interruptible = 0 } end)
+    local AssignBuildersToUnfinishedStructure = OptionalMethod(Assignments, 'AssignBuildersToUnfinishedStructure', function() return 0, {}, false, { Total = 0, Safe = 0, Reachable = 0, Interruptible = 0 } end)
+    local ProcessEngineer = OptionalMethod(Assignments, 'ProcessEngineer', function() end)
+    local DescribeStructureTaskTarget = OptionalMethod(Assignments, 'DescribeStructureTaskTarget', function() return 'none' end)
+    local DispatchExpansionEngineer = OptionalMethod(Expansion, 'DispatchExpansionEngineer', function() return 0 end)
 
     if now - (runtime.LastEngineerDirectorTime or -999) < 3 then
         return
