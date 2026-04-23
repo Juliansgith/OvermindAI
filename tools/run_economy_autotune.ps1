@@ -250,7 +250,8 @@ function Invoke-ReleaseSync {
         Write-Host '[DRYRUN] would sync AutoTuneConfig.lua to live mirrors'
         return
     }
-    & powershell -ExecutionPolicy Bypass -File $ReleaseChecks -SkipSyntax
+    $syncOutput = & powershell -ExecutionPolicy Bypass -File $ReleaseChecks -SkipSyntax
+    $syncOutput | ForEach-Object { Write-Host $_ }
     if ($LASTEXITCODE -ne 0) {
         throw 'release_checks.ps1 -SkipSyntax failed.'
     }
@@ -265,9 +266,7 @@ function Invoke-AutorunBatch {
     )
 
     $logDir = Join-Path $CandidateDir 'logs'
-    $generatedDir = Join-Path $CandidateDir 'generated'
     Ensure-Directory $logDir
-    Ensure-Directory $generatedDir
 
     $launchedLogs = @()
     $remaining = $Games
@@ -285,7 +284,6 @@ function Invoke-AutorunBatch {
             '-MapName', $MapName,
             '-BaseSeed', $seed,
             '-LogDir', $logDir,
-            '-GeneratedLuaDir', $generatedDir,
             '-ExitDelaySeconds', 4
         )
         if ($MaxGameSeconds -gt 0) {
@@ -315,11 +313,11 @@ function Invoke-AutorunBatch {
                     $pids += [int]$Matches[1]
                 }
             }
-            foreach ($pid in $pids) {
+            foreach ($gamePid in $pids) {
                 try {
-                    Wait-Process -Id $pid -ErrorAction Stop
+                    Wait-Process -Id $gamePid -ErrorAction Stop
                 } catch {
-                    Write-Warning "Process $pid was already gone or could not be waited on."
+                    Write-Warning "Process $gamePid was already gone or could not be waited on."
                 }
             }
         }
@@ -563,6 +561,12 @@ if ($BaseSeed -le 0) {
 $rng = [System.Random]::new($BaseSeed)
 $baselineConfig = Read-TuneConfig -Path $ConfigPath
 $baselineConfig.CandidateId = if ($baselineConfig.CandidateId) { [string]$baselineConfig.CandidateId } else { 'baseline' }
+$baselineRawPath = Join-Path $sessionDir 'baseline-AutoTuneConfig.raw.lua'
+if (Test-Path -LiteralPath $ConfigPath) {
+    Copy-Item -LiteralPath $ConfigPath -Destination $baselineRawPath -Force
+} else {
+    Write-TuneConfig -Config $baselineConfig -Path $baselineRawPath
+}
 $baselinePath = Join-Path $sessionDir 'baseline-AutoTuneConfig.lua'
 Write-TuneConfig -Config $baselineConfig -Path $baselinePath
 
@@ -619,7 +623,7 @@ if ($best.CandidateId -ne 'baseline' -and $best.RuntimeClean -and $margin -ge $P
     Write-Host ("PROMOTED {0}: score {1} vs baseline {2}, margin {3:P2}" -f $best.CandidateId, $best.Score, $baseline.Score, $margin)
 } else {
     if (-not $DryRun -and -not $KeepLosingCandidateConfig) {
-        Write-TuneConfig -Config $baselineConfig -Path $ConfigPath
+        Copy-Item -LiteralPath $baselineRawPath -Destination $ConfigPath -Force
         Invoke-ReleaseSync
     }
     Write-Host ("NO PROMOTION: best={0} score={1}, baseline={2}, margin={3:P2}, required={4:P2}" -f $best.CandidateId, $best.Score, $baseline.Score, $margin, $PromoteScoreMargin)
