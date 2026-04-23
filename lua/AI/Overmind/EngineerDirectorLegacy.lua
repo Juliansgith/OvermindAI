@@ -3103,7 +3103,7 @@ function Update(aiBrain, now)
     local fieldTaskQuota = 0
     if (contestFieldMode or desiredReclaimQuota > 0)
         and not mexRebuildUrgent
-        and not mexExpansionUrgent
+        and (not mexExpansionUrgent or desiredReclaimQuota > 0)
         and reclaimFieldPos
         and (fieldBaseReady or (desiredReclaimQuota > 0 and firstReclaimBaseReady))
         and not ecoCrash
@@ -3127,7 +3127,7 @@ function Update(aiBrain, now)
     elseif fieldStickyActive
         and (contestFieldMode or desiredReclaimQuota > 0)
         and not mexRebuildUrgent
-        and not mexExpansionUrgent
+        and (not mexExpansionUrgent or desiredReclaimQuota > 0)
         and reclaimFieldPos
         and (fieldBaseReady or (desiredReclaimQuota > 0 and firstReclaimBaseReady))
         and not ecoCrash
