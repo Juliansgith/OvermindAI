@@ -57,11 +57,13 @@ function Get-AutotuneDbSettings {
         ProjectName = $ProjectName
         ServiceName = 'postgres'
         AdminerServiceName = 'adminer'
+        DashboardServiceName = 'dashboard'
         Database = if ($envMap.ContainsKey('AUTOTUNE_DB_NAME')) { $envMap['AUTOTUNE_DB_NAME'] } else { 'overmind_autotune' }
         User = if ($envMap.ContainsKey('AUTOTUNE_DB_USER')) { $envMap['AUTOTUNE_DB_USER'] } else { 'overmind' }
         Password = if ($envMap.ContainsKey('AUTOTUNE_DB_PASSWORD')) { $envMap['AUTOTUNE_DB_PASSWORD'] } else { 'overmind_dev' }
         Port = if ($envMap.ContainsKey('AUTOTUNE_DB_PORT')) { [int]$envMap['AUTOTUNE_DB_PORT'] } else { 54329 }
         AdminerPort = if ($envMap.ContainsKey('AUTOTUNE_ADMINER_PORT')) { [int]$envMap['AUTOTUNE_ADMINER_PORT'] } else { 18081 }
+        DashboardPort = if ($envMap.ContainsKey('AUTOTUNE_DASHBOARD_PORT')) { [int]$envMap['AUTOTUNE_DASHBOARD_PORT'] } else { 18501 }
     }
 }
 
@@ -139,12 +141,16 @@ function Start-AutotuneDb {
     param(
         $Settings,
         [switch]$IncludeAdminer,
+        [switch]$IncludeDashboard,
         [int]$ReadyTimeoutSeconds = 60
     )
 
     $services = @($Settings.ServiceName)
     if ($IncludeAdminer) {
         $services += $Settings.AdminerServiceName
+    }
+    if ($IncludeDashboard) {
+        $services += $Settings.DashboardServiceName
     }
 
     $code = Invoke-AutotuneCompose -Settings $Settings -Arguments (@('up', '-d') + $services)
@@ -162,6 +168,25 @@ function Start-AutotuneDb {
     }
 
     throw 'Autotune database did not become ready in time.'
+}
+
+function Start-AutotuneDashboard {
+    param(
+        $Settings,
+        [switch]$IncludeAdminer,
+        [int]$ReadyTimeoutSeconds = 90
+    )
+
+    Start-AutotuneDb -Settings $Settings -IncludeAdminer:$IncludeAdminer -IncludeDashboard -ReadyTimeoutSeconds $ReadyTimeoutSeconds
+}
+
+function Stop-AutotuneDashboard {
+    param($Settings)
+
+    $code = Invoke-AutotuneCompose -Settings $Settings -Arguments @('stop', $Settings.DashboardServiceName)
+    if ($code -ne 0) {
+        throw 'Failed to stop autotune dashboard service.'
+    }
 }
 
 function Stop-AutotuneDb {

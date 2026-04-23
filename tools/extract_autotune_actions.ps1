@@ -93,6 +93,8 @@ function New-State {
         engineer_base_need = 0
         engineer_fac_task = 'none'
         engineer_struct_task = 'none'
+        engineer_acu_repair = 0
+        engineer_acu_need = 0
         macro_phase = 'none'
         macro_reason = 'none'
         goal = 'none'
@@ -102,6 +104,9 @@ function New-State {
         acu_action = 'none'
         acu_dist = 0.0
         acu_hp = 1.0
+        prod_struct_shield = 0
+        prod_struct_tmd = 0
+        prod_struct_home = 0
     }
 }
 
@@ -366,6 +371,17 @@ foreach ($log in $logs) {
             $state.upgrade_obj = if ((To-Int $Matches[19]) -gt 0) { 'enabled' } else { 'disabled' }
             $state.upgrade_reason = $Matches[20]
             Add-TimelinePoint -Timeline $timeline -State $state
+            if ($line -match 'struct=R\d+ S\d+ AA\d+ PD\d+ SH(\d+) TMD(\d+) home=(\d+)') {
+                $state.prod_struct_shield = To-Int $Matches[1]
+                $state.prod_struct_tmd = To-Int $Matches[2]
+                $state.prod_struct_home = To-Int $Matches[3]
+                $structSignature = "shield=$($state.prod_struct_shield)|tmd=$($state.prod_struct_tmd)|home=$($state.prod_struct_home)"
+                if ($signatures['production-structure'] -ne $structSignature) {
+                    $eventIndex += 1
+                    Add-EventRow -Events $events -LogName $log.Name -RunTag $identity.RunTag -Instance $identity.Instance -EventIndex $eventIndex -Subsystem 'production' -ActionType 'structure_posture' -ActionKey 'shield_tmd_home' -ActionValue ("{0}:{1}:{2}" -f $state.prod_struct_shield, $state.prod_struct_tmd, $state.prod_struct_home) -EventTime $t -State $state -Signature $structSignature -RawLine $line
+                    $signatures['production-structure'] = $structSignature
+                }
+            }
             $signature = "mode=$($state.prod_mode)|obj=$($state.prod_obj)|fac=$($state.fac_target_total)|mex=$($state.mex_ready)/$($state.mex_total)|upg=$($state.upgrade_reason)"
             if ($signatures['production-objective'] -ne $signature) {
                 $eventIndex += 1
@@ -403,6 +419,16 @@ foreach ($log in $logs) {
             $state.engineer_base_need = To-Int $Matches[11]
             $state.engineer_fac_task = ("{0}:{1}" -f $Matches[12], $Matches[13])
             $state.engineer_struct_task = ("{0}:{1}:{2}" -f $Matches[18], $Matches[19], $Matches[20])
+            if ($line -match 'acuRep=(\d+)\/(\d+)') {
+                $state.engineer_acu_repair = To-Int $Matches[1]
+                $state.engineer_acu_need = To-Int $Matches[2]
+                $acuSignature = "acuRepair=$($state.engineer_acu_repair)|acuNeed=$($state.engineer_acu_need)"
+                if ($signatures['engineer-acu-repair'] -ne $acuSignature) {
+                    $eventIndex += 1
+                    Add-EventRow -Events $events -LogName $log.Name -RunTag $identity.RunTag -Instance $identity.Instance -EventIndex $eventIndex -Subsystem 'engineer' -ActionType 'acu_repair' -ActionKey 'acu_repair_dispatch' -ActionValue ("{0}:{1}" -f $state.engineer_acu_repair, $state.engineer_acu_need) -EventTime $t -State $state -Signature $acuSignature -RawLine $line
+                    $signatures['engineer-acu-repair'] = $acuSignature
+                }
+            }
             Add-TimelinePoint -Timeline $timeline -State $state
             $signature = "expand=$($state.engineer_expand)|field=$($state.engineer_field)|quota=$($state.engineer_quota)|block=$($state.engineer_block)|fac=$($state.engineer_fac_task)|struct=$($state.engineer_struct_task)"
             if ($signatures['engineer'] -ne $signature) {

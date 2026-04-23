@@ -14,6 +14,8 @@ local RadarCategory = categories.STRUCTURE * categories.RADAR
 local SonarCategory = categories.STRUCTURE * categories.SONAR
 local PDCategory = categories.STRUCTURE * categories.DEFENSE * categories.DIRECTFIRE - categories.ANTIAIR
 local BaseAACategory = categories.STRUCTURE * categories.DEFENSE * categories.ANTIAIR
+local ShieldCategory = categories.STRUCTURE * categories.SHIELD
+local T2MissileDefenseCategory = categories.STRUCTURE * categories.ANTIMISSILE * categories.TECH2
 local NavalDefenseCategory = categories.STRUCTURE * categories.DEFENSE * categories.NAVAL
 local MexCategory = categories.STRUCTURE * categories.MASSEXTRACTION
 local PowerCategory = categories.STRUCTURE * categories.ENERGYPRODUCTION
@@ -177,6 +179,8 @@ local function BuildStructureCounts(aiBrain)
         Sonar = CountCategory(aiBrain, SonarCategory),
         PD = CountCategory(aiBrain, PDCategory),
         BaseAA = CountCategory(aiBrain, BaseAACategory),
+        Shield = CountCategory(aiBrain, ShieldCategory),
+        TMD = CountCategory(aiBrain, T2MissileDefenseCategory),
         NavalDefense = CountCategory(aiBrain, NavalDefenseCategory),
     }
 end
@@ -2507,6 +2511,11 @@ local function DecideTechPlan(runtime, current, constraints, confidence, mode)
         and (eco.EnergyStorageRatio or 0) >= 0.16
         and (eco.MassTrend or 0) >= -0.04
         and (eco.EnergyTrend or 0) >= 1
+    local mexPeakReady = ((runtime.EngineerState or {}).PeakMexReady) or mexReady
+    local mexLossCount = math.max(0, mexPeakReady - mexReady)
+    local collapseRecoveryWindow = (constraints.MapControl or 1) <= 0.26
+        or mexLossCount >= 2
+        or mexReady <= math.max(5, (constraints.StarterMexFloor or 6) - 1)
     local extractorPriority = Clamp(
         (ecoBias * 0.82)
         + (eligible and 0.18 or 0)
@@ -2528,6 +2537,16 @@ local function DecideTechPlan(runtime, current, constraints, confidence, mode)
         extractorReason = 'eco_crash'
     elseif constraints.QueueStarved and not overflowWindow then
         extractorReason = 'queue_starved'
+    elseif collapseRecoveryWindow
+        and readyLand >= 2
+        and powerReady >= 3
+        and (eco.EnergyStorageRatio or 0) >= 0.04
+        and (eco.EnergyTrend or 0) >= -14
+        and (eco.MassTrend or 0) >= -0.22
+        and not constraints.TechBlocked then
+        upgradeExtractors = true
+        aggressiveExtractors = false
+        extractorReason = 'collapse_recovery'
     elseif (prioritizeProduction or contestMapMode)
         and not overflowWindow
         and not constraints.StrongSurplusWindow
@@ -2578,6 +2597,10 @@ local function DecideTechPlan(runtime, current, constraints, confidence, mode)
         aggressiveExtractors = false
         extractorReason = 'surplus_to_tempo'
     end
+    local extractorUpgradeCap = aggressiveExtractors and 4 or (upgradeExtractors and 2 or 0)
+    if collapseRecoveryWindow and upgradeExtractors and not aggressiveExtractors then
+        extractorUpgradeCap = math.min(extractorUpgradeCap, 1)
+    end
 
     return {
         LandTechBias = Clamp(landBias, 0, 0.95),
@@ -2597,7 +2620,7 @@ local function DecideTechPlan(runtime, current, constraints, confidence, mode)
         UpgradeExtractors = upgradeExtractors,
         AggressiveExtractorUpgrades = aggressiveExtractors,
         ExtractorUpgradePriority = Round(extractorPriority, 2),
-        ExtractorUpgradeCap = aggressiveExtractors and 4 or (upgradeExtractors and 2 or 0),
+        ExtractorUpgradeCap = extractorUpgradeCap,
         ExtractorUpgradeReason = extractorReason,
     }
 end
@@ -2616,6 +2639,8 @@ local function DecideStructurePlan(runtime, current, constraints, confidence, mo
     local mexExpansionPressure = mexReady < math.max(8, (constraints.StarterMexFloor or 5) + 3)
     local macroPhase = ((runtime.MacroController or {}).Phase) or 'none'
     local firstT2PowerPending = macroPhase == 'first_t2_power'
+    local acuCrisisActive = now < (runtime.ACUCrisisUntil or -999)
+        or now < (runtime.ACUCrisisEscalatedUntil or -999)
     now = now or 0
 
     local radarDesired = 0
@@ -2699,11 +2724,54 @@ local function DecideStructurePlan(runtime, current, constraints, confidence, mo
         end
     end
     local navalDefenseDesired = (sonarDesired > 0 and (opp.Navy or 0) > 0 and confidence.Navy >= 0.45) and 1 or 0
+    local approachThreat = approachCluster.TotalThreat or 0
+    local approachDistance = approachCluster.HomeDistance or 999
+    local homeCrisisLockdown = acuCrisisActive
+        or constraints.LandPanic
+        or constraints.AirPanic
+        or severeBomberRaid
+        or raid.UnderLandHarass
+        or raid.UnderAirHarass
+        or (approachThreat >= 8 and approachDistance < 220)
+    local shieldDesired = 0
+    local tmdDesired = 0
+    local shieldTechWindow = powerReady >= 4
+        and not constraints.EconBootstrap
+        and not constraints.StarterPhase
+        and not firstT2PowerPending
+        and not constraints.EcoCrash
+
+    if shieldTechWindow and current.Factories.Land.Total > 0 then
+        if homeCrisisLockdown then
+            shieldDesired = 1
+        elseif now >= 620
+            and confidence.Global >= 0.46
+            and current.Factories.Land.Total >= 2
+            and (constraints.EnemyT2Push or constraints.EnemyIndirectHeavy or current.Factories.Air.Total > 0) then
+            shieldDesired = 1
+        end
+    end
+    if shieldDesired > 0
+        and powerReady >= 5
+        and confidence.Global >= 0.42
+        and (
+            homeCrisisLockdown
+            or constraints.EnemyIndirectHeavy
+            or constraints.EnemyT2Push
+            or current.Factories.Land.Total >= 3
+            or now >= 840
+        ) then
+        tmdDesired = 1
+    end
 
     if constraints.EcoWeak and not constraints.AirPanic and not severeBomberRaid then
         baseAADesired = math.min(baseAADesired, 2)
         pdDesired = math.min(pdDesired, 2)
         exposedMexAADesired = math.min(exposedMexAADesired, 1)
+        if not homeCrisisLockdown then
+            shieldDesired = 0
+            tmdDesired = 0
+        end
     end
     if mexExpansionPressure
         and not constraints.LandPanic
@@ -2712,12 +2780,18 @@ local function DecideStructurePlan(runtime, current, constraints, confidence, mo
         and not raid.UnderAirHarass then
         baseAADesired = math.min(baseAADesired, 1)
         pdDesired = math.min(pdDesired, 1)
+        if not homeCrisisLockdown then
+            shieldDesired = 0
+            tmdDesired = 0
+        end
     end
     if firstT2PowerPending then
         radarDesired = math.min(radarDesired, 1)
         baseAADesired = math.min(baseAADesired, (constraints.AirPanic or constraints.BomberPanic or raid.UnderAirHarass) and 1 or 0)
         pdDesired = math.min(pdDesired, (constraints.LandPanic or raid.UnderLandHarass) and 1 or 0)
         exposedMexAADesired = math.min(exposedMexAADesired, 1)
+        shieldDesired = homeCrisisLockdown and 1 or 0
+        tmdDesired = 0
     end
 
     return {
@@ -2726,6 +2800,9 @@ local function DecideStructurePlan(runtime, current, constraints, confidence, mo
         Sonar = sonarDesired,
         BaseAA = baseAADesired,
         PD = pdDesired,
+        Shield = shieldDesired,
+        TMD = tmdDesired,
+        HomeCrisisLockdown = homeCrisisLockdown and true or false,
         ExposedMexAA = exposedMexAADesired,
         NavalDefense = navalDefenseDesired,
     }
@@ -2939,7 +3016,7 @@ function Module.Update(aiBrain, now)
 
     if now - (state.LastLogTime or -999) >= 34 then
         state.LastLogTime = now
-        LOG(string.format('*OVERMIND PRODDIR A%d t=%.1f mode=%s obj=%s/%s conf=%.2f debt=%.2f fac=%d/%d/%d->%d/%d/%d bud=%.2f/%.2f/%.2f/%.2f/%.2f/%.2f/%.2f str=%.1f/%.1f/%.1f->%.1f/%.1f/%.1f gap=%.1f/%.1f/%.1f eng=%.1f/%.1f(%d/%d) eco=%d:%d/%d:%d/%d mex=%d:%d ft=%d:%s:%d/%d upg=%d:%s:%.2f struct=R%d S%d AA%d PD%d tech=%d:%s emerg=%d%d%d',
+        LOG(string.format('*OVERMIND PRODDIR A%d t=%.1f mode=%s obj=%s/%s conf=%.2f debt=%.2f fac=%d/%d/%d->%d/%d/%d bud=%.2f/%.2f/%.2f/%.2f/%.2f/%.2f/%.2f str=%.1f/%.1f/%.1f->%.1f/%.1f/%.1f gap=%.1f/%.1f/%.1f eng=%.1f/%.1f(%d/%d) eco=%d:%d/%d:%d/%d mex=%d:%d ft=%d:%s:%d/%d upg=%d:%s:%.2f struct=R%d S%d AA%d PD%d SH%d TMD%d home=%d tech=%d:%s emerg=%d%d%d',
             aiBrain:GetArmyIndex(),
             now,
             mode,
@@ -2991,6 +3068,9 @@ function Module.Update(aiBrain, now)
             structurePlan.Sonar or 0,
             structurePlan.BaseAA or 0,
             structurePlan.PD or 0,
+            structurePlan.Shield or 0,
+            structurePlan.TMD or 0,
+            structurePlan.HomeCrisisLockdown and 1 or 0,
             techPlan.EligibleForTech and 1 or 0,
             techPlan.BlockReason or 'none',
             capacityPlan.PauseFactoryGrowth and 1 or 0,

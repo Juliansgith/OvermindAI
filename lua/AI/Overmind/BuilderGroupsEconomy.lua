@@ -804,7 +804,7 @@ BuilderGroup {
         InstanceCount = 1,
         BuilderConditions = {
             { OMBC, 'IsOvermindBrain', {} },
-            { OMBC, 'ShouldBuildT1StructureRole', { 'pd' } },
+            { OMBC, 'ShouldBuildT1StructureRole', { 'pd', 'LocationType' } },
             { UCBC, 'LocationEngineersBuildingLess', { 'LocationType', 1, 'DEFENSE DIRECTFIRE' } },
             { OMBC, 'HasSafeEnergy', { 0.01, -24 } },
         },
@@ -824,7 +824,7 @@ BuilderGroup {
         InstanceCount = 1,
         BuilderConditions = {
             { OMBC, 'IsOvermindBrain', {} },
-            { OMBC, 'ShouldBuildT1StructureRole', { 'aa' } },
+            { OMBC, 'ShouldBuildT1StructureRole', { 'aa', 'LocationType' } },
             { UCBC, 'LocationEngineersBuildingLess', { 'LocationType', 1, 'DEFENSE ANTIAIR' } },
             { OMBC, 'HasSafeEnergy', { 0.01, -24 } },
         },
@@ -844,6 +844,7 @@ BuilderGroup {
         InstanceCount = 1,
         BuilderConditions = {
             { OMBC, 'IsOvermindBrain', {} },
+            { OMBC, 'ShouldAllowDefenseStructureLocation', { 'LocationType' } },
             { OMBC, 'IsBomberPanic', {} },
             { UCBC, 'UnitsLessAtLocation', { 'LocationType', 3, 'DEFENSE ANTIAIR TECH1 STRUCTURE' } },
             { UCBC, 'LocationEngineersBuildingLess', { 'LocationType', 2, 'DEFENSE ANTIAIR' } },
@@ -894,6 +895,53 @@ BuilderGroup {
         BuilderData = {
             Construction = {
                 BuildStructures = { 'T1NavalDefense' },
+                Location = 'LocationType',
+            },
+        },
+    },
+}
+
+BuilderGroup {
+    BuilderGroupName = 'OvermindT2DirectorStructures',
+    BuildersType = 'EngineerBuilder',
+    Builder {
+        BuilderName = 'Overmind T2Director Base Shield',
+        PlatoonTemplate = 'T2EngineerBuilder',
+        Priority = 1086,
+        InstanceCount = 1,
+        BuilderConditions = {
+            { OMBC, 'IsOvermindBrain', {} },
+            { MIBC, 'GreaterThanGameTime', { 360 } },
+            { OMBC, 'ShouldBuildT2StructureRole', { 'shield', 'LocationType' } },
+            { UCBC, 'LocationEngineersBuildingLess', { 'LocationType', 1, 'SHIELD STRUCTURE' } },
+            { OMBC, 'HasSafeEnergy', { 0.18, 6 } },
+        },
+        BuilderType = 'Any',
+        BuilderData = {
+            Construction = {
+                BuildClose = true,
+                BuildStructures = { 'T2ShieldDefense' },
+                Location = 'LocationType',
+            },
+        },
+    },
+    Builder {
+        BuilderName = 'Overmind T2Director Base TMD',
+        PlatoonTemplate = 'T2EngineerBuilder',
+        Priority = 1090,
+        InstanceCount = 1,
+        BuilderConditions = {
+            { OMBC, 'IsOvermindBrain', {} },
+            { MIBC, 'GreaterThanGameTime', { 420 } },
+            { OMBC, 'ShouldBuildT2StructureRole', { 'tmd', 'LocationType' } },
+            { UCBC, 'LocationEngineersBuildingLess', { 'LocationType', 1, 'ANTIMISSILE TECH2 STRUCTURE' } },
+            { OMBC, 'HasSafeEnergy', { 0.18, 6 } },
+        },
+        BuilderType = 'Any',
+        BuilderData = {
+            Construction = {
+                BuildClose = true,
+                BuildStructures = { 'T2MissileDefense' },
                 Location = 'LocationType',
             },
         },
@@ -1614,6 +1662,7 @@ BuilderGroup {
         InstanceCount = 1,
         BuilderConditions = {
             { OMBC, 'IsOvermindBrain', {} },
+            { OMBC, 'ShouldAllowDefenseStructureLocation', { 'LocationType' } },
             { UCBC, 'HaveGreaterThanUnitsWithCategory', { 0, 'FACTORY STRUCTURE' } },
             { OMBC, 'ShouldBuildT1StructureRole', { 'pd' } },
             { UCBC, 'UnitsLessAtLocation', { 'LocationType', 2, 'DEFENSE TECH1 STRUCTURE' } },
@@ -1636,6 +1685,7 @@ BuilderGroup {
         InstanceCount = 1,
         BuilderConditions = {
             { OMBC, 'IsOvermindBrain', {} },
+            { OMBC, 'ShouldAllowDefenseStructureLocation', { 'LocationType' } },
             { OMBC, 'ShouldForceDefenseRecovery', {} },
             { UCBC, 'HaveGreaterThanUnitsWithCategory', { 0, 'FACTORY STRUCTURE' } },
             { UCBC, 'LocationEngineersBuildingLess', { 'LocationType', 1, 'DEFENSE' } },
@@ -1657,6 +1707,7 @@ BuilderGroup {
         InstanceCount = 1,
         BuilderConditions = {
             { OMBC, 'IsOvermindBrain', {} },
+            { OMBC, 'ShouldAllowDefenseStructureLocation', { 'LocationType' } },
             { OMBC, 'ShouldAllowThreatBaseDefense', {} },
             { OMBC, 'IsUnderAirHarass', { 1 } },
             { UCBC, 'LocationEngineersBuildingLess', { 'LocationType', 1, 'DEFENSE ANTIAIR' } },
@@ -1679,6 +1730,7 @@ BuilderGroup {
         InstanceCount = 1,
         BuilderConditions = {
             { OMBC, 'IsOvermindBrain', {} },
+            { OMBC, 'ShouldAllowDefenseStructureLocation', { 'LocationType' } },
             { OMBC, 'ShouldAllowThreatBaseDefense', {} },
             { OMBC, 'IsUnderBomberHarass', { 1 } },
             { UCBC, 'LocationEngineersBuildingLess', { 'LocationType', 2, 'DEFENSE ANTIAIR' } },
@@ -1706,10 +1758,11 @@ BuilderGroup {
         InstanceCount = 1,
         BuilderConditions = {
             { OMBC, 'IsOvermindBrain', {} },
+            { OMBC, 'ShouldAllowDefenseStructureLocation', { 'LocationType' } },
             { MIBC, 'GreaterThanGameTime', { 170 } },
             { MIBC, 'LessThanGameTime', { 900 } },
             { UCBC, 'HaveGreaterThanUnitsWithCategory', { 0, 'FACTORY STRUCTURE' } },
-            { OMBC, 'ShouldBuildT1StructureRole', { 'pd' } },
+            { OMBC, 'ShouldBuildT1StructureRole', { 'pd', 'LocationType' } },
             { UCBC, 'UnitsLessAtLocation', { 'LocationType', 1, 'DEFENSE DIRECTFIRE TECH1' } },
             { OMBC, 'HasSafeEnergy', { 0.02, -20 } },
         },
@@ -1729,10 +1782,11 @@ BuilderGroup {
         InstanceCount = 1,
         BuilderConditions = {
             { OMBC, 'IsOvermindBrain', {} },
+            { OMBC, 'ShouldAllowDefenseStructureLocation', { 'LocationType' } },
             { MIBC, 'GreaterThanGameTime', { 160 } },
             { MIBC, 'LessThanGameTime', { 900 } },
             { UCBC, 'HaveGreaterThanUnitsWithCategory', { 0, 'FACTORY STRUCTURE' } },
-            { OMBC, 'ShouldBuildT1StructureRole', { 'aa' } },
+            { OMBC, 'ShouldBuildT1StructureRole', { 'aa', 'LocationType' } },
             { UCBC, 'UnitsLessAtLocation', { 'LocationType', 1, 'DEFENSE ANTIAIR TECH1' } },
             { OMBC, 'HasSafeEnergy', { 0.02, -20 } },
         },
@@ -1757,6 +1811,7 @@ BuilderGroup {
         InstanceCount = 1,
         BuilderConditions = {
             { OMBC, 'IsOvermindBrain', {} },
+            { OMBC, 'ShouldAllowDefenseStructureLocation', { 'LocationType' } },
             { OMBC, 'ShouldAllowThreatBaseDefense', {} },
             { TBC, 'EnemyThreatGreaterThanValueAtBase', { 'LocationType', 2, 'Air', 6 } },
             { UCBC, 'UnitsLessAtLocation', { 'LocationType', 5, 'DEFENSE ANTIAIR' } },
@@ -1779,6 +1834,7 @@ BuilderGroup {
         InstanceCount = 1,
         BuilderConditions = {
             { OMBC, 'IsOvermindBrain', {} },
+            { OMBC, 'ShouldAllowDefenseStructureLocation', { 'LocationType' } },
             { OMBC, 'ShouldAllowThreatBaseDefense', {} },
             { TBC, 'EnemyThreatGreaterThanValueAtBase', { 'LocationType', 3, 'Land', 6 } },
             { UCBC, 'UnitsLessAtLocation', { 'LocationType', 5, 'DEFENSE DIRECTFIRE' } },

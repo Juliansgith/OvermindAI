@@ -148,6 +148,7 @@ function Capture(aiBrain, now)
         EngineerDemand = engDemand.TotalWanted or 0,
         EngineerDemandTarget = engDemand.TargetEngineers or 0,
         EngineerDemandReason = engDemand.Reason or 'none',
+        EngineerACURepairDemand = engDemand.ACURepairWanted or 0,
         EngineerOpeningMexDemand = engDemand.InitialMexBuildersWanted or 0,
         EngineerFactoryDemand = engDemand.FactoryFinishWanted or 0,
         EngineerStructureDemand = engDemand.StructureFinishWanted or 0,
@@ -208,6 +209,7 @@ function Capture(aiBrain, now)
         StructureTaskAssigned = structureTask.AssignedBuilders or 0,
         StructureTaskRequired = structureTask.RequiredBuilders or 0,
         StructureTaskStall = structureTask.StallTime or 0,
+        EngineerACURepair = runtime.LastEngineerACURepair or 0,
         EngineerStrengthHave = GetRoleField(rolePlan, 'Engineer', 'CurrentStrength'),
         EngineerStrengthNeed = GetRoleField(rolePlan, 'Engineer', 'DesiredStrength'),
         EngineerUnitsHave = GetRoleField(rolePlan, 'Engineer', 'CurrentUnits'),
@@ -217,6 +219,10 @@ function Capture(aiBrain, now)
         StructRadar = structurePlan.Radar or 0,
         StructBaseAA = structurePlan.BaseAA or 0,
         StructPD = structurePlan.PD or 0,
+        StructShield = structurePlan.Shield or 0,
+        StructTMD = structurePlan.TMD or 0,
+        StructHomeLock = structurePlan.HomeCrisisLockdown and 1 or 0,
+        StructHomeVeto = (((runtime.LastHomeDefenseStructureVetoTime or -999) >= (now - 45)) and (runtime.LastHomeDefenseStructureVetoRole or 'none')) or 'none',
         TechEligible = techPlan.EligibleForTech and 1 or 0,
         TechBlock = techPlan.BlockReason or 'none',
         ExtractorUpgrades = techPlan.UpgradeExtractors and 1 or 0,
@@ -261,7 +267,7 @@ function Capture(aiBrain, now)
     if now - (tele.LastEconomyScorecardLogTime or -999) >= 120 then
         tele.LastEconomyScorecardLogTime = now
         local mem = aiBrain.OvermindMemory or {}
-        LOG(string.format('*OVERMIND ECONSCORE A%d t=%.0f mex=%d fac=%d/%d/%d idle=%d eng=%d/%d demand=%d:%s buckets=%d/%d/%d/%d/%d/%d reclaim=%.0f/%.2f map=%.2f pause=%d q=%s escort=%d',
+        LOG(string.format('*OVERMIND ECONSCORE A%d t=%.0f mex=%d fac=%d/%d/%d idle=%d eng=%d/%d demand=%d:%s buckets=%d/%d/%d/%d/%d/%d reclaim=%.0f/%.2f map=%.2f pause=%d q=%s escort=%d acuRep=%d/%d struct=%d/%d/%d veto=%s',
             aiBrain:GetArmyIndex(),
             now,
             (((current.Eco or {}).Mex or {}).Ready) or 0,
@@ -284,14 +290,20 @@ function Capture(aiBrain, now)
             sample.MapControl or 0,
             sample.FactoryGrowthPaused or 0,
             sample.QueueDiscipline or 'none',
-            sample.ExpansionEscortNeeded or 0))
+            sample.ExpansionEscortNeeded or 0,
+            sample.EngineerACURepair or 0,
+            sample.EngineerACURepairDemand or 0,
+            sample.StructShield or 0,
+            sample.StructTMD or 0,
+            sample.StructHomeLock or 0,
+            sample.StructHomeVeto or 'none'))
     end
 
     local checkpoints = { 240, 480, 720 }
     for _, checkpoint in checkpoints do
         if now >= checkpoint and not tele.Checkpoints[checkpoint] then
             tele.Checkpoints[checkpoint] = true
-            LOG(string.format('*OVERMIND CHECKPOINT A%d t=%ds fac=%d idleFac=%d qdef=%d qratio=%.2f harL=%d(%d) harA=%d(%d) raid=%d/%d/%d(%d) eng=%d baseEng=%d def=%d acuDist=%.1f acuEsc=%d risk=%d map=%.2f stagn=%.1f rf=%d rs=%d re=%d rd=%d phase=%s strat=%s/%s/%s:%.2f graph=%s/%d/%d intel=%d/%d cluster=%d:%.1f/%.0f force=%d/%d/%d tasks=%d[%s/%s/%s] goal=%s prod=%s fac=%d/%d/%d->%d/%d/%d pause=%d q=%s ft=%d:%s:%d/%d:%.1f st=%d:%s:%d/%d:%.1f str=%.1f/%.1f/%.1f->%.1f/%.1f/%.1f gap=%.1f/%.1f/%.1f engp=%.1f/%.1f(%d/%d) mex=%d:%d upg=%d:%s:%.2f struct=%d/%d/%d tech=%d:%s',
+            LOG(string.format('*OVERMIND CHECKPOINT A%d t=%ds fac=%d idleFac=%d qdef=%d qratio=%.2f harL=%d(%d) harA=%d(%d) raid=%d/%d/%d(%d) eng=%d baseEng=%d def=%d acuDist=%.1f acuEsc=%d risk=%d map=%.2f stagn=%.1f rf=%d rs=%d re=%d rd=%d phase=%s strat=%s/%s/%s:%.2f graph=%s/%d/%d intel=%d/%d cluster=%d:%.1f/%.0f force=%d/%d/%d tasks=%d[%s/%s/%s] goal=%s prod=%s fac=%d/%d/%d->%d/%d/%d pause=%d q=%s ft=%d:%s:%d/%d:%.1f st=%d:%s:%d/%d:%.1f str=%.1f/%.1f/%.1f->%.1f/%.1f/%.1f gap=%.1f/%.1f/%.1f engp=%.1f/%.1f(%d/%d) mex=%d:%d upg=%d:%s:%.2f struct=%d/%d/%d/%d/%d/%s acuRep=%d/%d tech=%d:%s',
                 aiBrain:GetArmyIndex(),
                 checkpoint,
                 sample.FactoryCount or 0,
@@ -379,6 +391,11 @@ function Capture(aiBrain, now)
                 sample.StructRadar or 0,
                 sample.StructBaseAA or 0,
                 sample.StructPD or 0,
+                sample.StructShield or 0,
+                sample.StructTMD or 0,
+                sample.StructHomeVeto or 'none',
+                sample.EngineerACURepair or 0,
+                sample.EngineerACURepairDemand or 0,
                 sample.TechEligible or 0,
                 sample.TechBlock or 'none'))
         end

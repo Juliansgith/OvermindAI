@@ -308,6 +308,8 @@ local function PickMexTarget(aiBrain, runtime, state)
     local powerReady = (((current.Eco or {}).Power or {}).Ready) or 0
     local mexReady = (((current.Eco or {}).Mex or {}).Ready) or 0
     local mapControl = zone.MapControl or 0
+    local mexPeakReady = ((runtime.EngineerState or {}).PeakMexReady) or mexReady
+    local mexLossCount = math.max(0, mexPeakReady - mexReady)
     local tempoMode = planner.TradeTechForTempo or planner.PunishGreed or techPlan.ExtractorUpgradeReason == 'tempo_mode'
     local prioritizeProduction = policy.PrioritizeProduction == true
     local contestMapMode = policy.ContestMapMode == true
@@ -355,6 +357,9 @@ local function PickMexTarget(aiBrain, runtime, state)
         and powerReady >= 3
         and mexReady >= 4
         and (eco.EnergyStorageRatio or 0) >= 0.05
+    local collapseRecovery = mapControl <= 0.26
+        or mexLossCount >= 2
+        or mexReady <= math.max(5, (((director.ConstraintState or {}).StarterMexFloor) or 6) - 1)
 
     state.Managed = true
     state.TargetUnit = false
@@ -460,6 +465,14 @@ local function PickMexTarget(aiBrain, runtime, state)
     if postT2LocalConsolidation then
         allowLocalT2 = true
     end
+    if hasLandHQ
+        and collapseRecovery
+        and not constraints.EcoCrash
+        and not constraints.CriticalStructure
+        and (eco.EnergyTrend or 0) >= -14
+        and (eco.MassTrend or 0) >= -0.24 then
+        allowLocalT2 = true
+    end
 
     local allowGeneralT2 = techPlan.UpgradeExtractors == true
         and (eco.MassIncome or 0) >= (3.2 - (upgradeBudgetBias * 0.22))
@@ -471,6 +484,15 @@ local function PickMexTarget(aiBrain, runtime, state)
         allowGeneralT2 = true
     end
     if surplusSpendWindow and readyLand >= 4 and powerReady >= 4 and mexReady >= 5 and not constraints.LandPanic and not constraints.AirPanic then
+        allowGeneralT2 = true
+    end
+    if hasLandHQ
+        and collapseRecovery
+        and not constraints.LandPanic
+        and not constraints.AirPanic
+        and not constraints.EcoCrash
+        and (eco.EnergyTrend or 0) >= -14
+        and (eco.MassTrend or 0) >= -0.22 then
         allowGeneralT2 = true
     end
     if localMexOnly and not strongSurplusWindow then
@@ -518,6 +540,10 @@ local function PickMexTarget(aiBrain, runtime, state)
         dynamicT2Cap = math.min(dynamicT2Cap, localMexConcurrentCap)
     end
     if frontUnsettled and not strongSurplusWindow then
+        dynamicT2Cap = math.min(dynamicT2Cap, 1)
+    end
+    if hasLandHQ and collapseRecovery and not strongSurplusWindow then
+        dynamicT2Cap = math.max(dynamicT2Cap, 1)
         dynamicT2Cap = math.min(dynamicT2Cap, 1)
     end
 
@@ -711,6 +737,10 @@ local function PickFactoryTarget(aiBrain, runtime, state, now)
     local totalLand = landFactories.Total or 0
     local powerReady = (((current.Eco or {}).Power or {}).Ready) or 0
     local mexReady = (((current.Eco or {}).Mex or {}).Ready) or 0
+    local mapControl = ((runtime.ZoneModel or {}).MapControl) or ((runtime.IntelModel or {}).MapControl) or 0
+    local mexPeakReady = ((runtime.EngineerState or {}).PeakMexReady) or mexReady
+    local mexLossCount = math.max(0, mexPeakReady - mexReady)
+    local collapseRecovery = mapControl <= 0.28 or mexLossCount >= 1 or mexReady <= 5
     local upgradeCount = CountActiveLandFactoryUpgrades(aiBrain)
     local t2LandFactories = aiBrain:GetCurrentUnits(categories.FACTORY * categories.LAND * categories.STRUCTURE * categories.TECH2) or 0
     local factoryTask = current.FactoryTask or {}
@@ -734,13 +764,13 @@ local function PickFactoryTarget(aiBrain, runtime, state, now)
     state.Mandatory = needsFirstHQOverall and true or false
     state.PowerRecoveryWanted = constraints.PowerBufferLow and needsFirstHQOverall
 
-    local firstHQEscapeFloorReady = readyLand >= 3
-        and mexReady >= 5
-        and powerReady >= 5
+    local firstHQEscapeFloorReady = readyLand >= (collapseRecovery and 2 or 3)
+        and mexReady >= (collapseRecovery and 4 or 5)
+        and powerReady >= (collapseRecovery and 4 or 5)
         and not constraints.EcoCrash
     local forceFirstHQAfterEscape = firstHQEscapeFloorReady
         and (
-            now >= (330 + hqTimingBias)
+            now >= ((collapseRecovery and 240 or 330) + hqTimingBias)
             or readyLand >= 4
             or macro.NeedFirstLandHQ == true
         )
@@ -778,10 +808,10 @@ local function PickFactoryTarget(aiBrain, runtime, state, now)
         or macroObjective == 'first_t2_power'
         or macroObjective == 'surplus_scale'
     local mandatoryFirstHQ = stillNeedsFirstHQ
-        and (stableLandFloor or (readyLand >= 4 and totalLand >= 4 and mexReady >= 3 and powerReady >= 3))
-        and readyLand >= 3
-        and totalLand >= 3
-        and mexReady >= 3
+        and (stableLandFloor or (readyLand >= (collapseRecovery and 2 or 4) and totalLand >= (collapseRecovery and 2 or 4) and mexReady >= 3 and powerReady >= 3))
+        and readyLand >= (collapseRecovery and 2 or 3)
+        and totalLand >= (collapseRecovery and 2 or 3)
+        and mexReady >= (collapseRecovery and 3 or 3)
         and not constraints.CriticalStructure
         and not constraints.EcoCrash
     if stillNeedsFirstHQ and macroWantsHQ and readyLand >= 3 and totalLand >= 3 and mexReady >= 4 and powerReady >= 3 then
@@ -863,6 +893,14 @@ local function PickFactoryTarget(aiBrain, runtime, state, now)
     local firstHQEnergyStorageFloor = (mandatoryFirstHQ and 0.00 or 0.12) + (hqEcoBias * 0.014)
     local firstHQMassTrendFloor = (mandatoryFirstHQ and ((airFactoryDebt and -0.70) or -0.55) or -0.14) + (hqEcoBias * 0.055)
     local firstHQEnergyTrendFloor = (mandatoryFirstHQ and ((airFactoryDebt and -18) or -14) or -2) + (hqEcoBias * 4.5)
+    if collapseRecovery then
+        firstHQMassIncomeFloor = firstHQMassIncomeFloor - 0.55
+        firstHQEnergyIncomeFloor = firstHQEnergyIncomeFloor - 8
+        firstHQMassStorageFloor = firstHQMassStorageFloor - 0.02
+        firstHQEnergyStorageFloor = firstHQEnergyStorageFloor - 0.04
+        firstHQMassTrendFloor = firstHQMassTrendFloor - 0.18
+        firstHQEnergyTrendFloor = firstHQEnergyTrendFloor - 4
+    end
     firstHQMassIncomeFloor = Clamp(firstHQMassIncomeFloor, mandatoryFirstHQ and 0.8 or 2.0, mandatoryFirstHQ and 2.8 or 4.6)
     firstHQEnergyIncomeFloor = Clamp(firstHQEnergyIncomeFloor, mandatoryFirstHQ and 4 or 34, mandatoryFirstHQ and 22 or 86)
     firstHQMassStorageFloor = Clamp(firstHQMassStorageFloor, 0, mandatoryFirstHQ and 0.08 or 0.14)
@@ -886,11 +924,11 @@ local function PickFactoryTarget(aiBrain, runtime, state, now)
         state.Reason = 'trend_floor'
         return
     end
-    if planner.TradeTechForTempo and readyLand < 4 and not surplusSpendWindow and not mandatoryFirstHQ and not macroWantsHQ then
+    if planner.TradeTechForTempo and readyLand < 4 and not surplusSpendWindow and not mandatoryFirstHQ and not macroWantsHQ and not collapseRecovery then
         state.Reason = 'tempo_hold'
         return
     end
-    if not strongSurplusWindow and not mandatoryFirstHQ and (eco.MassTrend or 0) < -0.08 then
+    if not strongSurplusWindow and not mandatoryFirstHQ and not collapseRecovery and (eco.MassTrend or 0) < -0.08 then
         state.Reason = 'mass_floor'
         return
     end

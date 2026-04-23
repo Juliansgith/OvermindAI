@@ -2,6 +2,7 @@ local Common = import('/mods/OvermindAI/lua/AI/Overmind/EngineerDirector/Common.
 local Threat = import('/mods/OvermindAI/lua/AI/Overmind/EngineerDirector/Threat.lua')
 local Reclaim = import('/mods/OvermindAI/lua/AI/Overmind/EngineerDirector/Reclaim.lua')
 local Recovery = import('/mods/OvermindAI/lua/AI/Overmind/EngineerDirector/Recovery.lua')
+local OvermindMechanicTune = import('/mods/OvermindAI/lua/AI/Overmind/MechanicTune.lua')
 local OvermindMemory = import('/mods/OvermindAI/lua/AI/Overmind/Memory.lua')
 
 local BuilderCategory = categories.ENGINEER * categories.MOBILE + categories.COMMAND
@@ -504,6 +505,60 @@ local function GetPriorityRepairTarget(aiBrain, runtime, mainPos)
     return best
 end
 
+local function GetPriorityACURepairTarget(aiBrain, runtime, mainPos, engPos, now)
+    if not aiBrain or not mainPos then
+        return false
+    end
+
+    local mechanic = OvermindMechanicTune.GetConfig(aiBrain)
+    local commanders = aiBrain:GetListOfUnits(categories.COMMAND, false, true) or {}
+    local acu = false
+    for _, unit in commanders do
+        if unit and not unit.Dead then
+            acu = unit
+            break
+        end
+    end
+    if not acu then
+        return false
+    end
+
+    local acuPos = acu.GetPosition and acu:GetPosition() or false
+    local acuHealth = acu.GetHealth and acu:GetHealth() or 0
+    local acuMaxHealth = acu.GetMaxHealth and acu:GetMaxHealth() or 0
+    if not acuPos or acuMaxHealth <= 0 or acuHealth <= 0 then
+        return false
+    end
+
+    local healthRatio = acuHealth / acuMaxHealth
+    local crisisActive = now < (runtime.ACUCrisisUntil or -999)
+        or now < (runtime.ACUCrisisEscalatedUntil or -999)
+    local recentDamage = (runtime.LastAcuDamageTime or -999) >= (now - 18)
+    local emergencyTask = (((runtime.ForceDirector or {}).Tasks or {}).acu_emergency_intercept) or false
+    local emergencyWanted = emergencyTask and (((emergencyTask.DesiredUnits or 0) > 0) or ((emergencyTask.CurrentUnits or 0) > 0))
+    local priorityBias = math.max(-0.12, math.min(0.18, (mechanic.EngineerACURepairPriorityBias or 0) / 1000))
+    local healthThreshold = 0.94 + (mechanic.EngineerACURepairHealthBias or 0) - priorityBias
+    local mainDistanceCap = 220 + (mechanic.EngineerACURepairDistanceBias or 0)
+    local engineerDistanceCap = 340 + (mechanic.EngineerACURepairDistanceBias or 0)
+    local targetThreat = aiBrain:GetThreatAtPosition(acuPos, 1, true, 'AntiSurface') or 0
+    local threatCap = 2.3 + (mechanic.EngineerACURepairThreatBias or 0) + (crisisActive and 0.4 or 0)
+
+    if not crisisActive and not recentDamage and not emergencyWanted and healthRatio >= healthThreshold then
+        return false
+    end
+    if Common.Distance2D(acuPos, mainPos) > mainDistanceCap then
+        return false
+    end
+    if engPos and Common.Distance2D(acuPos, engPos) > engineerDistanceCap then
+        return false
+    end
+    if targetThreat > threatCap and not crisisActive then
+        return false
+    end
+
+    return acu
+end
+
 local function GetPriorityBuildAssistTarget(aiBrain, runtime, mainPos)
     if not aiBrain or not mainPos then
         return false
@@ -551,6 +606,7 @@ local function TryAssignAssistOrRepair(aiBrain, runtime, eng, target, isUpgrade,
         return false
     end
 
+    local mechanic = OvermindMechanicTune.GetConfig(aiBrain)
     local mainPos = Common.GetMainPos(aiBrain, runtime)
     local engPos = eng.GetPosition and eng:GetPosition() or false
     local targetPos = target.GetPosition and target:GetPosition() or false
@@ -561,11 +617,20 @@ local function TryAssignAssistOrRepair(aiBrain, runtime, eng, target, isUpgrade,
         local targetEnemyCombat = Threat.HasEnemyCombatNear(aiBrain, targetPos, 26)
         local routeEnemyCombat = Threat.HasEnemyCombatNear(aiBrain, engPos, 20)
         local nearMain = mainPos and Common.Distance2D(targetPos, mainPos) <= 140
-        if (targetEnemyCombat and not nearMain)
+        local isACUTarget = EntityCategoryContains(categories.COMMAND, target)
+        local targetThreatCap = (nearMain and 2.0 or 1.1) + (mechanic.EngineerRepairThreatBias or 0)
+        local localThreatCap = 2.2 + (mechanic.EngineerRepairThreatBias or 0)
+        local routeRiskCap = (nearMain and 3.0 or 1.9) + (mechanic.EngineerRepairRouteRiskBias or 0)
+        if isACUTarget then
+            targetThreatCap = targetThreatCap + 0.7 + (mechanic.EngineerACURepairThreatBias or 0)
+            localThreatCap = localThreatCap + 0.55 + (mechanic.EngineerACURepairThreatBias or 0)
+            routeRiskCap = routeRiskCap + 0.7 + (mechanic.EngineerRepairRouteRiskBias or 0)
+        end
+        if (targetEnemyCombat and not nearMain and not isACUTarget)
             or routeEnemyCombat
-            or targetThreat > (nearMain and 2.0 or 1.1)
-            or localThreat > 2.2
-            or routeRisk > (nearMain and 3.0 or 1.9) then
+            or targetThreat > targetThreatCap
+            or localThreat > localThreatCap
+            or routeRisk > routeRiskCap then
             return false
         end
     end
@@ -615,6 +680,40 @@ local function DescribeStructureTaskTarget(target)
     return 'resume'
 end
 
+local function IsTechEngineer(unit)
+    return unit
+        and not unit.Dead
+        and EntityCategoryContains(categories.ENGINEER * categories.MOBILE * (categories.TECH2 + categories.TECH3), unit)
+end
+
+local function IsEcoStructureKind(kind)
+    local lower = string.lower(kind or 'none')
+    return lower == 'mex' or lower == 'power'
+end
+
+local function GetPriorityEcoStructureTask(ctx)
+    if ctx.ecoStructureTask and ctx.ecoStructureTask.Active and ctx.ecoStructureTargetObject then
+        return ctx.ecoStructureTask, ctx.ecoStructureTargetObject
+    end
+    if ctx.structureTask and ctx.structureTask.Active and ctx.structureTargetObject and IsEcoStructureKind(ctx.structureTask.Kind) then
+        return ctx.structureTask, ctx.structureTargetObject
+    end
+    return false, false
+end
+
+local function GetPriorityDefenseStructureTask(ctx)
+    if ctx.defenseStructureTask and ctx.defenseStructureTask.Active and ctx.defenseStructureTargetObject then
+        return ctx.defenseStructureTask, ctx.defenseStructureTargetObject
+    end
+    if ctx.structureTask
+        and ctx.structureTask.Active
+        and ctx.structureTargetObject
+        and not IsEcoStructureKind(ctx.structureTask.Kind) then
+        return ctx.structureTask, ctx.structureTargetObject
+    end
+    return false, false
+end
+
 local function ProcessEngineer(aiBrain, runtime, eng, now, ctx)
     if not eng or eng.Dead then
         return
@@ -622,8 +721,12 @@ local function ProcessEngineer(aiBrain, runtime, eng, now, ctx)
 
     local entityId = Common.GetEntityId(eng)
     local claimedByFactoryTask = ctx.factoryTask.Active and entityId and ctx.factoryTask.BuilderIds and ctx.factoryTask.BuilderIds[entityId]
-    local claimedByStructureTask = ctx.structureTask.Active and entityId and ctx.structureTask.BuilderIds and ctx.structureTask.BuilderIds[entityId]
+    local claimedByEcoStructureTask = ctx.ecoStructureTask and ctx.ecoStructureTask.Active and entityId and ctx.ecoStructureTask.BuilderIds and ctx.ecoStructureTask.BuilderIds[entityId]
+    local claimedByDefenseStructureTask = ctx.defenseStructureTask and ctx.defenseStructureTask.Active and entityId and ctx.defenseStructureTask.BuilderIds and ctx.defenseStructureTask.BuilderIds[entityId]
+    local claimedByStructureTask = claimedByEcoStructureTask or claimedByDefenseStructureTask
+        or (ctx.structureTask.Active and entityId and ctx.structureTask.BuilderIds and ctx.structureTask.BuilderIds[entityId])
     local claimedByRadarOrder = entityId and ctx.radarReservedBuilderIds[entityId]
+    local isTechBuilder = IsTechEngineer(eng)
     local canPreemptStructureForReclaim = claimedByStructureTask
         and not claimedByFactoryTask
         and not claimedByRadarOrder
@@ -633,6 +736,9 @@ local function ProcessEngineer(aiBrain, runtime, eng, now, ctx)
         and (ctx.structureReclaimPreempts or 0) < 1
         and ctx.needBase <= 0
         and not ctx.mexRebuildUrgent
+        and not ctx.techTransitionCritical
+        and not ctx.mapCollapse
+        and not isTechBuilder
         and not (ctx.structureTask.Kind == 'Power' and ctx.constraints.PowerBufferLow == true)
     if canPreemptStructureForReclaim
         and Reclaim.TryReclaimFieldZone(aiBrain, runtime, eng, ctx.reclaimFieldPos, now) then
@@ -648,6 +754,15 @@ local function ProcessEngineer(aiBrain, runtime, eng, now, ctx)
 
     local dist = Common.Distance2D(pos, ctx.mainPos)
     local localThreat = aiBrain:GetThreatAtPosition(pos, 1, true, 'AntiSurface') or 0
+    local isIdle = Common.IsIdle(eng)
+    local constructing = Common.IsConstructing(eng)
+    local acuRepairTarget = GetPriorityACURepairTarget(aiBrain, runtime, ctx.mainPos, pos, now)
+    local acuRepairUrgent = acuRepairTarget
+        and (
+            now < (runtime.ACUCrisisUntil or -999)
+            or now < (runtime.ACUCrisisEscalatedUntil or -999)
+            or ((runtime.LastAcuDamageTime or -999) >= (now - 18))
+        )
     if Common.IsReadyBuilder(eng)
         and EntityCategoryContains(categories.ENGINEER * categories.MOBILE * (categories.TECH2 + categories.TECH3), eng)
         and Recovery.TryOpenFirstT2PowerBuild(aiBrain, runtime, eng, ctx.mainPos, now) then
@@ -659,53 +774,76 @@ local function ProcessEngineer(aiBrain, runtime, eng, now, ctx)
         return
     end
 
+    if acuRepairUrgent
+        and not constructing
+        and (isIdle or Common.GetCommandQueueLength(eng) <= 2)
+        and localThreat < 2.9
+        and dist <= 420
+        and TryAssignAssistOrRepair(aiBrain, runtime, eng, acuRepairTarget, false, now) then
+        if claimedByFactoryTask and ctx.factoryTask.BuilderIds and entityId then
+            ctx.factoryTask.BuilderIds[entityId] = nil
+            ctx.factoryTask.AssignedBuilders = math.max(0, (ctx.factoryTask.AssignedBuilders or 1) - 1)
+        end
+        if claimedByEcoStructureTask and ctx.ecoStructureTask and ctx.ecoStructureTask.BuilderIds and entityId then
+            ctx.ecoStructureTask.BuilderIds[entityId] = nil
+            ctx.ecoStructureTask.AssignedBuilders = math.max(0, (ctx.ecoStructureTask.AssignedBuilders or 1) - 1)
+        end
+        if claimedByDefenseStructureTask and ctx.defenseStructureTask and ctx.defenseStructureTask.BuilderIds and entityId then
+            ctx.defenseStructureTask.BuilderIds[entityId] = nil
+            ctx.defenseStructureTask.AssignedBuilders = math.max(0, (ctx.defenseStructureTask.AssignedBuilders or 1) - 1)
+        end
+        if claimedByStructureTask and ctx.structureTask.BuilderIds and entityId then
+            ctx.structureTask.BuilderIds[entityId] = nil
+            ctx.structureTask.AssignedBuilders = math.max(0, (ctx.structureTask.AssignedBuilders or 1) - 1)
+        end
+        runtime.LastEngineerACURepairTime = now
+        ctx.acuRepairCount = (ctx.acuRepairCount or 0) + 1
+        return
+    end
+
     if claimedByFactoryTask or claimedByStructureTask or claimedByRadarOrder then
         return
     end
 
     local escort = aiBrain:GetNumUnitsAroundPoint(categories.MOBILE * (categories.LAND + categories.AIR) - categories.ENGINEER - categories.SCOUT - categories.COMMAND, pos, 26, 'Ally') or 0
-    local isIdle = Common.IsIdle(eng)
-    local constructing = Common.IsConstructing(eng)
     local acted = false
+    local upgradeAssistTarget = false
+    local upgradeAssistIsUpgrade = false
+    local ecoStructureAssistTask, ecoStructureAssistTarget = GetPriorityEcoStructureTask(ctx)
+    local defenseStructureAssistTask, defenseStructureAssistTarget = GetPriorityDefenseStructureTask(ctx)
+
+    if isIdle and not constructing and (isTechBuilder or ctx.mapCollapse or ctx.techTransitionCritical) then
+        upgradeAssistTarget, upgradeAssistIsUpgrade = GetPriorityUpgradeAssistTarget(aiBrain, runtime, ctx.mainPos)
+    end
 
     if isIdle and not constructing then
-        if ctx.contestFieldMode
-            and ctx.fieldTaskWindow
-            and ctx.reclaimField < ctx.fieldTaskQuota
-            and ctx.needBase <= 0
-            and not (ctx.factoryTask.Active and (ctx.factoryTask.AssignedBuilders or 0) <= 0 and (ctx.macroPhase == 'bootstrap_factory' or ctx.macroPhase == 'land_factory_floor'))
-            and Reclaim.TryReclaimFieldZone(aiBrain, runtime, eng, ctx.reclaimFieldPos, now) then
-            ctx.reclaimField = ctx.reclaimField + 1
-            acted = true
-        elseif (ctx.mexReady or 0) >= 4
-            and ctx.needBase <= 0
-            and localThreat < 1.6
-            and Reclaim.TryReclaimNearby(aiBrain, runtime, eng, now, now < 420 and 48 or 56, 1.0, {
-                MaxThreat = now < 420 and 1.45 or 1.85,
-                EnemyRadius = now < 420 and 24 or 28,
-                MinTotalMass = now < 420 and 6 or 10,
-                MaxTargets = now < 420 and 16 or 24,
-            }) then
-            ctx.reclaimField = ctx.reclaimField + 1
-            acted = true
-        elseif ctx.structureTask.Active
-            and (ctx.structureTask.Kind == 'Power' or ctx.structureTask.Kind == 'Mex')
-            and (ctx.macroPhase ~= 'starter_mex_claim' or ctx.structureTask.Kind == 'Power')
-            and ctx.structureTargetObject
+        if ecoStructureAssistTask
+            and ecoStructureAssistTarget
+            and (ecoStructureAssistTask.Kind == 'Power' or ecoStructureAssistTask.Kind == 'Mex')
+            and (ctx.macroPhase ~= 'starter_mex_claim' or ecoStructureAssistTask.Kind == 'Power')
             and (
                 not ctx.fieldTaskWindow
                 or ctx.reclaimField >= ctx.fieldTaskQuota
                 or ctx.needBase > 0
-                or (ctx.structureTask.AssignedBuilders or 0) < math.max(1, math.min(2, (ctx.structureTask.RequiredBuilders or 0)))
+                or (ecoStructureAssistTask.AssignedBuilders or 0) < math.max(1, math.min(2, (ecoStructureAssistTask.RequiredBuilders or 0)))
+                or isTechBuilder
+                or ctx.mapCollapse
             )
             and localThreat < 2.2
             and dist <= 360
-            and TryAssignAssistOrRepair(aiBrain, runtime, eng, ctx.structureTargetObject, false, now) then
-            if ctx.structureTask.Kind == 'Power' then
+            and TryAssignAssistOrRepair(aiBrain, runtime, eng, ecoStructureAssistTarget, false, now) then
+            if ecoStructureAssistTask.Kind == 'Power' then
                 ctx.powerRecoveryCount = ctx.powerRecoveryCount + 1
             else
                 ctx.surplusSpendCount = ctx.surplusSpendCount + 1
             end
+            acted = true
+        elseif defenseStructureAssistTask
+            and defenseStructureAssistTarget
+            and (ctx.homeDefenseCritical or ctx.radarCritical or ctx.transitionLock)
+            and localThreat < 2.3
+            and dist <= 320
+            and TryAssignAssistOrRepair(aiBrain, runtime, eng, defenseStructureAssistTarget, false, now) then
             acted = true
         elseif ctx.macroPhase == 'starter_mex_claim'
             and localThreat < 2.05
@@ -727,8 +865,7 @@ local function ProcessEngineer(aiBrain, runtime, eng, now, ctx)
             and TryAssignAssistOrRepair(aiBrain, runtime, eng, ctx.factoryTargetObject, false, now) then
             ctx.forcedFactoryRecover = ctx.forcedFactoryRecover + 1
             acted = true
-        elseif (ctx.macroPhase == 'first_land_hq' or ctx.macroPhase == 'first_t2_engineer' or ctx.macroPhase == 'first_t2_power') then
-            local assistTarget, isUpgradeTarget = GetPriorityUpgradeAssistTarget(aiBrain, runtime, ctx.mainPos)
+        elseif (ctx.macroPhase == 'first_land_hq' or ctx.macroPhase == 'first_t2_engineer' or ctx.macroPhase == 'first_t2_power' or ctx.mapCollapse) then
             if Common.IsReadyBuilder(eng)
                 and EntityCategoryContains(categories.ENGINEER * categories.MOBILE * (categories.TECH2 + categories.TECH3), eng)
                 and localThreat < 2.2
@@ -736,16 +873,16 @@ local function ProcessEngineer(aiBrain, runtime, eng, now, ctx)
                 and Recovery.TryOpenFirstT2PowerBuild(aiBrain, runtime, eng, ctx.mainPos, now) then
                 ctx.powerRecoveryCount = ctx.powerRecoveryCount + 1
                 acted = true
-            elseif assistTarget
+            elseif upgradeAssistTarget
                 and localThreat < 2.2
                 and dist <= 360
-                and TryAssignAssistOrRepair(aiBrain, runtime, eng, assistTarget, isUpgradeTarget, now) then
+                and TryAssignAssistOrRepair(aiBrain, runtime, eng, upgradeAssistTarget, upgradeAssistIsUpgrade, now) then
                 ctx.surplusSpendCount = ctx.surplusSpendCount + 1
                 acted = true
             elseif (ctx.hqPowerRecoveryWanted or ctx.macroNeedPowerRecovery)
                 and localThreat < 2.2
                 and dist <= 360 then
-                local powerTarget = Recovery.GetPriorityPowerRecoveryTarget(aiBrain, runtime, ctx.mainPos, ctx.structureTargetObject, ctx.structureTask)
+                local powerTarget = Recovery.GetPriorityPowerRecoveryTarget(aiBrain, runtime, ctx.mainPos, ecoStructureAssistTarget or ctx.structureTargetObject, ecoStructureAssistTask or ctx.structureTask)
                 if powerTarget and TryAssignAssistOrRepair(aiBrain, runtime, eng, powerTarget, false, now) then
                     ctx.powerRecoveryCount = ctx.powerRecoveryCount + 1
                     acted = true
@@ -761,6 +898,26 @@ local function ProcessEngineer(aiBrain, runtime, eng, now, ctx)
                 ctx.forcedFactoryRecover = ctx.forcedFactoryRecover + 1
                 acted = true
             end
+        elseif ctx.contestFieldMode
+            and ctx.fieldTaskWindow
+            and ctx.reclaimField < ctx.fieldTaskQuota
+            and ctx.needBase <= 0
+            and not (ctx.factoryTask.Active and (ctx.factoryTask.AssignedBuilders or 0) <= 0 and (ctx.macroPhase == 'bootstrap_factory' or ctx.macroPhase == 'land_factory_floor'))
+            and Reclaim.TryReclaimFieldZone(aiBrain, runtime, eng, ctx.reclaimFieldPos, now) then
+            ctx.reclaimField = ctx.reclaimField + 1
+            acted = true
+        elseif (ctx.mexReady or 0) >= 4
+            and ctx.needBase <= 0
+            and localThreat < 1.6
+            and not (isTechBuilder and (ctx.techTransitionCritical or ctx.mapCollapse or ecoStructureAssistTask or upgradeAssistTarget))
+            and Reclaim.TryReclaimNearby(aiBrain, runtime, eng, now, now < 420 and 48 or 56, 1.0, {
+                MaxThreat = now < 420 and 1.45 or 1.85,
+                EnemyRadius = now < 420 and 24 or 28,
+                MinTotalMass = now < 420 and 6 or 10,
+                MaxTargets = now < 420 and 16 or 24,
+            }) then
+            ctx.reclaimField = ctx.reclaimField + 1
+            acted = true
         elseif ctx.contestFieldMode
             and ctx.fieldTaskWindow
             and ctx.reclaimField < ctx.fieldTaskQuota
@@ -795,7 +952,12 @@ local function ProcessEngineer(aiBrain, runtime, eng, now, ctx)
         and (ctx.constraints.PowerBufferLow == true or ctx.hqPowerRecoveryWanted or Recovery.ShouldScaleBaseEco(runtime, now))
         and localThreat < 2.2
         and dist <= 360 then
-        local powerTarget = Recovery.GetPriorityPowerRecoveryTarget(aiBrain, runtime, ctx.mainPos, ctx.structureTargetObject, ctx.structureTask)
+        local powerTarget = Recovery.GetPriorityPowerRecoveryTarget(
+            aiBrain,
+            runtime,
+            ctx.mainPos,
+            ecoStructureAssistTarget or ctx.structureTargetObject,
+            ecoStructureAssistTask or ctx.structureTask)
         if powerTarget and TryAssignAssistOrRepair(aiBrain, runtime, eng, powerTarget, false, now) then
             ctx.powerRecoveryCount = ctx.powerRecoveryCount + 1
             acted = true
@@ -826,37 +988,57 @@ local function ProcessEngineer(aiBrain, runtime, eng, now, ctx)
     if (not acted)
         and isIdle
         and not constructing
-        and ctx.structureTask.Active
-        and ctx.structureTargetObject
-        and (ctx.structureTask.AssignedBuilders or 0) < (ctx.structureTask.RequiredBuilders or 0)
         and localThreat < 2.2
-        and dist <= 320
-        and TryAssignAssistOrRepair(aiBrain, runtime, eng, ctx.structureTargetObject, false, now) then
-        if entityId then
-            ctx.structureTask.BuilderIds = ctx.structureTask.BuilderIds or {}
-            ctx.structureTask.BuilderIds[entityId] = true
+        and dist <= 320 then
+        local laneTask = false
+        local laneTarget = false
+        if ecoStructureAssistTask
+            and ecoStructureAssistTarget
+            and (ecoStructureAssistTask.AssignedBuilders or 0) < (ecoStructureAssistTask.RequiredBuilders or 0) then
+            laneTask = ecoStructureAssistTask
+            laneTarget = ecoStructureAssistTarget
+        elseif defenseStructureAssistTask
+            and defenseStructureAssistTarget
+            and (defenseStructureAssistTask.AssignedBuilders or 0) < (defenseStructureAssistTask.RequiredBuilders or 0) then
+            laneTask = defenseStructureAssistTask
+            laneTarget = defenseStructureAssistTarget
+        elseif ctx.structureTask.Active
+            and ctx.structureTargetObject
+            and (ctx.structureTask.AssignedBuilders or 0) < (ctx.structureTask.RequiredBuilders or 0) then
+            laneTask = ctx.structureTask
+            laneTarget = ctx.structureTargetObject
         end
-        ctx.structureTask.AssignedBuilders = math.min((ctx.structureTask.RequiredBuilders or 0), (ctx.structureTask.AssignedBuilders or 0) + 1)
-        acted = true
+        if laneTask
+            and laneTarget
+            and TryAssignAssistOrRepair(aiBrain, runtime, eng, laneTarget, false, now) then
+            if entityId then
+                laneTask.BuilderIds = laneTask.BuilderIds or {}
+                laneTask.BuilderIds[entityId] = true
+            end
+            laneTask.AssignedBuilders = math.min((laneTask.RequiredBuilders or 0), (laneTask.AssignedBuilders or 0) + 1)
+            acted = true
+        end
     end
 
     if (not acted)
         and isIdle
         and not constructing
-        and ctx.structureTask.Active
-        and ctx.structureTargetObject
-        and (ctx.structureTask.Kind == 'Mex' or ctx.structureTask.Kind == 'Power')
+        and ecoStructureAssistTask
+        and ecoStructureAssistTarget
+        and (ecoStructureAssistTask.Kind == 'Mex' or ecoStructureAssistTask.Kind == 'Power')
         and Recovery.ShouldPersistentSurplusSpend(runtime, now)
         and localThreat < 2.0
         and dist <= 360
-        and TryAssignAssistOrRepair(aiBrain, runtime, eng, ctx.structureTargetObject, false, now) then
+        and TryAssignAssistOrRepair(aiBrain, runtime, eng, ecoStructureAssistTarget, false, now) then
         ctx.surplusSpendCount = ctx.surplusSpendCount + 1
         acted = true
     end
 
     if (not acted) and isIdle and not constructing then
-        local assistTarget, isUpgradeTarget = GetPriorityUpgradeAssistTarget(aiBrain, runtime, ctx.mainPos)
-        if assistTarget and localThreat < 2.2 and dist <= 360 and TryAssignAssistOrRepair(aiBrain, runtime, eng, assistTarget, isUpgradeTarget, now) then
+        if not upgradeAssistTarget then
+            upgradeAssistTarget, upgradeAssistIsUpgrade = GetPriorityUpgradeAssistTarget(aiBrain, runtime, ctx.mainPos)
+        end
+        if upgradeAssistTarget and localThreat < 2.2 and dist <= 360 and TryAssignAssistOrRepair(aiBrain, runtime, eng, upgradeAssistTarget, upgradeAssistIsUpgrade, now) then
             ctx.surplusSpendCount = ctx.surplusSpendCount + 1
             acted = true
         end
@@ -872,6 +1054,14 @@ local function ProcessEngineer(aiBrain, runtime, eng, now, ctx)
         local buildAssistTarget = GetPriorityBuildAssistTarget(aiBrain, runtime, ctx.mainPos)
         if buildAssistTarget and TryAssignAssistOrRepair(aiBrain, runtime, eng, buildAssistTarget, false, now) then
             ctx.surplusSpendCount = ctx.surplusSpendCount + 1
+            acted = true
+        end
+    end
+
+    if (not acted) and isIdle and not constructing then
+        if acuRepairTarget and localThreat < 2.8 and dist <= 420 and TryAssignAssistOrRepair(aiBrain, runtime, eng, acuRepairTarget, false, now) then
+            runtime.LastEngineerACURepairTime = now
+            ctx.acuRepairCount = (ctx.acuRepairCount or 0) + 1
             acted = true
         end
     end
@@ -904,6 +1094,7 @@ local function ProcessEngineer(aiBrain, runtime, eng, now, ctx)
         and not constructing
         and (not acted)
         and localThreat < 1.9
+        and not (isTechBuilder and (ctx.techTransitionCritical or ctx.mapCollapse or ecoStructureAssistTask or defenseStructureAssistTask or upgradeAssistTarget))
         and Reclaim.TryReclaimNearby(aiBrain, runtime, eng, now, ctx.contestFieldMode and 58 or 44, 1.0, {
             MaxThreat = ctx.contestFieldMode and 2.1 or 1.55,
             EnemyRadius = ctx.contestFieldMode and 30 or 24,
@@ -917,6 +1108,7 @@ local function ProcessEngineer(aiBrain, runtime, eng, now, ctx)
     if isIdle
         and not constructing
         and (not acted)
+        and not (isTechBuilder and (ctx.techTransitionCritical or ctx.mapCollapse or ecoStructureAssistTask or defenseStructureAssistTask or upgradeAssistTarget))
         and Reclaim.TryReclaimFieldZone(aiBrain, runtime, eng, ctx.reclaimFieldPos, now) then
         ctx.reclaimField = ctx.reclaimField + 1
         acted = true
@@ -926,6 +1118,7 @@ local function ProcessEngineer(aiBrain, runtime, eng, now, ctx)
         and not constructing
         and (not acted)
         and not (Recovery.ShouldPersistentSurplusSpend(runtime, now) or Recovery.ShouldScaleBaseEco(runtime, now))
+        and not (isTechBuilder and (ctx.techTransitionCritical or ctx.mapCollapse or ecoStructureAssistTask or defenseStructureAssistTask or upgradeAssistTarget))
         and Reclaim.TryReclaimEnemyMex(aiBrain, runtime, eng, now) then
         ctx.reclaimEnemyMex = ctx.reclaimEnemyMex + 1
         acted = true

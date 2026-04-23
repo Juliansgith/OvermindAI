@@ -624,6 +624,11 @@ local function ShouldUpgradeFactory(aiBrain, factory, runtime, eco, qLen)
     local landFactories = current.Factories and current.Factories.Land or {}
     local readyLand = landFactories.Ready or 0
     local totalLand = landFactories.Total or 0
+    local mexReady = (((current.Eco or {}).Mex or {}).Ready) or 0
+    local mapControl = ((runtime.ZoneModel or {}).MapControl) or ((runtime.IntelModel or {}).MapControl) or 0
+    local mexPeakReady = ((runtime.EngineerState or {}).PeakMexReady) or mexReady
+    local mexLossCount = math.max(0, mexPeakReady - mexReady)
+    local collapseRecovery = mapControl <= 0.28 or mexLossCount >= 1 or mexReady <= 5
     local factoryTask = current.FactoryTask or {}
     local completionDebt = factoryTask.Active
         and factoryTask.Domain == 'Land'
@@ -639,7 +644,7 @@ local function ShouldUpgradeFactory(aiBrain, factory, runtime, eco, qLen)
         return false, false
     end
 
-    if (not objectiveLandTech) and (readyLand < 3 or totalLand < 4) then
+    if (not objectiveLandTech) and (readyLand < (collapseRecovery and 2 or 3) or totalLand < (collapseRecovery and 3 or 4)) then
         return false, false
     end
     if CountActiveFactoryUpgrades(aiBrain, 'land') > 0 then
@@ -657,16 +662,16 @@ local function ShouldUpgradeFactory(aiBrain, factory, runtime, eco, qLen)
     local surplusSpendWindow = constraints.SurplusSpendWindow == true
     local strongSurplusWindow = constraints.StrongSurplusWindow == true
 
-    if (not objectiveLandTech) and not surplusSpendWindow and ((eco.MassIncome or 0) < 3.2 or (eco.EnergyIncome or 0) < 60) then
+    if (not objectiveLandTech) and not surplusSpendWindow and ((eco.MassIncome or 0) < (collapseRecovery and 2.4 or 3.2) or (eco.EnergyIncome or 0) < (collapseRecovery and 42 or 60)) then
         return false, false
     end
-    if (not objectiveLandTech) and not surplusSpendWindow and ((eco.MassStorageRatio or 0) < 0.06 or (eco.EnergyStorageRatio or 0) < 0.12) then
+    if (not objectiveLandTech) and not surplusSpendWindow and ((eco.MassStorageRatio or 0) < (collapseRecovery and 0.02 or 0.06) or (eco.EnergyStorageRatio or 0) < (collapseRecovery and 0.04 or 0.12)) then
         return false, false
     end
     if (((ecoCounts.Power or {}).Ready) or 0) < 4 or (((ecoCounts.Mex or {}).Ready) or 0) < 4 then
         return false, false
     end
-    if (not objectiveLandTech) and not strongSurplusWindow and ((eco.MassTrend or 0) < -0.12 or (eco.EnergyTrend or 0) < -2) then
+    if (not objectiveLandTech) and not strongSurplusWindow and ((eco.MassTrend or 0) < (collapseRecovery and -0.28 or -0.12) or (eco.EnergyTrend or 0) < (collapseRecovery and -10 or -2)) then
         return false, false
     end
 
@@ -676,7 +681,7 @@ local function ShouldUpgradeFactory(aiBrain, factory, runtime, eco, qLen)
         or planner.ForceAirAnswer
         or ((plan.Mode == 'pressure' or plan.Mode == 'expand' or plan.Mode == 'air_control') and readyLand >= 4 and (eco.MassTrend or 0) >= -0.05)
         or (readyLand >= 5 and (eco.EnergyStorageRatio or 0) >= 0.16 and (eco.MassTrend or 0) >= -0.08)
-    if not strategicTechWindow and not objectiveLandTech then
+    if not strategicTechWindow and not objectiveLandTech and not collapseRecovery then
         return false, false
     end
 

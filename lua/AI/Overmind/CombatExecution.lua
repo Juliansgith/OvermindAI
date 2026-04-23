@@ -1,4 +1,5 @@
 local OvermindMemory = import('/mods/OvermindAI/lua/AI/Overmind/Memory.lua')
+local OvermindMechanicTune = import('/mods/OvermindAI/lua/AI/Overmind/MechanicTune.lua')
 local OvermindRoleWeights = import('/mods/OvermindAI/lua/AI/Overmind/RoleWeights.lua')
 
 local PressureCategory = categories.MOBILE * (categories.LAND + categories.AIR) - categories.ENGINEER - categories.SCOUT - categories.COMMAND
@@ -470,7 +471,7 @@ local function IssueCohesiveLandOrders(aiBrain, ownPos, targetPos, allUnits, def
     local rear = LerpPos(ownPos, targetPos, rearT)
     local flank = LerpPos(ownPos, targetPos, flankT)
     local directAttackPos = (not defensive and Distance2D(front, targetPos) <= 28) and targetPos or front
-    local unsupportedAA = HasUnsupportedAAPosture and HasUnsupportedAAPosture(comp, defensive)
+    local unsupportedAA = HasUnsupportedAAPosture and HasUnsupportedAAPosture(comp, defensive, OvermindMechanicTune.GetConfig(aiBrain))
 
     if table.getn(direct) > 0 then
         if IssueMove then
@@ -543,30 +544,34 @@ local function GetDirectEscortSupport(comp)
     return math.max(0, direct - heavy) + aa
 end
 
-local function HasIndirectEscortGap(comp)
+local function HasIndirectEscortGap(comp, mechanic)
     local indirect = comp.Indirect or 0
     if indirect <= 0 then
         return false
     end
-    return GetDirectEscortSupport(comp) < math.max(2, indirect * 2)
+    local escortBias = mechanic and (mechanic.CombatIndirectEscortBias or 0) or 0
+    return GetDirectEscortSupport(comp) < math.max(2, indirect * math.max(1, 2 + escortBias))
 end
 
-local function HasHeavyEscortGap(comp)
+local function HasHeavyEscortGap(comp, mechanic)
     local heavy = comp.Heavy or 0
     if heavy <= 0 then
         return false
     end
+    local escortBias = mechanic and (mechanic.CombatHeavyEscortBias or 0) or 0
+    local aaBias = mechanic and (mechanic.CombatAASupportBias or 0) or 0
     local support = GetDirectEscortSupport(comp)
     local aa = comp.AA or 0
-    return support < math.max(2, heavy + 1) or (heavy >= 2 and aa < 1)
+    return support < math.max(2, heavy + 1 + escortBias) or (heavy >= 2 and aa < math.max(1, 1 + aaBias))
 end
 
-HasUnsupportedAAPosture = function(comp, defensive)
+HasUnsupportedAAPosture = function(comp, defensive, mechanic)
     local aa = comp.AA or 0
     if aa <= 0 then
         return false
     end
 
+    local aaBias = mechanic and (mechanic.CombatAASupportBias or 0) or 0
     local direct = comp.Direct or comp.Tank or 0
     local indirect = comp.Indirect or 0
     local heavy = comp.Heavy or 0
@@ -576,13 +581,13 @@ HasUnsupportedAAPosture = function(comp, defensive)
     if direct <= 0 and indirect <= 0 and heavy <= 0 then
         return true
     end
-    if direct <= 1 and aa >= math.max(3, indirect + heavy + 2) then
+    if direct <= 1 and aa >= math.max(3 + aaBias, indirect + heavy + 2 + aaBias) then
         return true
     end
-    return aa >= math.max(4, direct + heavy + 2)
+    return aa >= math.max(4 + aaBias, direct + heavy + 2 + aaBias)
 end
 
-local function EvaluateLandCohortPosture(aiBrain, ownPos, targetPos, units, comp, defensive)
+local function EvaluateLandCohortPosture(aiBrain, ownPos, targetPos, units, comp, defensive, mechanic)
     if not units or table.getn(units) <= 0 or not targetPos then
         return 'hold', ownPos
     end
@@ -591,7 +596,7 @@ local function EvaluateLandCohortPosture(aiBrain, ownPos, targetPos, units, comp
     local stagePos = LerpPos(ownPos, targetPos, defensive and 0.28 or 0.4)
     local frontPos = LerpPos(ownPos, targetPos, defensive and 0.34 or 0.56)
 
-    if HasIndirectEscortGap(comp) or HasHeavyEscortGap(comp) or HasUnsupportedAAPosture(comp, defensive) then
+    if HasIndirectEscortGap(comp, mechanic) or HasHeavyEscortGap(comp, mechanic) or HasUnsupportedAAPosture(comp, defensive, mechanic) then
         return 'regroup', stagePos
     end
 
@@ -607,6 +612,47 @@ local function EvaluateLandCohortPosture(aiBrain, ownPos, targetPos, units, comp
     end
 
     return 'commit', frontPos
+end
+
+local function CanStageSideCohort(aiBrain, ownPos, targetPos, units, comp, mechanic)
+    if not targetPos or not units then
+        return false
+    end
+
+    local count = table.getn(units)
+    if count <= 0 then
+        return false
+    end
+
+    if HasIndirectEscortGap(comp, mechanic) or HasHeavyEscortGap(comp, mechanic) or HasUnsupportedAAPosture(comp, false, mechanic) then
+        return false
+    end
+
+    local distance = Distance2D(ownPos, targetPos)
+    local minCount = distance >= 120 and 4 or 3
+    if count < minCount then
+        return false
+    end
+
+    local directSupport = GetDirectEscortSupport(comp)
+    if directSupport < math.min(count, distance >= 120 and 3 or 2) then
+        return false
+    end
+
+    local centroid = GetUnitsCentroid(units) or ownPos
+    local alliedNearby = aiBrain:GetNumUnitsAroundPoint(LandPressureCategory, centroid, distance >= 120 and 28 or 22, 'Ally') or 0
+    if alliedNearby < math.max(3, math.min(count, minCount)) then
+        return false
+    end
+
+    local stagePos = LerpPos(ownPos, targetPos, 0.46)
+    local ownStrength = OvermindRoleWeights.SumUnitStrength(units)
+    local stageThreat = GetLocalLandStrength(aiBrain, stagePos, 34, 'Enemy')
+    if stageThreat > (ownStrength * (count >= 6 and 1.05 or 0.82)) then
+        return false
+    end
+
+    return true
 end
 
 local function RegroupIsolatedLand(aiBrain, ownPos, targetPos, maxCount, inRecovery)
@@ -656,6 +702,7 @@ function RunPressureCycle(aiBrain, now)
     if not runtime then
         return
     end
+    local mechanic = OvermindMechanicTune.GetConfig(aiBrain)
 
     local ownPos = runtime.OwnMainPos or GetBrainAnchorPosition(aiBrain)
     local primaryEnemyPos = runtime.PrimaryEnemyPos
@@ -732,8 +779,8 @@ function RunPressureCycle(aiBrain, now)
     local outerCount = table.getn(outerUnits)
     local raidComp = raidCount > 0 and CountLandComposition(raidUnits) or false
     local outerComp = outerCount > 0 and CountLandComposition(outerUnits) or false
-    local raidUnsupportedSide = raidComp and HasUnsupportedAAPosture(raidComp, false) or false
-    local outerUnsupportedSide = outerComp and HasUnsupportedAAPosture(outerComp, false) or false
+    local raidUnsupportedSide = raidComp and HasUnsupportedAAPosture(raidComp, false, mechanic) or false
+    local outerUnsupportedSide = outerComp and HasUnsupportedAAPosture(outerComp, false, mechanic) or false
     local interceptUnits = ResolveTaskUnits(interceptTask, groups.Intercept or {}, math.max(3, math.floor(maxUnits * 0.3)))
     local interceptCount = table.getn(interceptUnits)
     local frontPos = (frontTask and frontTask.TargetPos) or intel.FrontLinePos or (runtime.ZoneModel and runtime.ZoneModel.FrontLinePos) or LerpPos(ownPos, primaryEnemyPos, 0.45)
@@ -778,9 +825,11 @@ function RunPressureCycle(aiBrain, now)
             local raidStage = (raidTask and raidTask.StagingPos) or LerpPos(ownPos, raidTarget, 0.42)
             if raidUnsupportedSide then
                 RegroupSideCohort(raidTask, raidUnits, raidCount, raidTarget)
-            else
+            elseif CanStageSideCohort(aiBrain, ownPos, raidTarget, raidUnits, raidComp or CountLandComposition(raidUnits), mechanic) then
                 IssueMove(raidUnits, raidStage)
                 SetTaskExecution(raidTask, now, 'staging', 'move', raidTarget, raidStage, raidCount)
+            else
+                RegroupSideCohort(raidTask, raidUnits, raidCount, raidTarget)
             end
         end
         if outerCount > 0 and outerTarget and not acuEmergencyActive then
@@ -789,9 +838,11 @@ function RunPressureCycle(aiBrain, now)
             elseif reclaimFirst and IssueCohesiveLandOrders then
                 IssueCohesiveLandOrders(aiBrain, ownPos, outerTarget, outerUnits, false)
                 SetTaskExecution(outerTask, now, 'contesting', 'cohesive-outer', outerTarget, outerStage, outerCount)
-            elseif IssueMove then
+            elseif IssueMove and CanStageSideCohort(aiBrain, ownPos, outerTarget, outerUnits, outerComp or CountLandComposition(outerUnits), mechanic) then
                 IssueMove(outerUnits, outerStage)
                 SetTaskExecution(outerTask, now, 'staging', 'move', outerTarget, outerStage, outerCount)
+            elseif IssueMove then
+                RegroupSideCohort(outerTask, outerUnits, outerCount, outerTarget)
             end
         end
         SetTaskExecution(frontTask, now, 'forming', 'hold', frontPos, frontPos, pressureCount)
@@ -870,7 +921,7 @@ function RunPressureCycle(aiBrain, now)
     end
     local graphAdvance = GetGraphAdvanceTarget(runtime, routeName, selectedTarget)
     local stagingPos = (frontTask and frontTask.StagingPos) or LerpPos(ownPos, graphAdvance or selectedTarget, 0.36)
-    local cohortPosture, cohortAnchor = EvaluateLandCohortPosture(aiBrain, ownPos, selectedTarget, pressureUnits, comp, false)
+    local cohortPosture, cohortAnchor = EvaluateLandCohortPosture(aiBrain, ownPos, selectedTarget, pressureUnits, comp, false, mechanic)
     if acuEmergencyActive then
         IssueCohesiveLandOrders(aiBrain, ownPos, acuEnemyPos, acuEmergencyUnits, true)
         SetTaskExecution(acuEmergencyTask, now, 'intercepting', 'cohesive-defend', acuEnemyPos, acuPos, acuEmergencyCount)
@@ -922,9 +973,9 @@ function RunPressureCycle(aiBrain, now)
     end
     if cohortPosture == 'regroup' and IssueMove then
         IssueMove(pressureUnits, cohortAnchor or stagingPos)
-        runtime.LastPressureOrder = HasIndirectEscortGap(comp) and 'RegroupEscort'
-            or (HasHeavyEscortGap(comp) and 'RegroupHeavy'
-            or (HasUnsupportedAAPosture(comp, false) and 'RegroupAA' or 'Regroup'))
+        runtime.LastPressureOrder = HasIndirectEscortGap(comp, mechanic) and 'RegroupEscort'
+            or (HasHeavyEscortGap(comp, mechanic) and 'RegroupHeavy'
+            or (HasUnsupportedAAPosture(comp, false, mechanic) and 'RegroupAA' or 'Regroup'))
         SetTaskExecution(frontTask, now, 'regrouping', 'move', selectedTarget, cohortAnchor or stagingPos, pressureCount)
         SetTaskExecution(artilleryTask, now, 'screening', 'move', selectedTarget, cohortAnchor or stagingPos, table.getn(artilleryReady))
         return
@@ -959,11 +1010,13 @@ function RunPressureCycle(aiBrain, now)
                 IssueCohesiveLandOrders(aiBrain, ownPos, raidTarget, raidUnits, false)
                 runtime.LastRaidOrder = 'Raid'
                 SetTaskExecution(raidTask, now, 'raiding', 'cohesive-raid', raidTarget, raidTask and raidTask.StagingPos or ownPos, raidCount)
-            elseif IssueMove then
+            elseif IssueMove and CanStageSideCohort(aiBrain, ownPos, raidTarget, raidUnits, raidComp or CountLandComposition(raidUnits), mechanic) then
                 local raidStage = GetGraphAdvanceTarget(runtime, 'raid', (raidTask and raidTask.StagingPos) or LerpPos(ownPos, raidTarget, 0.52))
                 IssueMove(raidUnits, raidStage)
                 runtime.LastRaidOrder = 'RaidStage'
                 SetTaskExecution(raidTask, now, 'staging', 'move', raidTarget, raidStage, raidCount)
+            elseif IssueMove then
+                RegroupSideCohort(raidTask, raidUnits, raidCount, raidTarget)
             end
         end
         if outerCount > 0 and outerTarget and not enemyNearBase then
@@ -972,9 +1025,11 @@ function RunPressureCycle(aiBrain, now)
             elseif reclaimFirst and IssueCohesiveLandOrders then
                 IssueCohesiveLandOrders(aiBrain, ownPos, outerTarget, outerUnits, false)
                 SetTaskExecution(outerTask, now, 'contesting', 'cohesive-outer', outerTarget, outerStage, outerCount)
-            elseif IssueMove then
+            elseif IssueMove and CanStageSideCohort(aiBrain, ownPos, outerTarget, outerUnits, outerComp or CountLandComposition(outerUnits), mechanic) then
                 IssueMove(outerUnits, outerStage)
                 SetTaskExecution(outerTask, now, 'staging', 'move', outerTarget, outerStage, outerCount)
+            elseif IssueMove then
+                RegroupSideCohort(outerTask, outerUnits, outerCount, outerTarget)
             end
         elseif outerCount > 0 and enemyNearBase and IssueMove then
             IssueMove(outerUnits, frontPos or rearGuardPos)
@@ -1031,9 +1086,11 @@ function RunPressureCycle(aiBrain, now)
         if outerCount > 0 and outerTarget and not enemyNearBase then
             if outerUnsupportedSide then
                 RegroupSideCohort(outerTask, outerUnits, outerCount, outerTarget)
-            elseif IssueMove then
+            elseif IssueMove and CanStageSideCohort(aiBrain, ownPos, outerTarget, outerUnits, outerComp or CountLandComposition(outerUnits), mechanic) then
                 IssueMove(outerUnits, outerStage)
                 SetTaskExecution(outerTask, now, 'contesting', 'move', outerTarget, outerStage, outerCount)
+            elseif IssueMove then
+                RegroupSideCohort(outerTask, outerUnits, outerCount, outerTarget)
             end
         end
         runtime.LastPressureOrder = 'InterceptCluster'
@@ -1075,9 +1132,11 @@ function RunPressureCycle(aiBrain, now)
             if keepOuter and outerTarget then
                 if outerUnsupportedSide then
                     RegroupSideCohort(outerTask, outerUnits, outerCount, outerTarget)
-                elseif IssueMove then
+                elseif IssueMove and CanStageSideCohort(aiBrain, ownPos, outerTarget, outerUnits, outerComp or CountLandComposition(outerUnits), mechanic) then
                     IssueMove(outerUnits, outerStage)
                     SetTaskExecution(outerTask, now, 'contesting', 'move', outerTarget, outerStage, outerCount)
+                elseif IssueMove then
+                    RegroupSideCohort(outerTask, outerUnits, outerCount, outerTarget)
                 end
             elseif IssueCohesiveLandOrders then
                 IssueCohesiveLandOrders(aiBrain, ownPos, enemyNearBase, outerUnits, true)
@@ -1108,9 +1167,11 @@ function RunPressureCycle(aiBrain, now)
             elseif reclaimFirst and IssueCohesiveLandOrders then
                 IssueCohesiveLandOrders(aiBrain, ownPos, outerTarget, outerUnits, false)
                 SetTaskExecution(outerTask, now, 'contesting', 'cohesive-outer', outerTarget, outerStage, outerCount)
-            elseif IssueMove then
+            elseif IssueMove and CanStageSideCohort(aiBrain, ownPos, outerTarget, outerUnits, outerComp or CountLandComposition(outerUnits), mechanic) then
                 IssueMove(outerUnits, outerStage)
                 SetTaskExecution(outerTask, now, 'staging', 'move', outerTarget, outerStage, outerCount)
+            elseif IssueMove then
+                RegroupSideCohort(outerTask, outerUnits, outerCount, outerTarget)
             end
         end
     end
@@ -1122,11 +1183,13 @@ function RunPressureCycle(aiBrain, now)
             IssueCohesiveLandOrders(aiBrain, ownPos, raidTarget, raidUnits, false)
             runtime.LastRaidOrder = 'Raid'
             SetTaskExecution(raidTask, now, 'raiding', 'cohesive-raid', raidTarget, raidTask and raidTask.StagingPos or ownPos, raidCount)
-        elseif IssueMove then
+        elseif IssueMove and CanStageSideCohort(aiBrain, ownPos, raidTarget, raidUnits, raidComp or CountLandComposition(raidUnits), mechanic) then
             local raidStage = GetGraphAdvanceTarget(runtime, 'raid', (raidTask and raidTask.StagingPos) or LerpPos(ownPos, raidTarget, 0.5))
             IssueMove(raidUnits, raidStage)
             runtime.LastRaidOrder = 'RaidStage'
             SetTaskExecution(raidTask, now, 'staging', 'move', raidTarget, raidStage, raidCount)
+        elseif IssueMove then
+            RegroupSideCohort(raidTask, raidUnits, raidCount, raidTarget)
         end
     elseif raidCount > 0 and baseGuardCount <= 0 and enemyNearBase and IssueCohesiveLandOrders then
         IssueCohesiveLandOrders(aiBrain, ownPos, enemyNearBase, raidUnits, true)

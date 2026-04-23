@@ -25,6 +25,23 @@ services:
     ports:
       - "${AUTOTUNE_ADMINER_PORT:-18081}:8080"
 
+  dashboard:
+    build:
+      context: ./dashboard
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      AUTOTUNE_DB_HOST: postgres
+      AUTOTUNE_DB_PORT: 5432
+      AUTOTUNE_DB_NAME: ${AUTOTUNE_DB_NAME:-overmind_autotune}
+      AUTOTUNE_DB_USER: ${AUTOTUNE_DB_USER:-overmind}
+      AUTOTUNE_DB_PASSWORD: ${AUTOTUNE_DB_PASSWORD:-overmind_dev}
+    ports:
+      - "${AUTOTUNE_DASHBOARD_PORT:-18501}:8501"
+
 volumes:
   overmind_autotune_pgdata:
     name: overmind_autotune_pgdata

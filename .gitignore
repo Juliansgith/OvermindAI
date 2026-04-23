@@ -47,6 +47,8 @@ autotune/db-reports/
 autotune/action-datasets/
 autotune/action-priors/
 autotune/launches/
+autotune/codex-patches/
+autotune/codex-worktrees/
 
 # Local database and env files
 .env.autotune-db

@@ -19,6 +19,7 @@ It stores:
 
 - `Postgres 16` in Docker
 - `Adminer` for lightweight browser inspection
+- `Streamlit` dashboard for trend and KPI analysis
 - PowerShell scripts in `tools/`
 - SQL schema and views in `sql/autotune-db/`
 
@@ -36,6 +37,7 @@ It stores:
 - [db_query_champions.ps1](C:\Program Files (x86)\Steam\steamapps\common\Supreme Commander Forged Alliance\mods\OvermindAI\tools\db_query_champions.ps1)
 - [db_query_param_effects.ps1](C:\Program Files (x86)\Steam\steamapps\common\Supreme Commander Forged Alliance\mods\OvermindAI\tools\db_query_param_effects.ps1)
 - [db_report_autotune.ps1](C:\Program Files (x86)\Steam\steamapps\common\Supreme Commander Forged Alliance\mods\OvermindAI\tools\db_report_autotune.ps1)
+- [autotune-dashboard.md](C:\Program Files (x86)\Steam\steamapps\common\Supreme Commander Forged Alliance\mods\OvermindAI\docs\autotune-dashboard.md)
 
 ## One-Time Setup
 
@@ -53,6 +55,7 @@ Default endpoints:
 
 - Postgres: `localhost:54329`
 - Adminer: `http://localhost:18081`
+- Dashboard: `http://localhost:18501`
 
 ## Basic Commands
 
@@ -66,6 +69,12 @@ Stop the stack:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\tools\db_stop.ps1
+```
+
+Start the dashboard on top of the DB:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\tools\dashboard_start.ps1
 ```
 
 Stop and destroy DB data:

@@ -779,7 +779,27 @@ local function NormalizeStructureRole(role)
     if normalized == 'defense' or normalized == 'structure' then
         return 'defense'
     end
+    if normalized == 'shield' then
+        return 'shield'
+    end
+    if normalized == 'tmd' or normalized == 'missile' or normalized == 'missiledefense' then
+        return 'tmd'
+    end
     return normalized
+end
+
+local function GetStructureRoleCategory(role)
+    local key = NormalizeStructureRole(role)
+    if key == 'pd' then
+        return categories.STRUCTURE * categories.DEFENSE * categories.DIRECTFIRE * categories.TECH1 - categories.ANTIAIR
+    elseif key == 'aa' then
+        return categories.STRUCTURE * categories.DEFENSE * categories.ANTIAIR * categories.TECH1
+    elseif key == 'shield' then
+        return categories.STRUCTURE * categories.SHIELD * (categories.TECH2 + categories.TECH3)
+    elseif key == 'tmd' then
+        return categories.STRUCTURE * categories.ANTIMISSILE * categories.TECH2
+    end
+    return categories.STRUCTURE * categories.DEFENSE * categories.TECH1
 end
 
 local function IsStructureBuildClaimed(aiBrain, role, now)
@@ -809,13 +829,7 @@ local function ClaimStructureBuild(aiBrain, role, seconds, now)
 end
 
 local function HasUnfinishedDefenseBuild(aiBrain, role)
-    local key = NormalizeStructureRole(role)
-    local category = categories.STRUCTURE * categories.DEFENSE * categories.TECH1
-    if key == 'pd' then
-        category = category * categories.DIRECTFIRE - categories.ANTIAIR
-    elseif key == 'aa' then
-        category = category * categories.ANTIAIR
-    end
+    local category = GetStructureRoleCategory(role)
     return GetUnfinishedUnitCount(aiBrain, category) > 0
 end
 
@@ -939,6 +953,58 @@ local function IsPrimaryLocation(aiBrain, locationType, maxDist)
 
     local distance = Distance2D(mainPos, otherPos)
     return distance <= (maxDist or 42)
+end
+
+local function RecordHomeDefenseVeto(aiBrain, role, locationType, reason, now)
+    local runtime = aiBrain and aiBrain.OvermindRuntime or false
+    if not runtime then
+        return
+    end
+    runtime.LastHomeDefenseStructureVetoTime = now or GetGameTimeSeconds()
+    runtime.LastHomeDefenseStructureVetoRole = tostring(role or 'none')
+    runtime.LastHomeDefenseStructureVetoLocation = tostring(locationType or 'unknown')
+    runtime.LastHomeDefenseStructureVetoReason = tostring(reason or 'none')
+end
+
+local function IsHomeSurvivalCrisis(aiBrain)
+    if not aiBrain then
+        return false
+    end
+
+    local runtime = aiBrain.OvermindRuntime or {}
+    local now = GetGameTimeSeconds()
+    if now < (runtime.ACUCrisisUntil or -999) or now < (runtime.ACUCrisisEscalatedUntil or -999) then
+        return true
+    end
+
+    local raid = runtime.RaidDefense or {}
+    local director = GetProductionDirector(aiBrain)
+    local constraints = director and director.ConstraintState or {}
+    local approachCluster = (runtime.EnemyClusterTracker and runtime.EnemyClusterTracker.ApproachCluster) or {}
+
+    return constraints.LandPanic == true
+        or constraints.AirPanic == true
+        or constraints.FrontCollapse == true
+        or (raid.UnderLandHarass and (raid.LastLandEnemyCount or 0) >= 2)
+        or (raid.UnderAirHarass and math.max(raid.LastAirEnemyCount or 0, raid.LastBomberEnemyCount or 0) >= 2)
+        or ((approachCluster.TotalThreat or 0) >= 8 and (approachCluster.HomeDistance or 999) < 220)
+end
+
+function ShouldAllowDefenseStructureLocation(aiBrain, locationType)
+    if not IsOvermindBrain(aiBrain) then
+        return true
+    end
+
+    if IsPrimaryLocation(aiBrain, locationType, 56) then
+        return true
+    end
+
+    if IsHomeSurvivalCrisis(aiBrain) then
+        RecordHomeDefenseVeto(aiBrain, 'defense', locationType, 'home_crisis', GetGameTimeSeconds())
+        return false
+    end
+
+    return true
 end
 
 function HasNoUnfinishedFactoriesAtLocation(aiBrain, locationType, radius, maxAllowed)
@@ -3712,7 +3778,7 @@ function ShouldBuildT1NavalRole(aiBrain, role)
     return false
 end
 
-function ShouldBuildT1StructureRole(aiBrain, role)
+function ShouldBuildT1StructureRole(aiBrain, role, locationType)
     if not IsOvermindBrain(aiBrain) then
         return false
     end
@@ -3722,6 +3788,10 @@ function ShouldBuildT1StructureRole(aiBrain, role)
     local bomberPanic = IsBomberPanic(aiBrain)
     local director = GetProductionDirector(aiBrain)
     local econBootstrap = IsEconomyBootstrapState(aiBrain)
+    if (structureKey == 'pd' or structureKey == 'aa') and locationType and not ShouldAllowDefenseStructureLocation(aiBrain, locationType) then
+        RecordHomeDefenseVeto(aiBrain, structureKey, locationType, 'home_crisis', now)
+        return false
+    end
     if econBootstrap and not IsUnderLandHarass(aiBrain, 1) and not IsUnderAirHarass(aiBrain, 1) and not bomberPanic then
         return false
     end
@@ -3855,4 +3925,52 @@ function ShouldBuildT1StructureRole(aiBrain, role)
         return need
     end
     return false
+end
+
+function ShouldBuildT2StructureRole(aiBrain, role, locationType)
+    if not IsOvermindBrain(aiBrain) then
+        return false
+    end
+
+    local key = NormalizeStructureRole(role)
+    if key ~= 'shield' and key ~= 'tmd' then
+        return false
+    end
+
+    local now = GetGameTimeSeconds()
+    local director = GetProductionDirector(aiBrain)
+    local structurePlan = director and director.StructurePlan or false
+    local current = director and director.Current or false
+    local structures = current and current.Structures or false
+    local homeCrisis = (structurePlan and structurePlan.HomeCrisisLockdown == true) or IsHomeSurvivalCrisis(aiBrain)
+    local econ = GetEcon(aiBrain)
+
+    if not structurePlan or not structures then
+        return false
+    end
+    if not IsPrimaryLocation(aiBrain, locationType, 56) then
+        RecordHomeDefenseVeto(aiBrain, key, locationType, homeCrisis and 'home_crisis' or 'non_primary', now)
+        return false
+    end
+    if locationType and not ShouldAllowDefenseStructureLocation(aiBrain, locationType) then
+        RecordHomeDefenseVeto(aiBrain, key, locationType, 'home_crisis', now)
+        return false
+    end
+    if IsEconomyBootstrapState(aiBrain) or IsStarterPhaseState(aiBrain) then
+        return false
+    end
+    if IsStructureBuildClaimed(aiBrain, key, now) or HasUnfinishedDefenseBuild(aiBrain, key) then
+        return false
+    end
+    if not homeCrisis and (econ.MassTrend or 0) <= -0.24 and (econ.MassStorageRatio or 0) <= 0.18 then
+        return false
+    end
+
+    local target = key == 'shield' and (structurePlan.Shield or 0) or (structurePlan.TMD or 0)
+    local currentCount = key == 'shield' and (structures.Shield or 0) or (structures.TMD or 0)
+    local need = currentCount < target
+    if need then
+        ClaimStructureBuild(aiBrain, key, key == 'shield' and 42 or 36, now)
+    end
+    return need
 end

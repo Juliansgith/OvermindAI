@@ -12,6 +12,7 @@ local AirBomberCategory = categories.MOBILE * categories.AIR * categories.BOMBER
     - categories.SCOUT - categories.TRANSPORTATION - categories.COMMAND
 local AirScoutCategory = categories.MOBILE * categories.AIR * categories.SCOUT
 
+local OvermindMechanicTune = import('/mods/OvermindAI/lua/AI/Overmind/MechanicTune.lua')
 local OvermindRoleWeights = import('/mods/OvermindAI/lua/AI/Overmind/RoleWeights.lua')
 
 local Module = {
@@ -375,6 +376,12 @@ function Module.Update(aiBrain, now)
     local reclaimFirst = planner.ReclaimFirst == true
     local engineerState = runtime.EngineerState or {}
     local current = ((runtime.ProductionDirector or {}).Current) or {}
+    local mechanic = OvermindMechanicTune.GetConfig(aiBrain)
+    local sideEscortBias = mechanic.ForceSideEscortAABias or 0
+    local emergencyThreatScale = 0.34 + (mechanic.ForceACUEmergencyThreatScaleBias or 0)
+    local emergencyBaseNeedBias = mechanic.ForceACUEmergencyBaseNeedBias or 0
+    local emergencyHoldBias = mechanic.ForceACUEmergencyHoldBias or 0
+    local emergencyCrisisShareBias = mechanic.ForceACUEmergencyCrisisShareBias or 0
     local mexReady = (((current.Eco or {}).Mex or {}).Ready) or 0
     local mapControl = ((runtime.ZoneModel or {}).MapControl) or 0.5
     local ownPos = GetMainPos(aiBrain, runtime)
@@ -589,11 +596,12 @@ function Module.Update(aiBrain, now)
             or acuDamageRecent
             or (acuEmergencySticky and (localAcuEnemyCount >= 1 or localAcuThreat > math.max(1.2, homeThreat - 1.4)))
         if acuRush then
-            state.ACUEmergencyHoldUntil = now + ((acuDamageRecent or acuCrisisEscalated) and 36 or (acuCrisisActive and 30 or 22))
-            acuEmergencyDirectNeed = Clamp(10 + math.floor(math.max(0, acuEmergencyThreat) * 0.34) + math.min(10, localAcuEnemyCount * 2) + (acuDamageRecent and 6 or 0) + ((previousAcuEmergencyCount > 0) and 3 or 0), 10, 30)
+            state.ACUEmergencyHoldUntil = now + math.max(10, ((acuDamageRecent or acuCrisisEscalated) and 36 or (acuCrisisActive and 30 or 22)) + emergencyHoldBias)
+            acuEmergencyDirectNeed = Clamp(10 + emergencyBaseNeedBias + math.floor(math.max(0, acuEmergencyThreat) * emergencyThreatScale) + math.min(10, localAcuEnemyCount * 2) + (acuDamageRecent and 6 or 0) + ((previousAcuEmergencyCount > 0) and 3 or 0), 10, 34)
             acuEmergencyAANeed = Clamp(((approachAir > 0) and 1 or 0) + ((raid.UnderAirHarass and 1) or 0) + ((acuDamageRecent and approachAir > 0) and 1 or 0), 0, 4)
             if acuCrisisActive then
-                acuEmergencyDirectNeed = Clamp(math.max(acuEmergencyDirectNeed, math.floor(landCombatTotal * (acuCrisisEscalated and 0.72 or 0.58)) + 4), 12, 40)
+                local crisisShare = Clamp((acuCrisisEscalated and 0.72 or 0.58) + emergencyCrisisShareBias, 0.45, 0.9)
+                acuEmergencyDirectNeed = Clamp(math.max(acuEmergencyDirectNeed, math.floor(landCombatTotal * crisisShare) + 4 + math.max(0, emergencyBaseNeedBias)), 12, 40)
                 acuEmergencyAANeed = Clamp(math.max(acuEmergencyAANeed, (approachAir > 0 and 2 or 1)), 1, 4)
             end
         elseif previousAcuEmergencyCount <= 0 and localAcuEnemyCount <= 0 and localAcuThreat <= (homeThreat + 0.4) then
@@ -925,10 +933,10 @@ function Module.Update(aiBrain, now)
         end
     end
     if table.getn(raiders) > 0 then
-        AllocateSideEscortAA(raiders, Clamp(1 + ((table.getn(raiders) >= 5 or raid.UnderAirHarass) and 1 or 0), 1, 2))
+        AllocateSideEscortAA(raiders, math.floor(Clamp(1 + ((table.getn(raiders) >= 5 or raid.UnderAirHarass) and 1 or 0) + sideEscortBias, 1, 3)))
     end
     if table.getn(outerContest) > 0 then
-        AllocateSideEscortAA(outerContest, Clamp(1 + ((table.getn(outerContest) >= 5 or airThreatZones > 1) and 1 or 0), 1, 2))
+        AllocateSideEscortAA(outerContest, math.floor(Clamp(1 + ((table.getn(outerContest) >= 5 or airThreatZones > 1) and 1 or 0) + sideEscortBias, 1, 3)))
     end
     local acuEmergency = {}
     if acuEmergencyNeed > 0 then
