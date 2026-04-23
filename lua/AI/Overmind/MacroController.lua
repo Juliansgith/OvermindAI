@@ -52,6 +52,36 @@ local function CountReadyUnits(aiBrain, category)
     return count
 end
 
+local function PickTech2PowerBlueprint(builder)
+    if not builder or builder.Dead then
+        return false
+    end
+
+    local bps = EntityCategoryGetUnitList(categories.STRUCTURE * categories.ENERGYPRODUCTION * categories.TECH2)
+    if not bps or table.getn(bps) <= 0 then
+        return false
+    end
+
+    for _, bp in bps do
+        if bp and builder:CanBuild(bp) then
+            return bp
+        end
+    end
+
+    return false
+end
+
+local function CountReadyTechPowerBuilders(aiBrain)
+    local count = 0
+    local units = aiBrain:GetListOfUnits(categories.ENGINEER * categories.MOBILE * (categories.TECH2 + categories.TECH3), false, true) or {}
+    for _, unit in units do
+        if IsReadyUnit(unit) and PickTech2PowerBlueprint(unit) then
+            count = count + 1
+        end
+    end
+    return count
+end
+
 local function CountActiveLandFactoryUpgrades(aiBrain)
     local count = 0
     local units = aiBrain:GetListOfUnits(categories.FACTORY * categories.LAND * categories.STRUCTURE, false, true) or {}
@@ -115,7 +145,7 @@ local function DetermineDesiredPhase(aiBrain, runtime, now)
     local readyMex = CountReadyUnits(aiBrain, categories.MASSEXTRACTION * categories.STRUCTURE)
     local readyPower = CountReadyUnits(aiBrain, categories.ENERGYPRODUCTION * categories.STRUCTURE)
     local t2LandFactories = CountUnits(aiBrain, categories.FACTORY * categories.LAND * categories.STRUCTURE * (categories.TECH2 + categories.TECH3))
-    local techEngineers = CountUnits(aiBrain, categories.ENGINEER * categories.MOBILE * (categories.TECH2 + categories.TECH3))
+    local techEngineers = CountReadyTechPowerBuilders(aiBrain)
     local techPower = CountReadyUnits(aiBrain, categories.ENERGYPRODUCTION * categories.STRUCTURE * (categories.TECH2 + categories.TECH3))
     local activeLandFactoryUpgrades = CountActiveLandFactoryUpgrades(aiBrain)
     local activeMexUpgrades = CountActiveMexUpgrades(aiBrain)

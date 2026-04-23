@@ -82,6 +82,14 @@ local function GetCommandQueueLength(unit)
     return q and table.getn(q) or 0
 end
 
+local function IsReadyBuilder(unit)
+    return unit
+        and not unit.Dead
+        and GetFraction(unit) >= 0.95
+        and not unit:IsUnitState('BeingBuilt')
+        and not unit:IsUnitState('Upgrading')
+end
+
 local function IsConstructing(unit)
     if not unit or unit.Dead then
         return false
@@ -1729,6 +1737,9 @@ local function TryOpenFirstT2PowerBuild(aiBrain, runtime, eng, mainPos, now)
     if not eng or eng.Dead or not mainPos or not IssueBuildMobile then
         return false
     end
+    if not IsReadyBuilder(eng) then
+        return false
+    end
 
     local macro = runtime and runtime.MacroController or {}
     local phase = macro.Phase or (((runtime and runtime.ProductionDirector) or {}).MacroObjective) or 'none'
@@ -2824,6 +2835,7 @@ local function ProcessEngineer(aiBrain, runtime, eng, now, ctx)
     local dist = Distance2D(pos, ctx.mainPos)
     local localThreat = aiBrain:GetThreatAtPosition(pos, 1, true, 'AntiSurface') or 0
     if ctx.macroPhase == 'first_t2_power'
+        and IsReadyBuilder(eng)
         and EntityCategoryContains(categories.ENGINEER * categories.MOBILE * (categories.TECH2 + categories.TECH3), eng)
         and TryOpenFirstT2PowerBuild(aiBrain, runtime, eng, ctx.mainPos, now) then
         if claimedByFactoryTask and ctx.factoryTask.BuilderIds and entityId then
@@ -3220,7 +3232,6 @@ function Update(aiBrain, now)
     engState.MexEmergencyRebuild = mexRebuildUrgent and true or false
     engState.MexEmergencyActive = (mexRebuildUrgent or mexExpansionUrgent) and true or false
     if mexRebuildUrgent then
-        recovery.ForceDefenseRecovery = true
         recovery.ForceFactoryLand = true
         recovery.ForceBaseEngineerRecovery = true
     end

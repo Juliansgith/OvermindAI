@@ -649,6 +649,7 @@ local function ProcessEngineer(aiBrain, runtime, eng, now, ctx)
     local dist = Common.Distance2D(pos, ctx.mainPos)
     local localThreat = aiBrain:GetThreatAtPosition(pos, 1, true, 'AntiSurface') or 0
     if ctx.macroPhase == 'first_t2_power'
+        and Common.IsReadyBuilder(eng)
         and EntityCategoryContains(categories.ENGINEER * categories.MOBILE * (categories.TECH2 + categories.TECH3), eng)
         and Recovery.TryOpenFirstT2PowerBuild(aiBrain, runtime, eng, ctx.mainPos, now) then
         if claimedByFactoryTask and ctx.factoryTask.BuilderIds and entityId then
@@ -719,6 +720,7 @@ local function ProcessEngineer(aiBrain, runtime, eng, now, ctx)
         elseif (ctx.macroPhase == 'first_land_hq' or ctx.macroPhase == 'first_t2_engineer' or ctx.macroPhase == 'first_t2_power') then
             local assistTarget, isUpgradeTarget = GetPriorityUpgradeAssistTarget(aiBrain, runtime, ctx.mainPos)
             if ctx.macroPhase == 'first_t2_power'
+                and Common.IsReadyBuilder(eng)
                 and EntityCategoryContains(categories.ENGINEER * categories.MOBILE * (categories.TECH2 + categories.TECH3), eng)
                 and localThreat < 2.2
                 and dist <= 360

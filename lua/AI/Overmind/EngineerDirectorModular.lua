@@ -217,7 +217,6 @@ function Update(aiBrain, now)
     engState.MexEmergencyRebuild = mexRebuildUrgent and true or false
     engState.MexEmergencyActive = (mexRebuildUrgent or mexExpansionUrgent) and true or false
     if mexRebuildUrgent then
-        recovery.ForceDefenseRecovery = true
         recovery.ForceFactoryLand = true
         recovery.ForceBaseEngineerRecovery = true
     end

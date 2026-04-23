@@ -596,6 +596,9 @@ local function TryOpenFirstT2PowerBuild(aiBrain, runtime, eng, mainPos, now)
     if not eng or eng.Dead or not mainPos or not IssueBuildMobile then
         return false
     end
+    if not Common.IsReadyBuilder(eng) then
+        return false
+    end
 
     local macro = runtime and runtime.MacroController or {}
     local phase = macro.Phase or (((runtime and runtime.ProductionDirector) or {}).MacroObjective) or 'none'
@@ -610,7 +613,7 @@ local function TryOpenFirstT2PowerBuild(aiBrain, runtime, eng, mainPos, now)
         LogFirstT2PowerFailure(aiBrain, runtime, now, 'unfinished_t2_power')
         return false
     end
-    if now < ((runtime.LastFirstT2PowerIssueTime or -999) + 10) then
+    if now < ((runtime.LastFirstT2PowerIssueTime or -999) + 38) then
         LogFirstT2PowerFailure(aiBrain, runtime, now, 'cooldown')
         return false
     end

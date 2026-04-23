@@ -84,10 +84,20 @@ local function IsLowTechDefenseCapped(runtime, aiBrain, bomberPanic)
     local mexReady = (((ecoCounts.Mex or {}).Ready) or 0)
     local t2PowerReady = aiBrain:GetCurrentUnits(categories.ENERGYPRODUCTION * categories.STRUCTURE * (categories.TECH2 + categories.TECH3)) or 0
     local t2MexReady = aiBrain:GetCurrentUnits(categories.MASSEXTRACTION * categories.STRUCTURE * (categories.TECH2 + categories.TECH3)) or 0
+    local t2LandReady = aiBrain:GetCurrentUnits(categories.FACTORY * categories.LAND * categories.STRUCTURE * (categories.TECH2 + categories.TECH3)) or 0
     local aaTotal = aiBrain:GetCurrentUnits(T1AAStructureCategory) or 0
     local pdTotal = aiBrain:GetCurrentUnits(T1PDStructureCategory) or 0
     local cap = bomberPanic and 4 or 3
-    if phase == 'first_t2_power' then
+    local firstTechTransition = t2PowerReady <= 0
+        and (
+            phase == 'mass_consolidation'
+            or phase == 'first_land_hq'
+            or phase == 'first_t2_engineer'
+            or phase == 'first_t2_power'
+            or t2LandReady > 0
+        )
+    if firstTechTransition then
+        cap = bomberPanic and 2 or 1
         return (aaTotal + pdTotal) >= cap
     end
     local techTransition = phase == 'first_t2_power'
@@ -343,6 +353,34 @@ function Module.Update(aiBrain, now)
     if IsLowTechDefenseCapped(runtime, aiBrain, bomberPanic) then
         state.NextTry = now + 10
         return
+    end
+
+    local macro = runtime.MacroController or {}
+    local phase = macro.Phase or prod.MacroObjective or 'none'
+    local t2PowerReady = aiBrain:GetCurrentUnits(categories.ENERGYPRODUCTION * categories.STRUCTURE * (categories.TECH2 + categories.TECH3)) or 0
+    local t2LandReady = aiBrain:GetCurrentUnits(categories.FACTORY * categories.LAND * categories.STRUCTURE * (categories.TECH2 + categories.TECH3)) or 0
+    local firstTechTransition = t2PowerReady <= 0
+        and (
+            phase == 'mass_consolidation'
+            or phase == 'first_land_hq'
+            or phase == 'first_t2_engineer'
+            or phase == 'first_t2_power'
+            or t2LandReady > 0
+        )
+    if firstTechTransition then
+        local mainPos = GetMainPos(aiBrain, runtime)
+        local threatPos = raid.LastThreatMexPos or raid.ExposedMexThreatPos
+        local nearHome = mainPos and threatPos and Distance2D(mainPos, threatPos) <= 130
+        local severeLand = raid.UnderLandHarass == true
+            and nearHome
+            and (raid.LastLandEnemyCount or 0) >= 5
+        local severeAir = bomberPanic
+            and nearHome
+            and math.max(raid.LastBomberEnemyCount or 0, raid.LastAirEnemyCount or 0) >= 2
+        if not severeLand and not severeAir then
+            state.NextTry = now + 10
+            return
+        end
     end
 
     if IsFirstHQPriority(runtime, aiBrain) then

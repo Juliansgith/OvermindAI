@@ -10,6 +10,7 @@ local LandIndirectCategory = categories.MOBILE * categories.LAND * categories.IN
     - categories.ENGINEER - categories.SCOUT - categories.COMMAND
 local LandScoutCategory = categories.MOBILE * categories.LAND * categories.SCOUT - categories.ENGINEER
 local EngineerCategory = categories.ENGINEER * categories.MOBILE
+local TechEngineerCategory = categories.ENGINEER * categories.MOBILE * (categories.TECH2 + categories.TECH3)
 
 local AirFighterCategory = categories.MOBILE * categories.AIR * categories.ANTIAIR
     - categories.SCOUT - categories.TRANSPORTATION - categories.COMMAND
@@ -476,7 +477,7 @@ local function CountActiveFactoryUpgrades(aiBrain, kind)
 end
 
 local function CountTechEngineers(aiBrain)
-    return aiBrain:GetCurrentUnits(categories.ENGINEER * categories.MOBILE * (categories.TECH2 + categories.TECH3)) or 0
+    return aiBrain:GetCurrentUnits(TechEngineerCategory) or 0
 end
 
 local function GetMacroObjective(runtime)
@@ -497,7 +498,7 @@ local function NeedsFirstLandHQ(runtime)
     return factoryUpgrade.NeedsFirstLandHQ == true and factoryUpgrade.Enabled ~= true
 end
 
-local function ShouldForceFirstTechEngineer(aiBrain, factory, runtime, eco)
+local function ShouldForceFirstTechEngineer(aiBrain, factory, runtime, eco, now)
     if not factory or factory.Dead then
         return false
     end
@@ -508,6 +509,9 @@ local function ShouldForceFirstTechEngineer(aiBrain, factory, runtime, eco)
         return false
     end
     if CountTechEngineers(aiBrain) >= 1 then
+        return false
+    end
+    if now and now < ((runtime.FirstTechEngineerQueuedUntil or -999)) then
         return false
     end
 
@@ -634,7 +638,7 @@ local function ShouldUpgradeFactory(aiBrain, factory, runtime, eco, qLen)
     return true, upgradeBp
 end
 
-local function TryIssuePlannedBuild(aiBrain, factory, runtime, now, state, queueLen, forceTopoff)
+local function TryIssuePlannedBuild(aiBrain, factory, runtime, now, state, queueLen, forceTopoff, forceFirstTechEngineer)
     if not IsFactoryReady(factory) then
         return false, 'not-ready'
     end
@@ -655,10 +659,15 @@ local function TryIssuePlannedBuild(aiBrain, factory, runtime, now, state, queue
     end
 
     local eco = GetEcon(runtime)
-    if ShouldForceFirstTechEngineer(aiBrain, factory, runtime, eco) then
-        local bp = PickBuildBlueprint(factory, EngineerCategory, 'Engineer', true, 0.6, 1.4)
+    if forceFirstTechEngineer or ShouldForceFirstTechEngineer(aiBrain, factory, runtime, eco, now) then
+        local bp = PickBuildBlueprint(factory, TechEngineerCategory, 'Engineer', true, 2.0, 2.0)
         if bp and IssueBuildFactory then
+            if (qLen > 0 or factory:IsUnitState('Building')) and IssueClearCommands then
+                IssueClearCommands({ factory })
+            end
             IssueBuildFactory({ factory }, bp, 1)
+            runtime.FirstTechEngineerQueuedUntil = now + 90
+            runtime.FirstTechEngineerQueuedBlueprint = bp
             state.LastIssuedTime = now
             state.LastRole = 'FirstTechEngineer'
             state.LastUtility = 995
@@ -766,11 +775,12 @@ function Module.Update(aiBrain, now)
                     emptyFactories = emptyFactories + 1
                     domainIdle[domain] = (domainIdle[domain] or 0) + 1
                 end
-                if qLen < queueDepthTarget or (firstHQReserve and kind == 'land' and qLen <= 0) then
+                local forceFirstTechEngineer = ShouldForceFirstTechEngineer(aiBrain, factory, runtime, eco, now)
+                if forceFirstTechEngineer or qLen < queueDepthTarget or (firstHQReserve and kind == 'land' and qLen <= 0) then
                     if qLen <= 0 and not factory:IsUnitState('Building') then
                         idleFactories = idleFactories + 1
                     end
-                    local ok = TryIssuePlannedBuild(aiBrain, factory, runtime, now, state, qLen, qLen > 0)
+                    local ok = TryIssuePlannedBuild(aiBrain, factory, runtime, now, state, qLen, qLen > 0, forceFirstTechEngineer)
                     if ok then
                         issued = issued + 1
                         if qLen > 0 then

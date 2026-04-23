@@ -65,6 +65,14 @@ local function GetCommandQueueLength(unit)
     return q and table.getn(q) or 0
 end
 
+local function IsReadyBuilder(unit)
+    return unit
+        and not unit.Dead
+        and GetFraction(unit) >= 0.95
+        and not unit:IsUnitState('BeingBuilt')
+        and not unit:IsUnitState('Upgrading')
+end
+
 local function IsConstructing(unit)
     if not unit or unit.Dead then
         return false
@@ -111,6 +119,7 @@ M.GetFraction = GetFraction
 M.GetEntityId = GetEntityId
 M.IsIdle = IsIdle
 M.GetCommandQueueLength = GetCommandQueueLength
+M.IsReadyBuilder = IsReadyBuilder
 M.IsConstructing = IsConstructing
 M.ShouldThrottle = ShouldThrottle
 M.RecallEngineer = RecallEngineer
