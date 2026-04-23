@@ -670,13 +670,13 @@ local function PickFactoryTarget(aiBrain, runtime, state, now)
     state.Mandatory = needsFirstHQOverall and true or false
     state.PowerRecoveryWanted = constraints.PowerBufferLow and needsFirstHQOverall
 
-    local firstHQEscapeFloorReady = readyLand >= 4
+    local firstHQEscapeFloorReady = readyLand >= 3
         and mexReady >= 5
         and powerReady >= 5
         and not constraints.EcoCrash
     local forceFirstHQAfterEscape = firstHQEscapeFloorReady
         and (
-            now >= 480
+            now >= 330
             or readyLand >= 4
             or macro.NeedFirstLandHQ == true
         )
@@ -722,6 +722,10 @@ local function PickFactoryTarget(aiBrain, runtime, state, now)
         and not constraints.EcoCrash
     if stillNeedsFirstHQ and macroWantsHQ and readyLand >= 3 and totalLand >= 3 and mexReady >= 4 and powerReady >= 3 then
         mandatoryFirstHQ = true
+    end
+    if forceFirstHQAfterEscape and stillNeedsFirstHQ then
+        mandatoryFirstHQ = true
+        macroWantsHQ = true
     end
     state.NeedsFirstLandHQ = stillNeedsFirstHQ and true or false
     state.Mandatory = mandatoryFirstHQ and true or false
@@ -770,7 +774,13 @@ local function PickFactoryTarget(aiBrain, runtime, state, now)
             and not constraints.QueueStarved
             and (eco.EnergyTrend or 0) >= -18
             and (constraints.CriticalStructureKind ~= 'Power' or powerReady >= 8)
-        if (hqPowerOverride or hqFactoryOverride or hqStructureOverride) and not constraints.EcoCrash and not constraints.QueueStarved then
+        local hqHardOverride = forceFirstHQAfterEscape
+            and mandatoryFirstHQ
+            and not constraints.EcoCrash
+            and readyLand >= 3
+            and mexReady >= 5
+            and powerReady >= 5
+        if hqHardOverride or ((hqPowerOverride or hqFactoryOverride or hqStructureOverride) and not constraints.EcoCrash and not constraints.QueueStarved) then
             -- fall through
         else
             state.Reason = constraints.CriticalFactory and (airFactoryDebt and 'air_factory_debt' or 'critical_factory')

@@ -40,6 +40,37 @@ local function GetMainPos(aiBrain, runtime)
     return { sx, 0, sz }
 end
 
+local function IsFirstHQPriority(runtime, aiBrain)
+    if not runtime or not aiBrain then
+        return false
+    end
+    local hasLandHQ = (aiBrain:GetCurrentUnits(categories.FACTORY * categories.LAND * categories.STRUCTURE * (categories.TECH2 + categories.TECH3)) or 0) > 0
+    if hasLandHQ then
+        return false
+    end
+
+    local prod = runtime.ProductionDirector or {}
+    local current = prod.Current or {}
+    local factories = current.Factories or {}
+    local ecoCounts = current.Eco or {}
+    local macro = runtime.MacroController or {}
+    local phase = macro.Phase or prod.MacroObjective or 'none'
+    local factoryDirective = ((runtime.UpgradeDirector or {}).Factory) or {}
+    local readyLand = ((factories.Land or {}).Ready) or 0
+    local mexReady = (((ecoCounts.Mex or {}).Ready) or 0)
+    local powerReady = (((ecoCounts.Power or {}).Ready) or 0)
+    if readyLand < 3 or mexReady < 5 or powerReady < 5 then
+        return false
+    end
+
+    return macro.HQPressureEscape == true
+        or factoryDirective.NeedsFirstLandHQ == true
+        or phase == 'mass_consolidation'
+        or phase == 'first_land_hq'
+        or phase == 'first_t2_engineer'
+        or phase == 'first_t2_power'
+end
+
 local function PickBlueprint(builder, needAA)
     if not builder then
         return false
@@ -280,6 +311,17 @@ function Module.Update(aiBrain, now)
     if (eco.MassStorageRatio or 0) <= 0.01 and (eco.EnergyStorageRatio or 0) <= 0.01 and (eco.MassTrend or 0) < -0.55 then
         state.NextTry = now + 10
         return
+    end
+
+    if IsFirstHQPriority(runtime, aiBrain) then
+        local aaTotal = aiBrain:GetCurrentUnits(T1AAStructureCategory) or 0
+        local pdTotal = aiBrain:GetCurrentUnits(T1PDStructureCategory) or 0
+        local severeLand = raid.UnderLandHarass and (raid.LastLandEnemyCount or 0) >= 4
+        local severeAir = bomberPanic and math.max(raid.LastBomberEnemyCount or 0, raid.LastAirEnemyCount or 0) >= 2
+        if (aaTotal + pdTotal) >= 2 or (not severeLand and not severeAir) then
+            state.NextTry = now + 10
+            return
+        end
     end
 
     local mainPos = GetMainPos(aiBrain, runtime)

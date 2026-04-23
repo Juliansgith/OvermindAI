@@ -291,6 +291,42 @@ local function GetUnfinishedUnitCount(aiBrain, category, aroundPos, radius)
     return math.max(0, existing - complete)
 end
 
+local function IsFirstHQPriorityState(aiBrain, minReadyLand)
+    if not aiBrain then
+        return false
+    end
+
+    local hasLandHQ = GetCompletedUnitCount(aiBrain, categories.FACTORY * categories.LAND * categories.STRUCTURE * (categories.TECH2 + categories.TECH3)) > 0
+    if hasLandHQ then
+        return false
+    end
+
+    local runtime = aiBrain.OvermindRuntime or {}
+    local production = runtime.ProductionDirector or {}
+    local current = production.Current or {}
+    local factories = current.Factories or {}
+    local ecoCounts = current.Eco or {}
+    local macro = runtime.MacroController or {}
+    local macroPhase = macro.Phase or production.MacroObjective or 'none'
+    local factoryDirective = ((runtime.UpgradeDirector or {}).Factory) or {}
+    local readyLand = ((factories.Land or {}).Ready) or GetCompletedUnitCount(aiBrain, categories.FACTORY * categories.LAND * categories.STRUCTURE)
+    local mexReady = (((ecoCounts.Mex or {}).Ready) or GetCompletedUnitCount(aiBrain, categories.MASSEXTRACTION * categories.STRUCTURE))
+    local powerReady = (((ecoCounts.Power or {}).Ready) or GetCompletedUnitCount(aiBrain, categories.ENERGYPRODUCTION * categories.STRUCTURE))
+    local hasFloor = readyLand >= (minReadyLand or 3)
+        and mexReady >= 5
+        and powerReady >= 5
+    if not hasFloor then
+        return false
+    end
+
+    return macro.HQPressureEscape == true
+        or factoryDirective.NeedsFirstLandHQ == true
+        or macroPhase == 'mass_consolidation'
+        or macroPhase == 'first_land_hq'
+        or macroPhase == 'first_t2_engineer'
+        or macroPhase == 'first_t2_power'
+end
+
 local function GetExtractorUpgradePlan(aiBrain)
     local upgradeDirector = GetUpgradeDirector(aiBrain)
     local directedExtractor = upgradeDirector and upgradeDirector.Extractor or false
@@ -1100,6 +1136,7 @@ local function ApproveFactoryBuildRequest(aiBrain, domain)
 
     local capacity = GetAuthoritativeCapacityPlan(aiBrain)
     local hasLandHQ = GetCompletedUnitCount(aiBrain, categories.FACTORY * categories.LAND * categories.STRUCTURE * (categories.TECH2 + categories.TECH3)) > 0
+    local firstHQPriority = IsFirstHQPriorityState(aiBrain, 3)
     local recovery = GetRecovery(aiBrain) or {}
     if capacity and not HasCriticalFactoryTask(aiBrain, domain) then
         local landFactories = GetExistingUnitCount(aiBrain, categories.FACTORY * categories.LAND * categories.STRUCTURE)
@@ -1109,6 +1146,9 @@ local function ApproveFactoryBuildRequest(aiBrain, domain)
             return false
         end
         local totalFactories = landFactories + airFactories + seaFactories
+        if firstHQPriority and totalFactories >= 3 then
+            return false
+        end
         local preHQCap = recovery.ForceFactoryRecovery and 5 or 4
         if not hasLandHQ and totalFactories >= preHQCap then
             return false
@@ -1118,6 +1158,9 @@ local function ApproveFactoryBuildRequest(aiBrain, domain)
     local gate = runtime.FactoryBuildGate or {}
     runtime.FactoryBuildGate = gate
     local totalFactories = GetExistingUnitCount(aiBrain, categories.FACTORY * categories.STRUCTURE)
+    if firstHQPriority and totalFactories >= 3 and not HasCriticalFactoryTask(aiBrain, domain) then
+        return false
+    end
     local strictCap = hasLandHQ and 5 or 4
     if now >= 720 then
         strictCap = hasLandHQ and 7 or 5
@@ -2508,6 +2551,9 @@ function ShouldForceDefenseRecovery(aiBrain)
         return false
     end
     local now = GetGameTimeSeconds()
+    if IsFirstHQPriorityState(aiBrain, 3) and not IsUnderLandHarass(aiBrain, 4) and not IsUnderAirHarass(aiBrain, 4) and not IsBomberPanic(aiBrain) then
+        return false
+    end
     if IsStructureBuildClaimed(aiBrain, 'defense', now) or HasUnfinishedDefenseBuild(aiBrain, 'defense') then
         return false
     end
@@ -3488,6 +3534,21 @@ function ShouldBuildT1StructureRole(aiBrain, role)
         return false
     end
     if (structureKey == 'pd' or structureKey == 'aa') then
+        if IsFirstHQPriorityState(aiBrain, 3) then
+            local landHarass = IsUnderLandHarass(aiBrain, 3)
+            local airHarass = IsUnderAirHarass(aiBrain, 3)
+            if structureKey == 'pd' and not landHarass then
+                return false
+            end
+            if structureKey == 'aa' and not airHarass and not bomberPanic then
+                return false
+            end
+            local existingDefense = GetExistingUnitCount(aiBrain, categories.STRUCTURE * categories.DEFENSE * categories.TECH1)
+            local cap = bomberPanic and 3 or 2
+            if existingDefense >= cap then
+                return false
+            end
+        end
         if IsStructureBuildClaimed(aiBrain, structureKey, now) or HasUnfinishedDefenseBuild(aiBrain, structureKey) or HasUnfinishedDefenseBuild(aiBrain, 'defense') then
             return false
         end
