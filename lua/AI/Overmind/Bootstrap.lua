@@ -3,7 +3,7 @@ local OvermindScheduler = import('/mods/OvermindAI/lua/AI/Overmind/Scheduler.lua
 local OvermindMemory = import('/mods/OvermindAI/lua/AI/Overmind/Memory.lua')
 
 local ActiveBrains = {}
-local BuildFingerprint = 'v205-quiet-reclaim-field-execution'
+local BuildFingerprint = 'v206-reclaim-field-small-props'
 
 local NavUtils = false
 do

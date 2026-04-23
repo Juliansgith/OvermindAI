@@ -318,7 +318,9 @@ local function TryReclaimFieldZone(aiBrain, runtime, eng, targetPos, now)
     local taskStrength = outerTask.CurrentStrength or 0
     local supported = math.max(allySupport, taskSupport, math.floor(taskStrength / 7))
     local outerBacked = taskSupport > 0 or taskStrength >= 8 or planner.OuterRetentionActive == true
-    local reclaimTargets, reclaimMass = GetReclaimFieldTargets(targetPos, planner.ReclaimFirst and 22 or 20, planner.ReclaimFirst and 6 or 10)
+    local minReclaimMass = planner.ReclaimFirst and (quotaForced and 1 or 6) or (quotaForced and 2 or 10)
+    local minFieldMass = planner.ReclaimFirst and (quotaForced and 55 or 80) or (quotaForced and 75 or 120)
+    local reclaimTargets, reclaimMass = GetReclaimFieldTargets(targetPos, planner.ReclaimFirst and 22 or 20, minReclaimMass)
     local supportWeightedThreat = math.max(0, localThreat - (supported * 0.18))
     local threatCap = planner.ReclaimFirst and (outerBacked and 2.35 or 2.0) or (outerBacked and 1.8 or 1.5)
     local routeRiskCap = planner.ReclaimFirst and (outerBacked and 4.0 or 3.5) or (outerBacked and 3.4 or 3.0)
@@ -327,7 +329,7 @@ local function TryReclaimFieldZone(aiBrain, runtime, eng, targetPos, now)
         and supportWeightedThreat <= 0.25
         and routeRisk <= (quotaForced and 2.8 or 2.2)
 
-    if table.getn(reclaimTargets) <= 0 or reclaimMass < (planner.ReclaimFirst and 80 or 120) then
+    if table.getn(reclaimTargets) <= 0 or reclaimMass < minFieldMass then
         return false
     end
     if distMain > (((runtime.EcoPolicy or {}).SafeExpandDistance or 680) + 100) then
