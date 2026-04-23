@@ -327,6 +327,26 @@ local function IsFirstHQPriorityState(aiBrain, minReadyLand)
         or macroPhase == 'first_t2_power'
 end
 
+local function ShouldReserveMexUpgradesForFirstHQ(aiBrain)
+    if not aiBrain then
+        return false
+    end
+
+    local hasLandHQ = GetCompletedUnitCount(aiBrain, categories.FACTORY * categories.LAND * categories.STRUCTURE * (categories.TECH2 + categories.TECH3)) > 0
+    if hasLandHQ then
+        return false
+    end
+
+    local runtime = aiBrain.OvermindRuntime or {}
+    local production = runtime.ProductionDirector or {}
+    local current = production.Current or {}
+    local factories = current.Factories or {}
+    local ecoCounts = current.Eco or {}
+    local readyLand = ((factories.Land or {}).Ready) or GetCompletedUnitCount(aiBrain, categories.FACTORY * categories.LAND * categories.STRUCTURE)
+    local mexReady = (((ecoCounts.Mex or {}).Ready) or GetCompletedUnitCount(aiBrain, categories.MASSEXTRACTION * categories.STRUCTURE))
+    return readyLand >= 2 and mexReady <= 8
+end
+
 local function IsLowTechDefenseCapped(aiBrain, bomberPanic)
     if not aiBrain then
         return false
@@ -1980,30 +2000,7 @@ function ShouldUpgradeExtractors(aiBrain, minMassIncome, minEnergyIncome, minMas
         return false
     end
 
-    local runtime = aiBrain.OvermindRuntime or {}
-    local production = runtime.ProductionDirector or {}
-    local current = production.Current or {}
-    local factories = current.Factories or {}
-    local ecoCounts = current.Eco or {}
-    local macro = runtime.MacroController or {}
-    local macroPhase = macro.Phase or production.MacroObjective or 'none'
-    local factoryDirective = ((runtime.UpgradeDirector or {}).Factory) or {}
-    local readyLand = ((factories.Land or {}).Ready) or 0
-    local mexReady = (((ecoCounts.Mex or {}).Ready) or 0)
-    local hasLandHQ = GetCompletedUnitCount(aiBrain, categories.FACTORY * categories.LAND * categories.STRUCTURE * (categories.TECH2 + categories.TECH3)) > 0
-    local reserveForFirstHQ = not hasLandHQ
-        and readyLand >= 2
-        and mexReady <= 8
-        and (
-            macro.HQPressureEscape == true
-            or factoryDirective.NeedsFirstLandHQ == true
-            or macroPhase == 'starter_mex_claim'
-            or macroPhase == 'mass_consolidation'
-            or macroPhase == 'first_land_hq'
-            or macroPhase == 'first_t2_engineer'
-            or macroPhase == 'first_t2_power'
-        )
-    if reserveForFirstHQ then
+    if ShouldReserveMexUpgradesForFirstHQ(aiBrain) then
         return false
     end
 
@@ -2076,6 +2073,9 @@ function ShouldUpgradeExtractorsAggressive(aiBrain)
     if not IsOvermindBrain(aiBrain) then
         return false
     end
+    if ShouldReserveMexUpgradesForFirstHQ(aiBrain) then
+        return false
+    end
     local upgradeDirector = GetUpgradeDirector(aiBrain)
     local directedExtractor = upgradeDirector and upgradeDirector.Extractor or false
     if directedExtractor and directedExtractor.Managed == true then
@@ -2091,6 +2091,9 @@ end
 
 function ShouldUpgradeLocalExtractors(aiBrain, targetTech, radius)
     if not IsOvermindBrain(aiBrain) then
+        return false
+    end
+    if ShouldReserveMexUpgradesForFirstHQ(aiBrain) then
         return false
     end
     local upgradeDirector = GetUpgradeDirector(aiBrain)
@@ -2113,6 +2116,9 @@ end
 
 function ShouldUpgradeRemoteExtractors(aiBrain, targetTech, minRadius)
     if not IsOvermindBrain(aiBrain) then
+        return false
+    end
+    if ShouldReserveMexUpgradesForFirstHQ(aiBrain) then
         return false
     end
     local upgradeDirector = GetUpgradeDirector(aiBrain)

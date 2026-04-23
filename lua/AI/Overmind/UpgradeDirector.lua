@@ -355,6 +355,15 @@ local function PickMexTarget(aiBrain, runtime, state)
         and readyLand >= 2
         and mexReady <= 8
 
+    if reserveForFirstHQ then
+        state.InFlight = activeMexUpgrades
+        state.LocalInFlight = activeUpgradeScopes.Local or 0
+        state.RemoteInFlight = activeUpgradeScopes.Remote or 0
+        state.Reason = 'first_hq_reserved'
+        state.Cap = 0
+        return
+    end
+
     local allowBudgetThroughFactoryRecovery = constraints.CriticalFactory
         and budgetT2Cap >= 1
         and activeMexUpgrades <= 0
@@ -373,11 +382,6 @@ local function PickMexTarget(aiBrain, runtime, state)
     state.InFlight = activeMexUpgrades
     state.LocalInFlight = activeUpgradeScopes.Local or 0
     state.RemoteInFlight = activeUpgradeScopes.Remote or 0
-    if reserveForFirstHQ and activeMexUpgrades <= 0 then
-        state.Reason = 'first_hq_reserved'
-        state.Cap = 0
-        return
-    end
     if (policyMexConcurrency or 0) <= 0 and activeMexUpgrades <= 0 then
         state.Reason = 'policy_hold'
         state.Cap = 0
