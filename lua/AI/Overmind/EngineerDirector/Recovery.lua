@@ -8,6 +8,7 @@ local FactoryCategory = categories.FACTORY * categories.STRUCTURE
 local StructureCategory = categories.STRUCTURE - categories.FACTORY
 local MexCategory = categories.STRUCTURE * categories.MASSEXTRACTION
 local EnergyCategory = categories.STRUCTURE * categories.ENERGYPRODUCTION
+local Tech2PowerCategory = categories.STRUCTURE * categories.ENERGYPRODUCTION * (categories.TECH2 + categories.TECH3)
 local RadarCategory = categories.STRUCTURE * categories.RADAR
 local AADefenseCategory = categories.STRUCTURE * categories.DEFENSE * categories.ANTIAIR
 local DefenseCategory = categories.STRUCTURE * categories.DEFENSE
@@ -340,12 +341,13 @@ local function ComputeFactoryTaskRequirements(domain, fraction, stallTime, ready
     return Common.Clamp(required, 1, 4)
 end
 
-local function PickPowerBlueprint(builder)
+local function PickPowerBlueprint(builder, targetTech)
     if not builder or builder.Dead then
         return false
     end
 
-    local bps = EntityCategoryGetUnitList(categories.STRUCTURE * categories.ENERGYPRODUCTION * categories.TECH1)
+    local techCategory = (targetTech == 'tech2' or targetTech == 2) and categories.TECH2 or categories.TECH1
+    local bps = EntityCategoryGetUnitList(categories.STRUCTURE * categories.ENERGYPRODUCTION * techCategory)
     if not bps or table.getn(bps) <= 0 then
         return false
     end
@@ -363,6 +365,9 @@ local PowerBuildOffsets = {
     { 18, 0 }, { -18, 0 }, { 0, 18 }, { 0, -18 },
     { 28, 12 }, { -28, 12 }, { 12, -28 }, { -12, -28 },
     { 36, 0 }, { -36, 0 }, { 0, 36 }, { 0, -36 },
+    { 48, 0 }, { -48, 0 }, { 0, 48 }, { 0, -48 },
+    { 54, 24 }, { -54, 24 }, { 24, -54 }, { -24, -54 },
+    { 66, 0 }, { -66, 0 }, { 0, 66 }, { 0, -66 },
 }
 
 local function GetFactoryAnchor(aiBrain, mainPos)
@@ -384,16 +389,26 @@ local function GetFactoryAnchor(aiBrain, mainPos)
     return best
 end
 
-local function FindPowerBuildPos(aiBrain, anchorPos)
+local function FindPowerBuildPos(aiBrain, anchorPos, bp, spacingRadius)
     if not aiBrain or not anchorPos then
         return false
     end
 
+    local radius = spacingRadius or 8
     for _, offset in PowerBuildOffsets do
-        local pos = { (anchorPos[1] or 0) + offset[1], 0, (anchorPos[3] or 0) + offset[2] }
-        local powerNearby = aiBrain:GetNumUnitsAroundPoint(EnergyCategory, pos, 8, 'Ally') or 0
-        local factoryNearby = aiBrain:GetNumUnitsAroundPoint(categories.FACTORY * categories.STRUCTURE, pos, 6, 'Ally') or 0
-        if powerNearby <= 0 and factoryNearby <= 0 and not Threat.HasEnemyCombatNear(aiBrain, pos, 34) then
+        local x = (anchorPos[1] or 0) + offset[1]
+        local z = (anchorPos[3] or 0) + offset[2]
+        local y = 0
+        if GetTerrainHeight then
+            y = GetTerrainHeight(x, z) or 0
+        end
+        local pos = { x, y, z }
+        local structureNearby = aiBrain:GetNumUnitsAroundPoint(categories.STRUCTURE, pos, radius, 'Ally') or 0
+        local buildable = true
+        if bp and aiBrain.CanBuildStructureAt then
+            buildable = aiBrain:CanBuildStructureAt(bp, pos) == true
+        end
+        if buildable and structureNearby <= 0 and not Threat.HasEnemyCombatNear(aiBrain, pos, 34) then
             return pos
         end
     end
@@ -401,8 +416,8 @@ local function FindPowerBuildPos(aiBrain, anchorPos)
     return false
 end
 
-local function CountNearbyUnfinishedPower(aiBrain, mainPos, radius)
-    local units = aiBrain:GetListOfUnits(EnergyCategory, false, true) or {}
+local function CountNearbyUnfinishedPower(aiBrain, mainPos, radius, category)
+    local units = aiBrain:GetListOfUnits(category or EnergyCategory, false, true) or {}
     local count = 0
     for _, unit in units do
         if unit and not unit.Dead then
@@ -552,7 +567,7 @@ local function TryOpenPowerRecoveryBuild(aiBrain, runtime, eng, mainPos, now)
 
     local bp = PickPowerBlueprint(eng)
     local anchor = bp and GetFactoryAnchor(aiBrain, mainPos) or false
-    local buildPos = bp and anchor and FindPowerBuildPos(aiBrain, anchor) or false
+    local buildPos = bp and anchor and FindPowerBuildPos(aiBrain, anchor, bp, 8) or false
     if not bp or not buildPos then
         return false
     end
@@ -560,6 +575,47 @@ local function TryOpenPowerRecoveryBuild(aiBrain, runtime, eng, mainPos, now)
     IssueBuildMobile({ eng }, buildPos, bp, {})
     runtime.LastPowerRecoveryIssueTime = now
     runtime.LastPowerRecoveryPos = buildPos
+    return true
+end
+
+local function TryOpenFirstT2PowerBuild(aiBrain, runtime, eng, mainPos, now)
+    if not eng or eng.Dead or not mainPos or not IssueBuildMobile then
+        return false
+    end
+
+    local macro = runtime and runtime.MacroController or {}
+    local phase = macro.Phase or (((runtime and runtime.ProductionDirector) or {}).MacroObjective) or 'none'
+    if phase ~= 'first_t2_power' and macro.NeedFirstT2Power ~= true then
+        return false
+    end
+    if (aiBrain:GetCurrentUnits(Tech2PowerCategory) or 0) > 0 then
+        return false
+    end
+    if CountNearbyUnfinishedPower(aiBrain, mainPos, 320, Tech2PowerCategory) >= 1 then
+        return false
+    end
+    if now < ((runtime.LastFirstT2PowerIssueTime or -999) + 10) then
+        return false
+    end
+
+    local bp = PickPowerBlueprint(eng, 'tech2')
+    local anchor = bp and GetFactoryAnchor(aiBrain, mainPos) or false
+    local buildPos = bp and anchor and FindPowerBuildPos(aiBrain, anchor, bp, 14) or false
+    if not bp or not buildPos then
+        return false
+    end
+
+    if IssueClearCommands then
+        IssueClearCommands({ eng })
+    end
+    IssueBuildMobile({ eng }, buildPos, bp, {})
+    runtime.LastFirstT2PowerIssueTime = now
+    runtime.LastFirstT2PowerPos = buildPos
+    LOG(string.format('*OVERMIND ENGDIR T2POWER A%d t=%.1f issued=1 pos=%.1f,%.1f',
+        aiBrain:GetArmyIndex(),
+        now,
+        buildPos[1] or 0,
+        buildPos[3] or 0))
     return true
 end
 
@@ -910,6 +966,7 @@ M.GetPriorityPowerRecoveryTarget = GetPriorityPowerRecoveryTarget
 M.GetPriorityMexRecoveryTarget = GetPriorityMexRecoveryTarget
 M.ShouldForceFinishEcoStructure = ShouldForceFinishEcoStructure
 M.TryOpenPowerRecoveryBuild = TryOpenPowerRecoveryBuild
+M.TryOpenFirstT2PowerBuild = TryOpenFirstT2PowerBuild
 M.ShouldScaleBaseEco = ShouldScaleBaseEco
 M.CountUnfinishedMexes = CountUnfinishedMexes
 M.ShouldPersistentSurplusSpend = ShouldPersistentSurplusSpend

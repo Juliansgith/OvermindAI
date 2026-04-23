@@ -706,7 +706,13 @@ local function ProcessEngineer(aiBrain, runtime, eng, now, ctx)
             acted = true
         elseif (ctx.macroPhase == 'first_land_hq' or ctx.macroPhase == 'first_t2_engineer' or ctx.macroPhase == 'first_t2_power') then
             local assistTarget, isUpgradeTarget = GetPriorityUpgradeAssistTarget(aiBrain, runtime, ctx.mainPos)
-            if assistTarget
+            if ctx.macroPhase == 'first_t2_power'
+                and localThreat < 2.2
+                and dist <= 360
+                and Recovery.TryOpenFirstT2PowerBuild(aiBrain, runtime, eng, ctx.mainPos, now) then
+                ctx.powerRecoveryCount = ctx.powerRecoveryCount + 1
+                acted = true
+            elseif assistTarget
                 and localThreat < 2.2
                 and dist <= 360
                 and TryAssignAssistOrRepair(aiBrain, runtime, eng, assistTarget, isUpgradeTarget, now) then
