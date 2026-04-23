@@ -1743,7 +1743,7 @@ local function TryOpenFirstT2PowerBuild(aiBrain, runtime, eng, mainPos, now)
         LogFirstT2PowerFailure(aiBrain, runtime, now, 'unfinished_t2_power')
         return false
     end
-    if now < ((runtime.LastFirstT2PowerIssueTime or -999) + 10) then
+    if now < ((runtime.LastFirstT2PowerIssueTime or -999) + 38) then
         LogFirstT2PowerFailure(aiBrain, runtime, now, 'cooldown')
         return false
     end

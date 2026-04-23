@@ -385,6 +385,20 @@ local function PickMexTarget(aiBrain, runtime, state)
         state.Cap = 0
         return
     end
+    local postT2LocalConsolidation = macroObjective == 'surplus_scale'
+        and techPowerReady >= 1
+        and readyLand >= 3
+        and totalLand >= 3
+        and powerReady >= 8
+        and mexReady >= 4
+        and activeMexUpgrades <= 0
+        and not constraints.EcoCrash
+        and not constraints.QueueStarved
+        and not constraints.LandPanic
+        and not constraints.AirPanic
+        and (eco.EnergyStorageRatio or 0) >= 0.02
+        and (eco.EnergyTrend or 0) >= -18
+        and (eco.MassTrend or 0) >= -0.32
 
     local allowBudgetThroughFactoryRecovery = constraints.CriticalFactory
         and budgetT2Cap >= 1
@@ -404,7 +418,7 @@ local function PickMexTarget(aiBrain, runtime, state)
     state.InFlight = activeMexUpgrades
     state.LocalInFlight = activeUpgradeScopes.Local or 0
     state.RemoteInFlight = activeUpgradeScopes.Remote or 0
-    if (policyMexConcurrency or 0) <= 0 and activeMexUpgrades <= 0 then
+    if (policyMexConcurrency or 0) <= 0 and activeMexUpgrades <= 0 and not postT2LocalConsolidation then
         state.Reason = 'policy_hold'
         state.Cap = 0
         return
@@ -428,6 +442,9 @@ local function PickMexTarget(aiBrain, runtime, state)
         allowLocalT2 = true
     end
     if surplusSpendWindow and readyLand >= 4 and powerReady >= 4 and mexReady >= 5 then
+        allowLocalT2 = true
+    end
+    if postT2LocalConsolidation then
         allowLocalT2 = true
     end
 
@@ -480,6 +497,9 @@ local function PickMexTarget(aiBrain, runtime, state)
     elseif macroObjective == 'first_land_hq' or macroObjective == 'first_t2_engineer' or macroObjective == 'first_t2_power' then
         dynamicT2Cap = math.min(dynamicT2Cap, 1)
     end
+    if postT2LocalConsolidation then
+        dynamicT2Cap = math.max(dynamicT2Cap, 1)
+    end
     if localMexOnly then
         dynamicT2Cap = math.min(dynamicT2Cap, localMexConcurrentCap)
     end
@@ -512,7 +532,7 @@ local function PickMexTarget(aiBrain, runtime, state)
         return
     end
 
-    if focusOnT1Spam and not strongSurplusWindow and not frontUpgradeReopen and (policyMexConcurrency or 0) <= 0 then
+    if focusOnT1Spam and not strongSurplusWindow and not frontUpgradeReopen and (policyMexConcurrency or 0) <= 0 and not postT2LocalConsolidation then
         state.Reason = 't1_spam'
         state.Cap = 0
         return
@@ -539,15 +559,15 @@ local function PickMexTarget(aiBrain, runtime, state)
                 local isLocal = distMain <= localRadius
                 local scopeClass = ClassifyMexScope(distMain, distAnchor)
                 local localScopeEligible = scopeClass == 'core' or scopeClass == 'inner_local' or ((not localMexOnly) and scopeClass == 'outer_local')
-                local localRiskCap = (budgetT2Cap >= 1) and 3.8 or 3.2
-                local localThreatCap = (budgetT2Cap >= 1) and 2.2 or 1.8
+                local localRiskCap = (budgetT2Cap >= 1 or postT2LocalConsolidation) and 3.8 or 3.2
+                local localThreatCap = (budgetT2Cap >= 1 or postT2LocalConsolidation) and 2.2 or 1.8
                 if tech == 1 and allowLocalT2 and isLocal and localScopeEligible and risk <= localRiskCap and threat <= localThreatCap then
                     local localScore = score
                         + 90
                         + (tempoMode and 55 or 20)
                         + (scoutingDebt and 28 or 0)
                         + (surplusSpendWindow and 26 or 0)
-                        + (budgetT2Cap >= 1 and 56 or 0)
+                        + ((budgetT2Cap >= 1 or postT2LocalConsolidation) and 56 or 0)
                         + math.min(30, math.max(0, mexBudget - 7.5) * 3.0)
                         + (distAnchor <= 85 and 36 or 0)
                         + (distAnchor <= 135 and 18 or 0)
@@ -604,6 +624,7 @@ local function PickMexTarget(aiBrain, runtime, state)
         state.Scope = bestScope
         state.Enabled = true
         state.Reason = macroObjective == 'mass_consolidation' and bestTech == 'tech2' and 'objective_mass_consolidation'
+            or postT2LocalConsolidation and bestTech == 'tech2' and 'post_t2_local_consolidation'
             or localMexOnly and bestTech == 'tech2' and 'local_tempo_consolidation'
             or budgetT2Cap >= 1 and bestTech == 'tech2' and 'budget_consolidation'
             or tempoMode and bestTech == 'tech2' and 'tempo_consolidation'

@@ -395,6 +395,7 @@ local function IsLowTechDefenseCapped(aiBrain, bomberPanic)
     local defenseCount = GetExistingUnitCount(aiBrain, categories.STRUCTURE * categories.DEFENSE * categories.TECH1)
     local cap = bomberPanic and 4 or 3
     if macroPhase == 'first_t2_power' and t2PowerReady <= 0 then
+        cap = bomberPanic and 2 or 1
         return defenseCount >= cap
     end
     local techTransition = macroPhase == 'first_t2_power'
@@ -2669,6 +2670,12 @@ function ShouldAllowThreatBaseDefense(aiBrain)
     if not IsOvermindBrain(aiBrain) then
         return false
     end
+    if IsFirstT2PowerPriorityState(aiBrain)
+        and not IsUnderLandHarass(aiBrain, 4)
+        and not IsUnderAirHarass(aiBrain, 2)
+        and not IsBomberPanic(aiBrain) then
+        return false
+    end
     return not IsLowTechDefenseCapped(aiBrain, IsBomberPanic(aiBrain))
 end
 
@@ -3641,6 +3648,21 @@ function ShouldBuildT1StructureRole(aiBrain, role)
     if (structureKey == 'pd' or structureKey == 'aa') then
         if IsLowTechDefenseCapped(aiBrain, bomberPanic) then
             return false
+        end
+        if IsFirstT2PowerPriorityState(aiBrain) then
+            local landHarass = IsUnderLandHarass(aiBrain, 4)
+            local airHarass = IsUnderAirHarass(aiBrain, 2)
+            if structureKey == 'pd' and not landHarass then
+                return false
+            end
+            if structureKey == 'aa' and not airHarass and not bomberPanic then
+                return false
+            end
+            local existingDefense = GetExistingUnitCount(aiBrain, categories.STRUCTURE * categories.DEFENSE * categories.TECH1)
+            local cap = bomberPanic and 2 or 1
+            if existingDefense >= cap then
+                return false
+            end
         end
         if IsFirstHQPriorityState(aiBrain, 3) then
             local landHarass = IsUnderLandHarass(aiBrain, 3)

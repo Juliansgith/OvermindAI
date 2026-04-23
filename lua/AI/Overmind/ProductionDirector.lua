@@ -2569,6 +2569,8 @@ local function DecideStructurePlan(runtime, current, constraints, confidence, mo
     local severeBomberRaid = constraints.SevereBomberRaid == true
     local bomberSeverity = constraints.BomberRaidSeverity or 0
     local mexExpansionPressure = mexReady < math.max(8, (constraints.StarterMexFloor or 5) + 3)
+    local macroPhase = ((runtime.MacroController or {}).Phase) or 'none'
+    local firstT2PowerPending = macroPhase == 'first_t2_power'
     now = now or 0
 
     local radarDesired = 0
@@ -2665,6 +2667,12 @@ local function DecideStructurePlan(runtime, current, constraints, confidence, mo
         and not raid.UnderAirHarass then
         baseAADesired = math.min(baseAADesired, 1)
         pdDesired = math.min(pdDesired, 1)
+    end
+    if firstT2PowerPending then
+        radarDesired = math.min(radarDesired, 1)
+        baseAADesired = math.min(baseAADesired, (constraints.AirPanic or constraints.BomberPanic or raid.UnderAirHarass) and 1 or 0)
+        pdDesired = math.min(pdDesired, (constraints.LandPanic or raid.UnderLandHarass) and 1 or 0)
+        exposedMexAADesired = math.min(exposedMexAADesired, 1)
     end
 
     return {
