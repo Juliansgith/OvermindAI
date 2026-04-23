@@ -210,6 +210,39 @@ local function FindThreatenedMex(aiBrain, runtime, mainPos)
     return bestPos, bestNeedAA, bestScore
 end
 
+local function FindExposedMexForPreemptiveAA(aiBrain, mainPos)
+    local mexes = aiBrain:GetListOfUnits(categories.STRUCTURE * categories.MASSEXTRACTION, false, true) or {}
+    local bestPos = false
+    local bestScore = -999999
+
+    for _, mex in mexes do
+        if mex and not mex.Dead and mex.GetPosition then
+            local pos = mex:GetPosition()
+            if pos then
+                local aaCount = aiBrain:GetNumUnitsAroundPoint(T1AAStructureCategory, pos, 18, 'Ally') or 0
+                if aaCount <= 0 then
+                    local distMain = mainPos and Distance2D(mainPos, pos) or 999
+                    local enemyAir = aiBrain:GetNumUnitsAroundPoint(categories.MOBILE * categories.AIR - categories.SCOUT - categories.TRANSPORTATION, pos, 38, 'Enemy') or 0
+                    local enemyLand = aiBrain:GetNumUnitsAroundPoint(categories.MOBILE * categories.LAND - categories.ENGINEER - categories.SCOUT, pos, 28, 'Enemy') or 0
+                    if distMain >= 80 and distMain <= 420 and enemyLand <= 4 then
+                        local tech = EntityCategoryContains(categories.TECH3, mex) and 3 or (EntityCategoryContains(categories.TECH2, mex) and 2 or 1)
+                        local score = (tech * 150) + math.min(180, distMain) - (enemyLand * 35) + (enemyAir * 20)
+                        if mex:IsUnitState('Upgrading') then
+                            score = score + 120
+                        end
+                        if score > bestScore then
+                            bestScore = score
+                            bestPos = pos
+                        end
+                    end
+                end
+            end
+        end
+    end
+
+    return bestPos, bestScore
+end
+
 function Module.Update(aiBrain, now)
     local runtime = aiBrain.OvermindRuntime
     if not runtime then
@@ -219,6 +252,7 @@ function Module.Update(aiBrain, now)
     local state = runtime.MexDefense or {
         NextTry = -999,
         LastLog = -999,
+        LastPreemptiveAATry = -999,
     }
     runtime.MexDefense = state
 
@@ -300,16 +334,33 @@ function Module.Update(aiBrain, now)
         end
     end
 
+    if not buildPosBase
+        and mainPos
+        and powerReady > 0
+        and now >= 300
+        and (bomberWatch or bomberPanic or exposedMexAirRaid or desiredExposedMexAA >= 2)
+        and now >= ((state.LastPreemptiveAATry or -999) + 22) then
+        local preemptivePos = false
+        if exposedMexAirRaid or bomberPanic or (eco.MassTrend or 0) >= -0.18 then
+            preemptivePos = FindExposedMexForPreemptiveAA(aiBrain, mainPos)
+        end
+        if preemptivePos then
+            chooseAA = true
+            buildPosBase = preemptivePos
+            state.LastPreemptiveAATry = now
+        end
+    end
+
     if not buildPosBase and mainPos then
         local baseAA = aiBrain:GetNumUnitsAroundPoint(T1AAStructureCategory, mainPos, 46, 'Ally') or 0
         local basePD = aiBrain:GetNumUnitsAroundPoint(T1PDStructureCategory, mainPos, 46, 'Ally') or 0
-        local desiredAA = math.max(0, math.min(2, structurePlan.BaseAA or 0))
+        local desiredAA = math.max(0, math.min(3, structurePlan.BaseAA or 0))
         local desiredPD = math.max(0, math.min(2, structurePlan.PD or 0))
         if bomberWatch and powerReady > 0 then
             desiredAA = math.max(desiredAA, 1)
         end
         if bomberPanic or exposedMexAirRaid then
-            desiredAA = math.max(desiredAA, 2)
+            desiredAA = math.max(desiredAA, 2 + (((raid.BomberRaidSeverity or 0) >= 4) and 1 or 0))
         end
         if desiredAA <= 0 and desiredPD <= 0 then
             state.NextTry = now + 8

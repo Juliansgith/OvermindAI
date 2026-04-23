@@ -17,9 +17,66 @@ local DefenseCategory = categories.STRUCTURE * categories.DEFENSE
 local BuilderCategory = categories.ENGINEER * categories.MOBILE + categories.COMMAND
 local LandCombatCategory = categories.MOBILE * categories.LAND - categories.ENGINEER - categories.SCOUT - categories.COMMAND
 
+local function FallbackGetMainPos(aiBrain, runtime)
+    if aiBrain and aiBrain.BuilderManagers and aiBrain.BuilderManagers.MAIN and aiBrain.BuilderManagers.MAIN.Position then
+        return aiBrain.BuilderManagers.MAIN.Position
+    end
+    if runtime and runtime.ZoneModel and runtime.ZoneModel.OwnMainPos then
+        return runtime.ZoneModel.OwnMainPos
+    end
+    local sx, sz = aiBrain:GetArmyStartPos()
+    return { sx, 0, sz }
+end
+
+local function FallbackGetEntityId(unit)
+    if not unit or unit.Dead then
+        return false
+    end
+    if unit.GetEntityId then
+        local ok, id = pcall(function()
+            return unit:GetEntityId()
+        end)
+        if ok and id then
+            return tostring(id)
+        end
+    end
+    return tostring(unit)
+end
+
+local function FallbackGetFraction(unit)
+    if not unit or unit.Dead or not unit.GetFractionComplete then
+        return 1
+    end
+    local ok, fraction = pcall(function()
+        return unit:GetFractionComplete()
+    end)
+    if ok and type(fraction) == 'number' then
+        return fraction
+    end
+    return 1
+end
+
 local function ResolveMethod(moduleTable, methodName, moduleName)
-    local fn = moduleTable and moduleTable[methodName]
+    local fn = false
+    if type(moduleTable) == 'table' then
+        fn = rawget(moduleTable, methodName)
+        if type(fn) ~= 'function' then
+            local ok, resolved = pcall(function()
+                return moduleTable[methodName]
+            end)
+            if ok and type(resolved) == 'function' then
+                fn = resolved
+            end
+        end
+    end
     if type(fn) ~= 'function' then
+        if moduleName == 'Common' and methodName == 'GetMainPos' then
+            return FallbackGetMainPos
+        elseif moduleName == 'Common' and methodName == 'GetEntityId' then
+            return FallbackGetEntityId
+        elseif moduleName == 'Common' and methodName == 'GetFraction' then
+            return FallbackGetFraction
+        end
         error(string.format('EngineerDirectorModular missing %s[%s]', tostring(moduleName), tostring(methodName)))
     end
     return fn
@@ -34,23 +91,49 @@ function Update(aiBrain, now)
     local GetMainPos = ResolveMethod(Common, 'GetMainPos', 'Common')
     local GetEntityId = ResolveMethod(Common, 'GetEntityId', 'Common')
     local GetFraction = ResolveMethod(Common, 'GetFraction', 'Common')
-    local CleanupExpansionReservations = ResolveMethod(Expansion, 'CleanupExpansionReservations', 'Expansion')
-    local NeedsCriticalRadar = ResolveMethod(Policy, 'NeedsCriticalRadar', 'Policy')
-    local GetRadarReservedBuilderIds = ResolveMethod(Policy, 'GetRadarReservedBuilderIds', 'Policy')
-    local FindBestUnfinishedFactory = ResolveMethod(Recovery, 'FindBestUnfinishedFactory', 'Recovery')
-    local ComputeFactoryTaskRequirements = ResolveMethod(Recovery, 'ComputeFactoryTaskRequirements', 'Recovery')
-    local ResetFactoryTask = ResolveMethod(Recovery, 'ResetFactoryTask', 'Recovery')
-    local ShouldForceFinishEcoStructure = ResolveMethod(Recovery, 'ShouldForceFinishEcoStructure', 'Recovery')
-    local FindTrackedUnfinishedStructure = ResolveMethod(Recovery, 'FindTrackedUnfinishedStructure', 'Recovery')
-    local FindBestUnfinishedStructure = ResolveMethod(Recovery, 'FindBestUnfinishedStructure', 'Recovery')
-    local ShouldKeepTrackedStructureTask = ResolveMethod(Recovery, 'ShouldKeepTrackedStructureTask', 'Recovery')
-    local ComputeStructureTaskRequirements = ResolveMethod(Recovery, 'ComputeStructureTaskRequirements', 'Recovery')
-    local ResetStructureTask = ResolveMethod(Recovery, 'ResetStructureTask', 'Recovery')
-    local AssignBuildersToUnfinishedFactory = ResolveMethod(Assignments, 'AssignBuildersToUnfinishedFactory', 'Assignments')
-    local AssignBuildersToUnfinishedStructure = ResolveMethod(Assignments, 'AssignBuildersToUnfinishedStructure', 'Assignments')
-    local ProcessEngineer = ResolveMethod(Assignments, 'ProcessEngineer', 'Assignments')
-    local DescribeStructureTaskTarget = ResolveMethod(Assignments, 'DescribeStructureTaskTarget', 'Assignments')
-    local DispatchExpansionEngineer = ResolveMethod(Expansion, 'DispatchExpansionEngineer', 'Expansion')
+    local CleanupExpansionReservations = (type(Expansion) == 'table' and Expansion.CleanupExpansionReservations) or function() end
+    local NeedsCriticalRadar = (type(Policy) == 'table' and Policy.NeedsCriticalRadar) or function() return false end
+    local GetRadarReservedBuilderIds = (type(Policy) == 'table' and Policy.GetRadarReservedBuilderIds) or function() return {} end
+    local FindBestUnfinishedFactory = (type(Recovery) == 'table' and Recovery.FindBestUnfinishedFactory) or function() return false, false, 1, 'none', 0 end
+    local ComputeFactoryTaskRequirements = (type(Recovery) == 'table' and Recovery.ComputeFactoryTaskRequirements) or function() return 1 end
+    local ResetFactoryTask = (type(Recovery) == 'table' and Recovery.ResetFactoryTask) or function(task)
+        if task then
+            task.Active = false
+            task.TargetId = false
+            task.TargetPos = false
+            task.TargetFraction = 1
+            task.LastProgressTime = -999
+            task.StallTime = 0
+            task.RequiredBuilders = 0
+            task.AssignedBuilders = 0
+            task.BuilderIds = {}
+            task.CandidateDebug = { Total = 0, Safe = 0, Reachable = 0, Interruptible = 0 }
+        end
+    end
+    local ShouldForceFinishEcoStructure = (type(Recovery) == 'table' and Recovery.ShouldForceFinishEcoStructure) or function() return false, false, false end
+    local FindTrackedUnfinishedStructure = (type(Recovery) == 'table' and Recovery.FindTrackedUnfinishedStructure) or function() return false, false, 1, 'none', 0 end
+    local FindBestUnfinishedStructure = (type(Recovery) == 'table' and Recovery.FindBestUnfinishedStructure) or function() return false, false, 1, 'none', 0 end
+    local ShouldKeepTrackedStructureTask = (type(Recovery) == 'table' and Recovery.ShouldKeepTrackedStructureTask) or function() return false end
+    local ComputeStructureTaskRequirements = (type(Recovery) == 'table' and Recovery.ComputeStructureTaskRequirements) or function() return 1 end
+    local ResetStructureTask = (type(Recovery) == 'table' and Recovery.ResetStructureTask) or function(task)
+        if task then
+            task.Active = false
+            task.TargetId = false
+            task.TargetPos = false
+            task.TargetFraction = 1
+            task.LastProgressTime = -999
+            task.StallTime = 0
+            task.RequiredBuilders = 0
+            task.AssignedBuilders = 0
+            task.BuilderIds = {}
+            task.CandidateDebug = { Total = 0, Safe = 0, Reachable = 0, Interruptible = 0 }
+        end
+    end
+    local AssignBuildersToUnfinishedFactory = (type(Assignments) == 'table' and Assignments.AssignBuildersToUnfinishedFactory) or function() return 0, {}, false, { Total = 0, Safe = 0, Reachable = 0, Interruptible = 0 } end
+    local AssignBuildersToUnfinishedStructure = (type(Assignments) == 'table' and Assignments.AssignBuildersToUnfinishedStructure) or function() return 0, {}, false, { Total = 0, Safe = 0, Reachable = 0, Interruptible = 0 } end
+    local ProcessEngineer = (type(Assignments) == 'table' and Assignments.ProcessEngineer) or function() end
+    local DescribeStructureTaskTarget = (type(Assignments) == 'table' and Assignments.DescribeStructureTaskTarget) or function() return 'none' end
+    local DispatchExpansionEngineer = (type(Expansion) == 'table' and Expansion.DispatchExpansionEngineer) or function() return 0 end
 
     if now - (runtime.LastEngineerDirectorTime or -999) < 3 then
         return
@@ -84,6 +167,31 @@ function Update(aiBrain, now)
     local radarCritical = NeedsCriticalRadar(runtime)
     local raid = runtime.RaidDefense or {}
     local constraints = ((runtime.ProductionDirector or {}).ConstraintState or {})
+    local current = ((runtime.ProductionDirector or {}).Current or {})
+    local mexReady = (((current.Eco or {}).Mex or {}).Ready) or 0
+    engState.PeakMexReady = math.max(engState.PeakMexReady or 0, mexReady)
+    local mexLossCount = math.max(0, (engState.PeakMexReady or mexReady) - mexReady)
+    local mexRebuildUrgent = mexLossCount >= 1
+        or (
+            ((raid.LastThreatLabel == 'mex' or raid.LastThreatLabel == 'asset')
+                and (raid.UnderLandHarass or raid.UnderAirHarass))
+            and mexReady <= ((constraints.StarterMexFloor or 5) + 2)
+        )
+    local mexExpansionUrgent = now < 1500
+        and mexReady < math.max(12, (constraints.StarterMexFloor or 5) + 5)
+        and not severeFactoryStarve
+    if mexRebuildUrgent then
+        safeExpandDistance = math.max(safeExpandDistance, 920)
+    elseif mexExpansionUrgent then
+        safeExpandDistance = math.max(safeExpandDistance, 860)
+    end
+    engState.MexEmergencyRebuild = mexRebuildUrgent and true or false
+    engState.MexEmergencyActive = (mexRebuildUrgent or mexExpansionUrgent) and true or false
+    if mexRebuildUrgent then
+        recovery.ForceDefenseRecovery = true
+        recovery.ForceFactoryLand = true
+        recovery.ForceBaseEngineerRecovery = true
+    end
     local macro = runtime.MacroController or {}
     local macroPhase = macro.Phase or (((runtime.ProductionDirector or {}).MacroObjective) or 'land_factory_floor')
     local hqPressureEscape = macro.HQPressureEscape == true
@@ -382,6 +490,7 @@ function Update(aiBrain, now)
         threatenedCount = 0,
         transitionLock = transitionLock,
         fieldTaskQuota = fieldTaskQuota,
+        mexRebuildUrgent = mexRebuildUrgent,
     }
     local factoryTaskCovered = (not factoryTask.Active)
         or (

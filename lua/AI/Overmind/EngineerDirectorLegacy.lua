@@ -118,6 +118,45 @@ local function RecallEngineer(runtime, eng, mainPos, now, reason)
     return true
 end
 
+local function MarkExpansionCommit(runtime, engineerId, now, duration)
+    if not runtime or not engineerId then
+        return
+    end
+    runtime.EngineerExpansionCommit = runtime.EngineerExpansionCommit or {}
+    runtime.EngineerExpansionCommit[engineerId] = now + math.max(18, duration or 50)
+end
+
+local function IsExpansionCommitActive(runtime, engineerId, now)
+    if not runtime or not engineerId then
+        return false
+    end
+    local commits = runtime.EngineerExpansionCommit
+    if not commits then
+        return false
+    end
+    local expiresAt = commits[engineerId]
+    if not expiresAt then
+        return false
+    end
+    if now > expiresAt then
+        commits[engineerId] = nil
+        return false
+    end
+    return true
+end
+
+local function CleanupExpansionCommits(runtime, now)
+    local commits = runtime and runtime.EngineerExpansionCommit or false
+    if not commits then
+        return
+    end
+    for engineerId, expiresAt in commits do
+        if (not expiresAt) or now > expiresAt then
+            commits[engineerId] = nil
+        end
+    end
+end
+
 local function TryReclaimEnemyMex(aiBrain, runtime, eng, now)
     if not eng or eng.Dead then
         return false
@@ -588,10 +627,29 @@ local function GetRadarReservedBuilderIds(runtime, now)
     return reserved
 end
 
+local function GetExpansionTargetJitter(runtime, pos)
+    local randomization = runtime and runtime.Randomization or false
+    if not randomization or not pos then
+        return 0
+    end
+
+    local seed = randomization.Seed or 0
+    local x = math.floor((pos[1] or 0) * 10)
+    local z = math.floor((pos[3] or 0) * 10)
+    local hash = math.mod((seed + (x * 73856093) + (z * 19349663)), 2147483647)
+    return ((math.mod(hash, 17)) - 8) * 0.55
+end
+
 local function FindExpansionTarget(aiBrain, runtime, mainPos, enemyPos, maxDistance, threatCap, now, engineerPos)
     now = now or 0
     local sourcePos = engineerPos or mainPos
     local engineerId = engineerPos and engineerPos.EngineerId or false
+    local raid = runtime and runtime.RaidDefense or {}
+    local engState = runtime and runtime.EngineerState or {}
+    local mexPeakReady = (engState and engState.PeakMexReady) or 0
+    local mexReady = (((((runtime or {}).ProductionDirector or {}).Current or {}).Eco or {}).Mex or {}).Ready or 0
+    local mexRebuildUrgent = mexPeakReady > mexReady
+    local zonePreferredPos = false
     if runtime and runtime.ZoneGraph and runtime.ZoneGraph.BestExpansionNodeKey then
         local node = runtime.ZoneGraph.ByKey and runtime.ZoneGraph.ByKey[runtime.ZoneGraph.BestExpansionNodeKey]
         if node and node.Pos
@@ -602,7 +660,10 @@ local function FindExpansionTarget(aiBrain, runtime, mainPos, enemyPos, maxDista
             and (node.RouteRisk or 0) <= 8
             and not HasFriendlyMexAtPos(aiBrain, node.Pos, 8)
             and not IsReservedExpansionTarget(runtime, now, node.Pos, engineerId) then
-            return node.Pos
+            if mexRebuildUrgent then
+                return node.Pos
+            end
+            zonePreferredPos = node.Pos
         end
     end
 
@@ -630,6 +691,24 @@ local function FindExpansionTarget(aiBrain, runtime, mainPos, enemyPos, maxDista
             end
             score = score - (threat * 28)
             score = score + GetContestExpansionBias(runtime, pos, mainPos, enemyPos)
+            score = score + GetExpansionTargetJitter(runtime, pos)
+            if zonePreferredPos and Distance2D(pos, zonePreferredPos) <= 8 then
+                score = score + 26
+            end
+            if raid and raid.LastThreatMexPos then
+                local distThreatMex = Distance2D(pos, raid.LastThreatMexPos)
+                if distThreatMex <= 38 then
+                    score = score + 95
+                elseif distThreatMex <= 72 then
+                    score = score + 56
+                elseif distThreatMex <= 120 then
+                    score = score + 22
+                end
+            end
+            if mexRebuildUrgent then
+                score = score + math.max(0, 40 - (distMain * 0.12))
+                score = score - (distSource * 0.35)
+            end
             if enemyPos then
                 local distEnemy = Distance2D(pos, enemyPos)
                 score = score + math.min(45, distEnemy * 0.12)
@@ -675,6 +754,7 @@ local function FindFollowupExpansionTarget(aiBrain, runtime, mainPos, enemyPos, 
                     local distEnemy = Distance2D(pos, enemyPos)
                     score = score + math.min(30, distEnemy * 0.08)
                 end
+                score = score + (GetExpansionTargetJitter(runtime, pos) * 0.7)
                 if score > bestScore then
                     bestScore = score
                     bestPos = pos
@@ -692,6 +772,8 @@ local function DispatchExpansionEngineer(aiBrain, runtime, now, engineers, mainP
     local policy = runtime and runtime.EcoPolicy or {}
     local macro = runtime and runtime.MacroController or {}
     local raid = runtime and runtime.RaidDefense or {}
+    local engState = runtime and runtime.EngineerState or {}
+    local mexEmergency = engState and engState.MexEmergencyActive == true
     local bootstrap = constraints and constraints.EconBootstrap == true
     local starterPhase = constraints and constraints.StarterPhase == true
     local contestDispatch = policy.ForwardContestBias == true
@@ -709,17 +791,21 @@ local function DispatchExpansionEngineer(aiBrain, runtime, now, engineers, mainP
     if ((raid.BomberPanicUntil or -999) > now) and table.getn(engineers or {}) <= math.max(4, ((constraints and constraints.StarterEngineerFloor) or 6) - 1) then
         return 0
     end
-    if now < (runtime.LastExpansionDispatchTime or -999) + (bootstrap and 1.2 or 2.2) then
+    if now < (runtime.LastExpansionDispatchTime or -999) + (bootstrap and 1.2 or (mexEmergency and 1.4 or 2.2)) then
         return 0
     end
 
     CleanupExpansionReservations(runtime, now)
     local dispatched = 0
     local dispatchLimit = bootstrap and 2 or (contestDispatch and 2 or 1)
+    if mexEmergency then
+        dispatchLimit = math.max(dispatchLimit, 3)
+    end
+    local dispatchRadius = mexEmergency and 340 or 220
     for _, eng in engineers do
         if eng and not eng.Dead and not IsConstructing(eng) and IsIdle(eng) then
             local pos = eng:GetPosition()
-            if pos and Distance2D(pos, mainPos) <= 220 then
+            if pos and Distance2D(pos, mainPos) <= dispatchRadius then
                 local sourcePos = { pos[1], pos[2] or 0, pos[3], EngineerId = GetEntityId(eng) }
                 local target = FindExpansionTarget(aiBrain, runtime, mainPos, enemyPos, safeExpandDistance, threatCap, now, sourcePos)
                 if not target then
@@ -730,30 +816,37 @@ local function DispatchExpansionEngineer(aiBrain, runtime, now, engineers, mainP
                     break
                 end
                 local bp = PickMexBlueprint(eng)
-                if bp and IssueBuildMobile then
-                    local engineerId = GetEntityId(eng)
-                    ReserveExpansionTarget(runtime, now, target, engineerId)
-                    IssueBuildMobile({ eng }, target, bp, {})
-                    local landReady = ((((runtime.ProductionDirector or {}).Current or {}).Factories or {}).Land or {}).Ready or 0
-                    if now < 420 or landReady <= 1 then
-                        local followup = FindFollowupExpansionTarget(
-                            aiBrain,
-                            runtime,
-                            mainPos,
-                            enemyPos,
-                            target,
-                            safeExpandDistance,
-                            threatCap,
-                            now,
-                            engineerId)
-                        if followup then
-                            ReserveExpansionTarget(runtime, now, followup, engineerId)
-                            IssueBuildMobile({ eng }, followup, bp, {})
+                    if bp and IssueBuildMobile then
+                        local engineerId = GetEntityId(eng)
+                        ReserveExpansionTarget(runtime, now, target, engineerId)
+                        IssueBuildMobile({ eng }, target, bp, {})
+                        local landReady = ((((runtime.ProductionDirector or {}).Current or {}).Factories or {}).Land or {}).Ready or 0
+                        local followupBudget = (mexEmergency and 2) or 1
+                        if now < 420 or landReady <= 1 or mexEmergency then
+                            local anchorPos = target
+                            for _ = 1, followupBudget do
+                                local followup = FindFollowupExpansionTarget(
+                                    aiBrain,
+                                    runtime,
+                                    mainPos,
+                                    enemyPos,
+                                    anchorPos,
+                                    safeExpandDistance,
+                                    threatCap,
+                                    now,
+                                    engineerId)
+                                if not followup then
+                                    break
+                                end
+                                ReserveExpansionTarget(runtime, now, followup, engineerId)
+                                IssueBuildMobile({ eng }, followup, bp, {})
+                                anchorPos = followup
+                            end
                         end
-                    end
-                    runtime.LastExpansionDispatchTime = now
-                    runtime.LastExpansionTargetPos = target
-                    dispatched = dispatched + 1
+                        MarkExpansionCommit(runtime, engineerId, now, bootstrap and 68 or (mexEmergency and 96 or 78))
+                        runtime.LastExpansionDispatchTime = now
+                        runtime.LastExpansionTargetPos = target
+                        dispatched = dispatched + 1
                     if dispatched >= dispatchLimit then
                         break
                     end
@@ -807,6 +900,7 @@ local function ScoreStructureTarget(aiBrain, runtime, structure, kind, pos, frac
     local recovery = runtime.Recovery or {}
     local raid = runtime.RaidDefense or {}
     local constraints = ((runtime.ProductionDirector or {}).ConstraintState or {})
+    local engState = runtime.EngineerState or {}
     local distMain = Distance2D(pos, mainPos)
     local localThreat = aiBrain:GetThreatAtPosition(pos, 1, true, 'AntiSurface') or 0
     local engineerLossRisk = OvermindMemory.GetEngineerLossRisk(aiBrain, pos, 42)
@@ -814,6 +908,8 @@ local function ScoreStructureTarget(aiBrain, runtime, structure, kind, pos, frac
     local bootstrapPowerNeed = NeedsBootstrapPower(aiBrain, runtime)
     local radarCritical = NeedsCriticalRadar(runtime)
     local starterPhase = ((runtime.ProductionDirector or {}).ConstraintState or {}).StarterPhase == true
+    local mexEmergency = engState.MexEmergencyActive == true
+    local mexRebuild = engState.MexEmergencyRebuild == true
     local bomberWatch, bomberPanic, exposedMexAirRaid = ComputeAirThreatFlags(runtime, GetGameTimeSeconds())
     local forceFinishPower = kind == 'Power'
         and fraction >= 0.8
@@ -838,6 +934,17 @@ local function ScoreStructureTarget(aiBrain, runtime, structure, kind, pos, frac
     end
 
     local score = kindBias + (fraction * 120) - (distMain * 0.16) - (localThreat * 18) - (engineerLossRisk * 18) - (expansionRisk * 10)
+    if kind == 'Mex' and mexEmergency then
+        score = score + (mexRebuild and 95 or 62)
+        if raid and raid.LastThreatMexPos then
+            local distThreatMex = Distance2D(pos, raid.LastThreatMexPos)
+            if distThreatMex <= 34 then
+                score = score + 85
+            elseif distThreatMex <= 70 then
+                score = score + 48
+            end
+        end
+    end
     if bootstrapPowerNeed then
         if kind == 'Power' then
             score = score + 120
@@ -870,7 +977,7 @@ local function ScoreStructureTarget(aiBrain, runtime, structure, kind, pos, frac
         elseif kind == 'Power' then
             score = score + 24
         elseif kind == 'Mex' then
-            score = score - (radarCritical and 170 or 55)
+            score = score - (radarCritical and (mexEmergency and 60 or 170) or (mexEmergency and 18 or 55))
         elseif kind == 'Defense' then
             score = score - 25
         end
@@ -901,7 +1008,7 @@ local function ScoreStructureTarget(aiBrain, runtime, structure, kind, pos, frac
         elseif kind == 'Power' then
             score = score + 18
         elseif kind == 'Mex' then
-            score = score - 85
+            score = score - (mexEmergency and 26 or 85)
         elseif kind == 'Defense' then
             score = score - 30
         end
@@ -912,7 +1019,7 @@ local function ScoreStructureTarget(aiBrain, runtime, structure, kind, pos, frac
         elseif kind == 'Radar' then
             score = score + 70
         elseif kind == 'Mex' then
-            score = score - 150
+            score = score - (mexRebuild and 40 or 150)
         elseif kind == 'Defense' then
             score = score - 40
         end
@@ -934,6 +1041,8 @@ local function FindBestUnfinishedStructure(aiBrain, runtime, mainPos)
     local bestPriority = 0
     local bestScore = -999999
     local safeExpandDistance = (runtime.EcoPolicy and runtime.EcoPolicy.SafeExpandDistance) or 680
+    local mexEmergency = ((runtime.EngineerState or {}).MexEmergencyActive) == true
+    local mexRebuild = ((runtime.EngineerState or {}).MexEmergencyRebuild) == true
 
     for _, structure in structures do
         if structure and not structure.Dead and not structure:IsUnitState('Upgrading') then
@@ -943,10 +1052,13 @@ local function FindBestUnfinishedStructure(aiBrain, runtime, mainPos)
                 if pos then
                     local distMain = Distance2D(pos, mainPos)
                     local kind = GetStructureKind(structure)
-                    local maxDist = (kind == 'Mex') and math.max(300, safeExpandDistance * 0.95) or 240
+                    local maxDist = (kind == 'Mex')
+                        and math.max(320, safeExpandDistance * (mexEmergency and 1.2 or 0.95))
+                        or 240
                     if distMain <= maxDist then
                         local score, threat = ScoreStructureTarget(aiBrain, runtime, structure, kind, pos, fraction, mainPos)
-                        if threat <= ((kind == 'Mex') and 3.1 or 2.8) and score > bestScore then
+                        local threatCap = (kind == 'Mex') and (mexRebuild and 3.5 or 3.1) or 2.8
+                        if threat <= threatCap and score > bestScore then
                             best = structure
                             bestPos = pos
                             bestFraction = fraction
@@ -1393,19 +1505,52 @@ local function TryOpenSurplusExpansionBuild(aiBrain, runtime, eng, mainPos, enem
     if not eng or eng.Dead or not mainPos or not IssueBuildMobile then
         return false
     end
-    if now < ((runtime.LastSurplusExpansionIssueTime or -999) + 10) then
+    safeExpandDistance = safeExpandDistance or 680
+
+    local macroPhase = (((runtime or {}).MacroController or {}).Phase)
+        or ((((runtime or {}).ProductionDirector or {}).MacroObjective) or 'none')
+    local mexReady = (((((runtime or {}).ProductionDirector or {}).Current or {}).Eco or {}).Mex or {}).Ready or 0
+    local engState = runtime and runtime.EngineerState or {}
+    if runtime then
+        runtime.EngineerState = engState
+    end
+    engState.PeakMexReady = math.max(engState.PeakMexReady or 0, mexReady)
+    local mexLossCount = math.max(0, (engState.PeakMexReady or mexReady) - mexReady)
+    local rebuildUrgent = mexLossCount >= 1
+    local mexExpansionUrgent = now < 1550 and mexReady < 12
+
+    local issueCooldown = (macroPhase == 'starter_mex_claim') and 2 or ((rebuildUrgent or mexExpansionUrgent) and 3 or 8)
+    if now < ((runtime.LastSurplusExpansionIssueTime or -999) + issueCooldown) then
         return false
     end
-    if CountUnfinishedMexes(aiBrain, mainPos, math.max(520, safeExpandDistance)) >= 1 then
+    local maxUnfinishedMexes = 1
+    if macroPhase == 'starter_mex_claim' then
+        maxUnfinishedMexes = 4
+    elseif rebuildUrgent or mexExpansionUrgent then
+        maxUnfinishedMexes = 4
+    end
+    if CountUnfinishedMexes(aiBrain, mainPos, math.max(520, safeExpandDistance)) >= maxUnfinishedMexes then
         return false
     end
 
     local engineerId = GetEntityId(eng)
     local pos = eng.GetPosition and eng:GetPosition() or false
     local sourcePos = pos and { pos[1], pos[2] or 0, pos[3], EngineerId = engineerId } or false
-    local target = FindExpansionTarget(aiBrain, runtime, mainPos, enemyPos, math.max(520, safeExpandDistance), 1.7, now, sourcePos)
+    local searchPrimary = math.max(320, math.min(560, safeExpandDistance))
+    local searchFallback = math.max(420, math.min(760, safeExpandDistance + 140))
+    if macroPhase == 'starter_mex_claim' or mexReady < 6 then
+        searchPrimary = math.max(280, math.min(420, safeExpandDistance))
+        searchFallback = math.max(360, math.min(620, safeExpandDistance + 120))
+    elseif rebuildUrgent or mexExpansionUrgent then
+        searchPrimary = math.max(320, math.min(520, safeExpandDistance + 80))
+        searchFallback = math.max(420, math.min(720, safeExpandDistance + 220))
+    end
+    local threatPrimary = (macroPhase == 'starter_mex_claim') and 1.9 or ((rebuildUrgent or mexExpansionUrgent) and 1.95 or 1.7)
+    local threatFallback = threatPrimary + 0.25
+
+    local target = FindExpansionTarget(aiBrain, runtime, mainPos, enemyPos, searchPrimary, threatPrimary, now, sourcePos)
     if not target then
-        target = FindExpansionTarget(aiBrain, runtime, mainPos, enemyPos, math.max(600, safeExpandDistance + 80), 1.95, now, sourcePos)
+        target = FindExpansionTarget(aiBrain, runtime, mainPos, enemyPos, searchFallback, threatFallback, now, sourcePos)
     end
     if not target then
         return false
@@ -1418,8 +1563,35 @@ local function TryOpenSurplusExpansionBuild(aiBrain, runtime, eng, mainPos, enem
 
     ReserveExpansionTarget(runtime, now, target, engineerId)
     IssueBuildMobile({ eng }, target, bp, {})
+
+    local followupBudget = (macroPhase == 'starter_mex_claim') and 4 or (((rebuildUrgent or mexExpansionUrgent) or mexReady <= 6) and 3 or 1)
+    if followupBudget > 0 then
+        local anchorPos = target
+        local followupDistance = math.max(searchPrimary, safeExpandDistance + 140)
+        local followupThreat = threatPrimary + 0.1
+        for _ = 1, followupBudget do
+            local followup = FindFollowupExpansionTarget(
+                aiBrain,
+                runtime,
+                mainPos,
+                enemyPos,
+                anchorPos,
+                followupDistance,
+                followupThreat,
+                now,
+                engineerId)
+            if not followup then
+                break
+            end
+            ReserveExpansionTarget(runtime, now, followup, engineerId)
+            IssueBuildMobile({ eng }, followup, bp, {})
+            anchorPos = followup
+        end
+    end
+
     runtime.LastSurplusExpansionIssueTime = now
     runtime.LastSurplusExpansionPos = target
+    MarkExpansionCommit(runtime, engineerId, now, (macroPhase == 'starter_mex_claim') and 102 or ((rebuildUrgent or mexExpansionUrgent) and 88 or 64))
     return true
 end
 
@@ -1642,6 +1814,9 @@ local function AssignBuildersToUnfinishedFactory(aiBrain, runtime, now, target, 
 
     local eco = runtime.EcoState or {}
     local recovery = runtime.Recovery or {}
+    local engState = runtime.EngineerState or {}
+    local mexEmergencyRebuild = engState.MexEmergencyRebuild == true
+    local mexEmergencyActive = mexEmergencyRebuild or engState.MexEmergencyActive == true
     local mainPos = GetMainPos(aiBrain, runtime)
     local targetThreat = aiBrain:GetThreatAtPosition(targetPos, 1, true, 'AntiSurface') or 0
     local openingFactoryFloor = string.lower(domain or 'none') == 'land'
@@ -1656,12 +1831,38 @@ local function AssignBuildersToUnfinishedFactory(aiBrain, runtime, now, target, 
         and GetFraction(target) >= 0.18
         and not HasEnemyCombatNear(aiBrain, targetPos, 52)
     local requiredBuilders = ComputeFactoryTaskRequirements(domain, GetFraction(target), stallTime, readyFactories, eco)
+    if mexEmergencyActive then
+        local domainLower = string.lower(domain or 'none')
+        if domainLower == 'land' then
+            if readyFactories >= 1 then
+                requiredBuilders = math.max(0, requiredBuilders - (mexEmergencyRebuild and 2 or 1))
+                if stallTime < 16 then
+                    requiredBuilders = math.min(requiredBuilders, 1)
+                end
+            end
+        else
+            requiredBuilders = math.max(0, requiredBuilders - 1)
+            if not recovery.ForceFactoryRecovery and stallTime < 20 then
+                requiredBuilders = 0
+            end
+        end
+    end
     if openingFactoryFloor then
         requiredBuilders = math.max(2, math.min(3, requiredBuilders))
     elseif stickyLandFinish then
         requiredBuilders = math.max(requiredBuilders, math.min(4, readyFactories <= 1 and 3 or 2))
     end
     local forceInterrupt = stallTime >= 4 or readyFactories <= 0 or recovery.ForceFactoryRecovery or openingFactoryFloor or stickyLandFinish
+    if mexEmergencyActive
+        and not openingFactoryFloor
+        and not stickyLandFinish
+        and readyFactories >= 1
+        and stallTime < 12 then
+        forceInterrupt = false
+    end
+    if requiredBuilders <= 0 then
+        return 0, {}, false, { Total = 0, Safe = 0, Reachable = 0, Interruptible = 0 }
+    end
 
     local dispatchRadius = 240
     if stallTime >= 6 then
@@ -1815,6 +2016,9 @@ local function AssignBuildersToUnfinishedStructure(aiBrain, runtime, now, target
     end
 
     local eco = runtime.EcoState or {}
+    local engState = runtime.EngineerState or {}
+    local mexEmergencyRebuild = engState.MexEmergencyRebuild == true
+    local mexEmergencyActive = mexEmergencyRebuild or engState.MexEmergencyActive == true
     local mainPos = GetMainPos(aiBrain, runtime)
     local targetThreat = aiBrain:GetThreatAtPosition(targetPos, 1, true, 'AntiSurface') or 0
     local radarCritical = NeedsCriticalRadar(runtime)
@@ -1824,6 +2028,19 @@ local function AssignBuildersToUnfinishedStructure(aiBrain, runtime, now, target
     local targetFraction = GetFraction(target)
     local requiredBuilders = ComputeStructureTaskRequirements(kind, targetFraction, stallTime, eco)
     local kindLower = string.lower(kind or 'none')
+    if mexEmergencyActive and kind ~= 'Mex' then
+        if mexEmergencyRebuild then
+            if kind == 'Power' and targetFraction >= 0.78 then
+                requiredBuilders = math.max(1, requiredBuilders - 1)
+            elseif kind == 'Radar' and radarCritical then
+                requiredBuilders = math.max(1, requiredBuilders - 1)
+            else
+                requiredBuilders = math.max(0, requiredBuilders - 2)
+            end
+        elseif kind ~= 'Power' then
+            requiredBuilders = math.max(0, requiredBuilders - 1)
+        end
+    end
     local forceFinishPower = kind == 'Power'
         and targetFraction >= 0.8
         and (
@@ -1853,6 +2070,9 @@ local function AssignBuildersToUnfinishedStructure(aiBrain, runtime, now, target
     elseif kind == 'AA' and (bomberWatch or bomberPanic or exposedMexAirRaid) then
         requiredBuilders = math.max(2, requiredBuilders)
         forceInterrupt = true
+    end
+    if requiredBuilders <= 0 then
+        return 0, {}, false, { Total = 0, Safe = 0, Reachable = 0, Interruptible = 0 }
     end
 
     local dispatchRadius = 220
@@ -2214,7 +2434,12 @@ local function ProcessEngineer(aiBrain, runtime, eng, now, ctx)
     local claimedByFactoryTask = ctx.factoryTask.Active and entityId and ctx.factoryTask.BuilderIds and ctx.factoryTask.BuilderIds[entityId]
     local claimedByStructureTask = ctx.structureTask.Active and entityId and ctx.structureTask.BuilderIds and ctx.structureTask.BuilderIds[entityId]
     local claimedByRadarOrder = entityId and ctx.radarReservedBuilderIds[entityId]
-    if claimedByFactoryTask or claimedByStructureTask or claimedByRadarOrder then
+    local mexEmergency = ctx.mexRebuildUrgent or ctx.mexExpansionUrgent
+    local ignoreFactoryClaim = mexEmergency and not ctx.severeFactoryStarve
+    local ignoreStructureClaim = mexEmergency
+        and ctx.structureTask
+        and (ctx.structureTask.Kind ~= 'Mex' and ctx.structureTask.Kind ~= 'Power')
+    if ((claimedByFactoryTask and not ignoreFactoryClaim) or (claimedByStructureTask and not ignoreStructureClaim) or claimedByRadarOrder) then
         return
     end
 
@@ -2228,11 +2453,21 @@ local function ProcessEngineer(aiBrain, runtime, eng, now, ctx)
     local escort = aiBrain:GetNumUnitsAroundPoint(categories.MOBILE * (categories.LAND + categories.AIR) - categories.ENGINEER - categories.SCOUT - categories.COMMAND, pos, 26, 'Ally') or 0
     local isIdle = IsIdle(eng)
     local constructing = IsConstructing(eng)
+    local commandQueueLength = GetCommandQueueLength(eng)
+    local expansionCommitActive = entityId and IsExpansionCommitActive(runtime, entityId, now)
     local acted = false
 
     if isIdle and not constructing then
-        if ctx.structureTask.Active
+        if expansionCommitActive
+            and localThreat < 2.1
+            and dist <= math.max(560, ctx.safeExpandDistance + 80)
+            and TryOpenSurplusExpansionBuild(aiBrain, runtime, eng, ctx.mainPos, ctx.enemyPos, ctx.safeExpandDistance, now) then
+            ctx.dispatchedExpand = ctx.dispatchedExpand + 1
+            acted = true
+        elseif ctx.structureTask.Active
             and (ctx.structureTask.Kind == 'Power' or ctx.structureTask.Kind == 'Mex')
+            and (ctx.macroPhase ~= 'starter_mex_claim' or ctx.structureTask.Kind == 'Power')
+            and (ctx.structureTask.Kind ~= 'Mex' or not ctx.mexExpansionUrgent)
             and ctx.structureTargetObject
             and (
                 not ctx.fieldTaskWindow
@@ -2250,10 +2485,28 @@ local function ProcessEngineer(aiBrain, runtime, eng, now, ctx)
             end
             acted = true
         elseif ctx.macroPhase == 'starter_mex_claim'
-            and localThreat < 1.8
-            and dist <= 320
+            and localThreat < 2.05
+            and dist <= 420
             and TryOpenSurplusExpansionBuild(aiBrain, runtime, eng, ctx.mainPos, ctx.enemyPos, ctx.safeExpandDistance, now) then
             ctx.dispatchedExpand = ctx.dispatchedExpand + 1
+            acted = true
+        elseif ctx.mexRebuildUrgent
+            and localThreat < 2.0
+            and dist <= 460
+            and TryOpenSurplusExpansionBuild(aiBrain, runtime, eng, ctx.mainPos, ctx.enemyPos, ctx.safeExpandDistance, now) then
+            ctx.dispatchedExpand = ctx.dispatchedExpand + 1
+            acted = true
+        elseif ctx.mexExpansionUrgent
+            and localThreat < 1.95
+            and dist <= 500
+            and TryOpenSurplusExpansionBuild(aiBrain, runtime, eng, ctx.mainPos, ctx.enemyPos, ctx.safeExpandDistance, now) then
+            ctx.dispatchedExpand = ctx.dispatchedExpand + 1
+            acted = true
+        elseif ctx.mexRebuildUrgent
+            and localThreat < 2.05
+            and dist <= 520
+            and TryReclaimEnemyMex(aiBrain, runtime, eng, now) then
+            ctx.reclaimEnemyMex = ctx.reclaimEnemyMex + 1
             acted = true
         elseif (ctx.macroPhase == 'bootstrap_factory' or ctx.macroPhase == 'land_factory_floor')
             and ctx.factoryTask.Active
@@ -2292,6 +2545,8 @@ local function ProcessEngineer(aiBrain, runtime, eng, now, ctx)
             end
         elseif ctx.contestFieldMode
             and ctx.fieldTaskWindow
+            and not ctx.mexRebuildUrgent
+            and not ctx.mexExpansionUrgent
             and ctx.reclaimField < ctx.fieldTaskQuota
             and ctx.needBase <= 0
             and TryReclaimFieldZone(aiBrain, runtime, eng, ctx.reclaimFieldPos, now) then
@@ -2299,6 +2554,8 @@ local function ProcessEngineer(aiBrain, runtime, eng, now, ctx)
             acted = true
         elseif ctx.contestFieldMode
             and ctx.fieldTaskWindow
+            and not ctx.mexRebuildUrgent
+            and not ctx.mexExpansionUrgent
             and ctx.reclaimField < ctx.fieldTaskQuota
             and ctx.needBase <= 0
             and localThreat < 1.8
@@ -2308,6 +2565,8 @@ local function ProcessEngineer(aiBrain, runtime, eng, now, ctx)
             acted = true
         elseif ctx.contestFieldMode
             and ctx.fieldTaskWindow
+            and not ctx.mexRebuildUrgent
+            and not ctx.mexExpansionUrgent
             and ctx.reclaimField < ctx.fieldTaskQuota
             and ctx.needBase <= 0
             and localThreat < 1.9
@@ -2432,6 +2691,8 @@ local function ProcessEngineer(aiBrain, runtime, eng, now, ctx)
     if isIdle
         and not constructing
         and (not acted)
+        and not ctx.mexRebuildUrgent
+        and not ctx.mexExpansionUrgent
         and TryReclaimFieldZone(aiBrain, runtime, eng, ctx.reclaimFieldPos, now) then
         ctx.reclaimField = ctx.reclaimField + 1
         acted = true
@@ -2461,25 +2722,36 @@ local function ProcessEngineer(aiBrain, runtime, eng, now, ctx)
             localThreat > 0.8
             or (ctx.raid.ExposedMexThreatPos and Distance2D(pos, ctx.raid.ExposedMexThreatPos) < 70)
         )
+    local queuedWork = (not isIdle) and commandQueueLength >= 1
+    local preserveQueuedExpansion = queuedWork
+        and (ctx.mexRebuildUrgent or ctx.mexExpansionUrgent)
+        and dist > 105
+        and localThreat < 2.4
+        and escort >= 1
+    local preserveCommittedExpansion = expansionCommitActive
+        and dist > 95
+        and localThreat < 2.8
+        and escort >= 1
+    local allowNonSevereRecall = not preserveQueuedExpansion and not preserveCommittedExpansion
 
-    if (not acted) and (severeThreat or farUnsafe or (not constructing and (earlyOverextend or enemySideRisk))) then
+    if (not acted) and (severeThreat or (allowNonSevereRecall and (farUnsafe or (not constructing and (earlyOverextend or enemySideRisk))))) then
         if RecallEngineer(runtime, eng, ctx.mainPos, now, 'threatened') then
             ctx.threatenedCount = ctx.threatenedCount + 1
         end
-    elseif (not acted) and not constructing and airRaidRisk then
+    elseif (not acted) and not constructing and airRaidRisk and allowNonSevereRecall then
         if RecallEngineer(runtime, eng, ctx.mainPos, now, 'air_raid') then
             ctx.threatenedCount = ctx.threatenedCount + 1
         end
-    elseif (not acted) and not constructing and ctx.needBase > 0 and dist > 130 and isIdle and localThreat < 1.9 then
+    elseif (not acted) and allowNonSevereRecall and not constructing and ctx.needBase > 0 and dist > 130 and isIdle and localThreat < 1.9 then
         if RecallEngineer(runtime, eng, ctx.mainPos, now, 'base_floor') then
             ctx.recoverCount = ctx.recoverCount + 1
             ctx.needBase = ctx.needBase - 1
         end
-    elseif (not acted) and not constructing and ctx.factoryTask.Active and (ctx.factoryTask.AssignedBuilders or 0) < (ctx.factoryTask.RequiredBuilders or 0) and dist > 140 and localThreat < 1.6 and ctx.forcedFactoryRecover < math.max(2, ctx.factoryTask.RequiredBuilders or 0) then
+    elseif (not acted) and allowNonSevereRecall and not constructing and ctx.factoryTask.Active and (ctx.factoryTask.AssignedBuilders or 0) < (ctx.factoryTask.RequiredBuilders or 0) and dist > 140 and localThreat < 1.6 and ctx.forcedFactoryRecover < math.max(2, ctx.factoryTask.RequiredBuilders or 0) then
         if RecallEngineer(runtime, eng, ctx.mainPos, now, 'factory_task') then
             ctx.forcedFactoryRecover = ctx.forcedFactoryRecover + 1
         end
-    elseif (not acted) and not constructing and ctx.severeFactoryStarve and dist > 140 and localThreat < 1.6 and ctx.forcedFactoryRecover < 2 then
+    elseif (not acted) and allowNonSevereRecall and not constructing and ctx.severeFactoryStarve and dist > 140 and localThreat < 1.6 and ctx.forcedFactoryRecover < 2 then
         if RecallEngineer(runtime, eng, ctx.mainPos, now, 'factory_starve') then
             ctx.forcedFactoryRecover = ctx.forcedFactoryRecover + 1
         end
@@ -2508,6 +2780,7 @@ function Update(aiBrain, now)
     engState.UnfinishedStructureTask = structureTask
     engState.ExpansionReservations = engState.ExpansionReservations or {}
     CleanupExpansionReservations(runtime, now)
+    CleanupExpansionCommits(runtime, now)
 
     local baseFloor = policy.BaseEngineerFloor or 3
     if now < 300 then
@@ -2524,6 +2797,31 @@ function Update(aiBrain, now)
     local radarCritical = NeedsCriticalRadar(runtime)
     local raid = runtime.RaidDefense or {}
     local constraints = ((runtime.ProductionDirector or {}).ConstraintState or {})
+    local current = ((runtime.ProductionDirector or {}).Current or {})
+    local mexReady = (((current.Eco or {}).Mex or {}).Ready) or 0
+    engState.PeakMexReady = math.max(engState.PeakMexReady or 0, mexReady)
+    local mexLossCount = math.max(0, (engState.PeakMexReady or mexReady) - mexReady)
+    local mexRebuildUrgent = mexLossCount >= 1
+        or (
+            ((raid.LastThreatLabel == 'mex' or raid.LastThreatLabel == 'asset')
+                and (raid.UnderLandHarass or raid.UnderAirHarass))
+            and mexReady <= ((constraints.StarterMexFloor or 5) + 2)
+        )
+    local mexExpansionUrgent = now < 1700
+        and mexReady < math.max(13, (constraints.StarterMexFloor or 5) + 6)
+        and not severeFactoryStarve
+    if mexRebuildUrgent then
+        safeExpandDistance = math.max(safeExpandDistance, 920)
+    elseif mexExpansionUrgent then
+        safeExpandDistance = math.max(safeExpandDistance, 860)
+    end
+    engState.MexEmergencyRebuild = mexRebuildUrgent and true or false
+    engState.MexEmergencyActive = (mexRebuildUrgent or mexExpansionUrgent) and true or false
+    if mexRebuildUrgent then
+        recovery.ForceDefenseRecovery = true
+        recovery.ForceFactoryLand = true
+        recovery.ForceBaseEngineerRecovery = true
+    end
     local macro = runtime.MacroController or {}
     local macroPhase = macro.Phase or (((runtime.ProductionDirector or {}).MacroObjective) or 'land_factory_floor')
     local hqPressureEscape = macro.HQPressureEscape == true
@@ -2758,6 +3056,8 @@ function Update(aiBrain, now)
     local fieldStickyActive = now < (engState.ReclaimFieldStickyUntil or -999)
     local fieldTaskQuota = 0
     if contestFieldMode
+        and not mexRebuildUrgent
+        and not mexExpansionUrgent
         and reclaimFieldPos
         and fieldBaseReady
         and not ecoCrash
@@ -2780,6 +3080,8 @@ function Update(aiBrain, now)
         fieldStickyActive = true
     elseif fieldStickyActive
         and contestFieldMode
+        and not mexRebuildUrgent
+        and not mexExpansionUrgent
         and reclaimFieldPos
         and fieldBaseReady
         and not ecoCrash
@@ -2822,6 +3124,8 @@ function Update(aiBrain, now)
         threatenedCount = 0,
         transitionLock = transitionLock,
         fieldTaskQuota = fieldTaskQuota,
+        mexRebuildUrgent = mexRebuildUrgent,
+        mexExpansionUrgent = mexExpansionUrgent,
     }
     local factoryTaskCovered = (not factoryTask.Active)
         or (
@@ -2855,18 +3159,20 @@ function Update(aiBrain, now)
         and not structureTask.Active
         and radarOrderActive
         and table.getn(engineers or {}) >= math.max(baseFloor + 3, 6)
+    local mexDispatchOverride = mexRebuildUrgent
+        or (mexExpansionUrgent and mexReady < math.max(8, (constraints.StarterMexFloor or 5) + 2))
 
     local canDispatchExpand = now >= 60
         and not severeFactoryStarve
         and not ecoCrash
-        and not recovery.ForceBaseEngineerRecovery
-        and not factoryTask.Active
-        and not structureTask.Active
+        and (mexDispatchOverride or not recovery.ForceBaseEngineerRecovery)
+        and (mexDispatchOverride or not factoryTask.Active)
+        and (mexDispatchOverride or not structureTask.Active)
         and (not radarCritical or allowExpandWhileRadarPending)
         and (not (bomberWatch and currentRadar <= 0) or allowExpandWhileRadarPending)
         and not raid.ExposedMexUnderAirRaid
         and not (bomberPanic and table.getn(engineers or {}) <= math.max(4, baseFloor + 1))
-        and baseEngineers >= math.max(2, baseFloor - 2)
+        and (mexDispatchOverride or baseEngineers >= math.max(2, baseFloor - 2))
         and (eco.MassTrend or 0) > -0.55
         and (eco.EnergyTrend or 0) > -28
     if canDispatchExpand then
@@ -2880,7 +3186,14 @@ function Update(aiBrain, now)
         if (policy.ForwardContestBias == true) or hqPressureEscape then
             threatCap = threatCap + 0.15
         end
-        ctx.dispatchedExpand = DispatchExpansionEngineer(aiBrain, runtime, now, engineers, mainPos, enemyPos, math.max(420, safeExpandDistance), threatCap)
+        if mexDispatchOverride then
+            threatCap = math.max(threatCap, 1.75)
+        end
+        local dispatchDistance = math.max(420, safeExpandDistance)
+        if mexDispatchOverride then
+            dispatchDistance = math.max(dispatchDistance, safeExpandDistance + 80)
+        end
+        ctx.dispatchedExpand = DispatchExpansionEngineer(aiBrain, runtime, now, engineers, mainPos, enemyPos, dispatchDistance, threatCap)
     end
 
     runtime.LastEngineerRecovered = ctx.recoverCount

@@ -666,6 +666,12 @@ local function ProcessEngineer(aiBrain, runtime, eng, now, ctx)
             and Recovery.TryOpenSurplusExpansionBuild(aiBrain, runtime, eng, ctx.mainPos, ctx.enemyPos, ctx.safeExpandDistance, now) then
             ctx.dispatchedExpand = ctx.dispatchedExpand + 1
             acted = true
+        elseif ctx.mexRebuildUrgent
+            and localThreat < 2.0
+            and dist <= 460
+            and Recovery.TryOpenSurplusExpansionBuild(aiBrain, runtime, eng, ctx.mainPos, ctx.enemyPos, ctx.safeExpandDistance, now) then
+            ctx.dispatchedExpand = ctx.dispatchedExpand + 1
+            acted = true
         elseif (ctx.macroPhase == 'bootstrap_factory' or ctx.macroPhase == 'land_factory_floor')
             and ctx.factoryTask.Active
             and ctx.factoryTargetObject

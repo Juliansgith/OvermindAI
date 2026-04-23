@@ -393,6 +393,8 @@ local function DispatchExpansionEngineer(aiBrain, runtime, now, engineers, mainP
     local policy = runtime and runtime.EcoPolicy or {}
     local macro = runtime and runtime.MacroController or {}
     local raid = runtime and runtime.RaidDefense or {}
+    local engState = runtime and runtime.EngineerState or {}
+    local mexEmergency = engState and engState.MexEmergencyActive == true
     local bootstrap = constraints and constraints.EconBootstrap == true
     local starterPhase = constraints and constraints.StarterPhase == true
     local contestDispatch = policy.ForwardContestBias == true
@@ -410,17 +412,21 @@ local function DispatchExpansionEngineer(aiBrain, runtime, now, engineers, mainP
     if ((raid.BomberPanicUntil or -999) > now) and table.getn(engineers or {}) <= math.max(4, ((constraints and constraints.StarterEngineerFloor) or 6) - 1) then
         return 0
     end
-    if now < (runtime.LastExpansionDispatchTime or -999) + (bootstrap and 1.2 or 2.2) then
+    if now < (runtime.LastExpansionDispatchTime or -999) + (bootstrap and 1.2 or (mexEmergency and 1.4 or 2.2)) then
         return 0
     end
 
     CleanupExpansionReservations(runtime, now)
     local dispatched = 0
     local dispatchLimit = bootstrap and 2 or (contestDispatch and 2 or 1)
+    if mexEmergency then
+        dispatchLimit = math.max(dispatchLimit, 3)
+    end
+    local dispatchRadius = mexEmergency and 340 or 220
     for _, eng in engineers do
         if eng and not eng.Dead and not IsConstructing(eng) and IsIdle(eng) then
             local pos = eng:GetPosition()
-            if pos and Common.Distance2D(pos, mainPos) <= 220 then
+            if pos and Common.Distance2D(pos, mainPos) <= dispatchRadius then
                 local sourcePos = { pos[1], pos[2] or 0, pos[3], EngineerId = Common.GetEntityId(eng) }
                 local target = FindExpansionTarget(aiBrain, runtime, mainPos, enemyPos, safeExpandDistance, threatCap, now, sourcePos)
                 if not target then

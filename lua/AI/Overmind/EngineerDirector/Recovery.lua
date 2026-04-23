@@ -643,13 +643,30 @@ local function TryOpenSurplusExpansionBuild(aiBrain, runtime, eng, mainPos, enem
     if not eng or eng.Dead or not mainPos or not IssueBuildMobile then
         return false
     end
+    safeExpandDistance = safeExpandDistance or 680
+
     local macroPhase = (((runtime or {}).MacroController or {}).Phase)
         or ((((runtime or {}).ProductionDirector or {}).MacroObjective) or 'none')
-    local issueCooldown = (macroPhase == 'starter_mex_claim') and 4 or 10
+    local mexReady = (((((runtime or {}).ProductionDirector or {}).Current or {}).Eco or {}).Mex or {}).Ready or 0
+    local engState = runtime and runtime.EngineerState or {}
+    if runtime then
+        runtime.EngineerState = engState
+    end
+    engState.PeakMexReady = math.max(engState.PeakMexReady or 0, mexReady)
+    local mexLossCount = math.max(0, (engState.PeakMexReady or mexReady) - mexReady)
+    local rebuildUrgent = mexLossCount >= 1
+    local mexExpansionUrgent = now < 1500 and mexReady < 12
+
+    local issueCooldown = (macroPhase == 'starter_mex_claim') and 2 or ((rebuildUrgent or mexExpansionUrgent) and 3 or 8)
     if now < ((runtime.LastSurplusExpansionIssueTime or -999) + issueCooldown) then
         return false
     end
-    local maxUnfinishedMexes = (macroPhase == 'starter_mex_claim') and 2 or 1
+    local maxUnfinishedMexes = 1
+    if macroPhase == 'starter_mex_claim' then
+        maxUnfinishedMexes = 4
+    elseif rebuildUrgent or mexExpansionUrgent then
+        maxUnfinishedMexes = 3
+    end
     if CountUnfinishedMexes(aiBrain, mainPos, math.max(520, safeExpandDistance)) >= maxUnfinishedMexes then
         return false
     end
@@ -657,9 +674,14 @@ local function TryOpenSurplusExpansionBuild(aiBrain, runtime, eng, mainPos, enem
     local engineerId = Common.GetEntityId(eng)
     local pos = eng.GetPosition and eng:GetPosition() or false
     local sourcePos = pos and { pos[1], pos[2] or 0, pos[3], EngineerId = engineerId } or false
-    local target = Expansion.FindExpansionTarget(aiBrain, runtime, mainPos, enemyPos, math.max(520, safeExpandDistance), 1.7, now, sourcePos)
+    local searchPrimary = math.max(rebuildUrgent and 680 or 520, safeExpandDistance + ((macroPhase == 'starter_mex_claim' or rebuildUrgent) and 120 or 0))
+    local searchFallback = math.max(rebuildUrgent and 760 or 600, safeExpandDistance + ((macroPhase == 'starter_mex_claim' or rebuildUrgent) and 220 or 80))
+    local threatPrimary = (macroPhase == 'starter_mex_claim') and 1.9 or (rebuildUrgent and 1.95 or 1.7)
+    local threatFallback = threatPrimary + 0.25
+
+    local target = Expansion.FindExpansionTarget(aiBrain, runtime, mainPos, enemyPos, searchPrimary, threatPrimary, now, sourcePos)
     if not target then
-        target = Expansion.FindExpansionTarget(aiBrain, runtime, mainPos, enemyPos, math.max(600, safeExpandDistance + 80), 1.95, now, sourcePos)
+        target = Expansion.FindExpansionTarget(aiBrain, runtime, mainPos, enemyPos, searchFallback, threatFallback, now, sourcePos)
     end
     if not target then
         return false
@@ -672,6 +694,32 @@ local function TryOpenSurplusExpansionBuild(aiBrain, runtime, eng, mainPos, enem
 
     Expansion.ReserveExpansionTarget(runtime, now, target, engineerId)
     IssueBuildMobile({ eng }, target, bp, {})
+
+    local followupBudget = (macroPhase == 'starter_mex_claim') and 3 or (((rebuildUrgent or mexExpansionUrgent) or mexReady <= 5) and 2 or 0)
+    if followupBudget > 0 then
+        local anchorPos = target
+        local followupDistance = math.max(searchPrimary, safeExpandDistance + 140)
+        local followupThreat = threatPrimary + 0.1
+        for _ = 1, followupBudget do
+            local followup = Expansion.FindFollowupExpansionTarget(
+                aiBrain,
+                runtime,
+                mainPos,
+                enemyPos,
+                anchorPos,
+                followupDistance,
+                followupThreat,
+                now,
+                engineerId)
+            if not followup then
+                break
+            end
+            Expansion.ReserveExpansionTarget(runtime, now, followup, engineerId)
+            IssueBuildMobile({ eng }, followup, bp, {})
+            anchorPos = followup
+        end
+    end
+
     runtime.LastSurplusExpansionIssueTime = now
     runtime.LastSurplusExpansionPos = target
     return true

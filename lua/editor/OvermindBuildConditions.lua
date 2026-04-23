@@ -836,6 +836,161 @@ local function IsFactoryExpansionEcoBlocked(aiBrain, landFactories, airFactories
     return false
 end
 
+local function IsFactoryGrowthHardBlocked(aiBrain, capacity, domain)
+    if HasCriticalFactoryTask(aiBrain, domain) then
+        return true
+    end
+
+    local activeCapacity = capacity or GetAuthoritativeCapacityPlan(aiBrain)
+    if activeCapacity then
+        if activeCapacity.PauseFactoryGrowth == true or activeCapacity.FactoryCompletionLock == true then
+            return true
+        end
+    end
+
+    local recovery = GetRecovery(aiBrain) or {}
+    if recovery.FactoryQueueExpansionBlocked or recovery.ForceFactoryDeadlock then
+        return true
+    end
+
+    local landFactories = GetExistingUnitCount(aiBrain, categories.FACTORY * categories.LAND * categories.STRUCTURE)
+    local airFactories = GetExistingUnitCount(aiBrain, categories.FACTORY * categories.AIR * categories.STRUCTURE)
+    local seaFactories = GetExistingUnitCount(aiBrain, categories.FACTORY * categories.NAVAL * categories.STRUCTURE)
+    local totalFactories = landFactories + airFactories + seaFactories
+    local unfinishedFactories = GetUnfinishedUnitCount(aiBrain, categories.FACTORY * categories.STRUCTURE)
+    local unfinishedCap = recovery.ForceFactoryRecovery and 1 or 0
+    if unfinishedFactories > unfinishedCap then
+        return true
+    end
+
+    if IsFactoryExpansionEcoBlocked(aiBrain, landFactories, airFactories, seaFactories) then
+        return true
+    end
+
+    local now = GetGameTimeSeconds()
+    local phaseFactoryCap = 6
+    if now >= 720 then
+        phaseFactoryCap = 7
+    end
+    if now >= 1320 then
+        phaseFactoryCap = 8
+    end
+    if now >= 2100 then
+        phaseFactoryCap = 10
+    end
+    if now >= 3000 then
+        phaseFactoryCap = 12
+    end
+    if recovery.ForceFactoryRecovery then
+        phaseFactoryCap = phaseFactoryCap + 1
+    end
+    if totalFactories >= phaseFactoryCap and not MassOverflowRisk(aiBrain, 0.96, 0.45) then
+        return true
+    end
+
+    local econ = GetEcon(aiBrain)
+    local massStorageRatio = econ.MassStorageRatio or 0
+    local massTrend = econ.MassTrend or 0
+    local massIncome = econ.MassIncome or 0
+    local severeMassDeficit = totalFactories >= 4
+        and massStorageRatio <= 0.24
+        and massTrend <= -0.08
+        and massIncome <= math.max(4.8, totalFactories * 0.9)
+    local deepMassDeficit = totalFactories >= 3
+        and (
+            (massStorageRatio <= 0.12 and massTrend <= -0.12)
+            or (massTrend <= -0.24)
+        )
+
+    return severeMassDeficit or deepMassDeficit
+end
+
+local function IsFactoryCapacityOvershoot(capacity, domain, landFactories, airFactories, seaFactories)
+    if type(capacity) ~= 'table' then
+        return false
+    end
+
+    local land = landFactories or 0
+    local air = airFactories or 0
+    local sea = seaFactories or 0
+    local total = land + air + sea
+
+    local desiredTotal = capacity.DesiredTotal
+    if desiredTotal == nil then
+        desiredTotal = (capacity.LandTarget or land) + (capacity.AirTarget or air) + (capacity.SeaTarget or sea)
+    end
+    if desiredTotal ~= nil and total >= (desiredTotal + 1) then
+        return true
+    end
+
+    if not domain then
+        return false
+    end
+
+    local normalized = string.lower(domain or '')
+    if normalized == 'sea' or normalized == 'naval' then
+        normalized = 'navy'
+    end
+
+    if normalized == 'land' then
+        return capacity.LandTarget ~= nil and land >= ((capacity.LandTarget or 0) + 1)
+    elseif normalized == 'air' then
+        return capacity.AirTarget ~= nil and air >= ((capacity.AirTarget or 0) + 1)
+    elseif normalized == 'navy' then
+        return capacity.SeaTarget ~= nil and sea >= ((capacity.SeaTarget or 0) + 1)
+    end
+
+    return false
+end
+
+local function ApproveFactoryBuildRequest(aiBrain, domain)
+    local runtime = aiBrain and aiBrain.OvermindRuntime or false
+    if not runtime then
+        return true
+    end
+
+    local gate = runtime.FactoryBuildGate or {}
+    runtime.FactoryBuildGate = gate
+    local now = GetGameTimeSeconds()
+    local totalFactories = GetExistingUnitCount(aiBrain, categories.FACTORY * categories.STRUCTURE)
+    local strictCap = 5
+    if now >= 720 then
+        strictCap = 7
+    end
+    if now >= 1320 then
+        strictCap = 8
+    end
+    if now >= 2100 then
+        strictCap = 10
+    end
+    if now >= 3000 then
+        strictCap = 12
+    end
+    if totalFactories >= strictCap and not HasCriticalFactoryTask(aiBrain, domain) then
+        return false
+    end
+
+    if (gate.LockUntil or -999) > now then
+        return false
+    end
+
+    local cooldown = 18
+    if now < 420 then
+        cooldown = 6
+    elseif now < 1200 then
+        cooldown = 14
+    end
+    if HasRecoveryFlag(aiBrain, 'ForceFactoryRecovery') or HasCriticalFactoryTask(aiBrain, domain) then
+        cooldown = math.min(cooldown, 8)
+    end
+
+    gate.LockUntil = now + cooldown
+    gate.LastIssueTime = now
+    gate.LastDomain = domain or 'any'
+
+    return true
+end
+
 local function IsSecondaryExpansionReady(aiBrain, recovery, now, econ, factoryCount)
     local activeRecovery = recovery or GetRecovery(aiBrain) or {}
     local activeEcon = econ or GetEcon(aiBrain)
@@ -1811,14 +1966,24 @@ function ShouldAddFactory(aiBrain, locationType, minMassIncome, minEnergyIncome,
 
     local isPrimary = IsPrimaryLocation(aiBrain, locationType, 44)
     if capacity then
-        local anyGrowth = capacity.AddLandFactory or capacity.AddAirFactory or capacity.AddSeaFactory
-        if HasCriticalFactoryTask(aiBrain) or capacity.PauseFactoryGrowth == true then
+        if IsFactoryGrowthHardBlocked(aiBrain, capacity) then
             return false
         end
+        local landFactories = GetExistingUnitCount(aiBrain, categories.FACTORY * categories.LAND * categories.STRUCTURE)
+        local airFactories = GetExistingUnitCount(aiBrain, categories.FACTORY * categories.AIR * categories.STRUCTURE)
+        local seaFactories = GetExistingUnitCount(aiBrain, categories.FACTORY * categories.NAVAL * categories.STRUCTURE)
+        if IsFactoryCapacityOvershoot(capacity, nil, landFactories, airFactories, seaFactories) then
+            return false
+        end
+        local anyGrowth = capacity.AddLandFactory or capacity.AddAirFactory or capacity.AddSeaFactory
         if not isPrimary then
             return anyGrowth and IsSecondaryExpansionReady(aiBrain, recovery, now, econ, factoryCount)
         end
         return anyGrowth == true
+    end
+
+    if IsFactoryGrowthHardBlocked(aiBrain, false) then
+        return false
     end
 
     local queueBlocked = recovery and (recovery.FactoryQueueExpansionBlocked
@@ -1905,25 +2070,39 @@ function ShouldAddFactory(aiBrain, locationType, minMassIncome, minEnergyIncome,
 end
 
 function ShouldAddLandFactory(aiBrain, locationType, minMassIncome, minEnergyIncome, minMassRatio, minEnergyRatio)
-    if HasCriticalFactoryTask(aiBrain, 'land') then
+    local capacity = GetAuthoritativeCapacityPlan(aiBrain)
+    if IsFactoryGrowthHardBlocked(aiBrain, capacity, 'land') then
         return false
     end
-    local capacity = GetAuthoritativeCapacityPlan(aiBrain)
+    if capacity then
+        local landFactories = GetExistingUnitCount(aiBrain, categories.FACTORY * categories.LAND * categories.STRUCTURE)
+        local airFactories = GetExistingUnitCount(aiBrain, categories.FACTORY * categories.AIR * categories.STRUCTURE)
+        local seaFactories = GetExistingUnitCount(aiBrain, categories.FACTORY * categories.NAVAL * categories.STRUCTURE)
+        if IsFactoryCapacityOvershoot(capacity, 'land', landFactories, airFactories, seaFactories) then
+            return false
+        end
+    end
     if capacity then
         local recovery = GetRecovery(aiBrain) or {}
         local now = GetGameTimeSeconds()
         local factoryCount = GetUnitCount(aiBrain, categories.FACTORY * categories.STRUCTURE)
+        local allow = false
         if not IsPrimaryLocation(aiBrain, locationType, 44) then
-            return capacity.AddLandFactory == true and IsSecondaryExpansionReady(aiBrain, recovery, now, GetEcon(aiBrain), factoryCount)
+            allow = capacity.AddLandFactory == true and IsSecondaryExpansionReady(aiBrain, recovery, now, GetEcon(aiBrain), factoryCount)
+        else
+            allow = capacity.AddLandFactory == true
         end
-        return capacity.AddLandFactory == true
+        if not allow then
+            return false
+        end
+        return ApproveFactoryBuildRequest(aiBrain, 'land')
     end
     if not ShouldAddFactory(aiBrain, locationType, minMassIncome, minEnergyIncome, minMassRatio, minEnergyRatio) then
         return false
     end
 
     if HasRecoveryFlag(aiBrain, 'ForceFactoryLand') then
-        return true
+        return ApproveFactoryBuildRequest(aiBrain, 'land')
     end
     if HasRecoveryFlag(aiBrain, 'ForceFactoryAir') then
         return false
@@ -1932,7 +2111,7 @@ function ShouldAddLandFactory(aiBrain, locationType, minMassIncome, minEnergyInc
     local landFactories, airFactories = GetFactoryCounts(aiBrain)
     local total = landFactories + airFactories
     if total < 4 then
-        return true
+        return ApproveFactoryBuildRequest(aiBrain, 'land')
     end
 
     local ownAir = GetUnitCount(aiBrain, categories.MOBILE * categories.AIR - categories.SCOUT)
@@ -1942,11 +2121,11 @@ function ShouldAddLandFactory(aiBrain, locationType, minMassIncome, minEnergyInc
     end
 
     if landFactories < 2 then
-        return true
+        return ApproveFactoryBuildRequest(aiBrain, 'land')
     end
 
     if total <= 0 then
-        return true
+        return ApproveFactoryBuildRequest(aiBrain, 'land')
     end
 
     local posture = GetPosture(aiBrain)
@@ -1964,29 +2143,43 @@ function ShouldAddLandFactory(aiBrain, locationType, minMassIncome, minEnergyInc
         return false
     end
 
-    return true
+    return ApproveFactoryBuildRequest(aiBrain, 'land')
 end
 
 function ShouldAddAirFactory(aiBrain, locationType, minMassIncome, minEnergyIncome, minMassRatio, minEnergyRatio)
-    if HasCriticalFactoryTask(aiBrain, 'air') then
+    local capacity = GetAuthoritativeCapacityPlan(aiBrain)
+    if IsFactoryGrowthHardBlocked(aiBrain, capacity, 'air') then
         return false
     end
-    local capacity = GetAuthoritativeCapacityPlan(aiBrain)
+    if capacity then
+        local landFactories = GetExistingUnitCount(aiBrain, categories.FACTORY * categories.LAND * categories.STRUCTURE)
+        local airFactories = GetExistingUnitCount(aiBrain, categories.FACTORY * categories.AIR * categories.STRUCTURE)
+        local seaFactories = GetExistingUnitCount(aiBrain, categories.FACTORY * categories.NAVAL * categories.STRUCTURE)
+        if IsFactoryCapacityOvershoot(capacity, 'air', landFactories, airFactories, seaFactories) then
+            return false
+        end
+    end
     if capacity then
         local recovery = GetRecovery(aiBrain) or {}
         local now = GetGameTimeSeconds()
         local factoryCount = GetUnitCount(aiBrain, categories.FACTORY * categories.STRUCTURE)
+        local allow = false
         if not IsPrimaryLocation(aiBrain, locationType, 44) then
-            return capacity.AddAirFactory == true and IsSecondaryExpansionReady(aiBrain, recovery, now, GetEcon(aiBrain), factoryCount)
+            allow = capacity.AddAirFactory == true and IsSecondaryExpansionReady(aiBrain, recovery, now, GetEcon(aiBrain), factoryCount)
+        else
+            allow = capacity.AddAirFactory == true
         end
-        return capacity.AddAirFactory == true
+        if not allow then
+            return false
+        end
+        return ApproveFactoryBuildRequest(aiBrain, 'air')
     end
     if not ShouldAddFactory(aiBrain, locationType, minMassIncome, minEnergyIncome, minMassRatio, minEnergyRatio) then
         return false
     end
 
     if HasRecoveryFlag(aiBrain, 'ForceFactoryAir') then
-        return true
+        return ApproveFactoryBuildRequest(aiBrain, 'air')
     end
     if HasRecoveryFlag(aiBrain, 'ForceFactoryLand') then
         return false
@@ -1995,7 +2188,7 @@ function ShouldAddAirFactory(aiBrain, locationType, minMassIncome, minEnergyInco
     local landFactories, airFactories = GetFactoryCounts(aiBrain)
     local total = landFactories + airFactories
     if total < 4 then
-        return true
+        return ApproveFactoryBuildRequest(aiBrain, 'air')
     end
 
     local ownAir = GetUnitCount(aiBrain, categories.MOBILE * categories.AIR - categories.SCOUT)
@@ -2005,11 +2198,11 @@ function ShouldAddAirFactory(aiBrain, locationType, minMassIncome, minEnergyInco
     end
 
     if airFactories < 1 and landFactories >= 1 then
-        return true
+        return ApproveFactoryBuildRequest(aiBrain, 'air')
     end
 
     if total <= 0 then
-        return true
+        return ApproveFactoryBuildRequest(aiBrain, 'air')
     end
 
     local posture = GetPosture(aiBrain)
@@ -2027,7 +2220,7 @@ function ShouldAddAirFactory(aiBrain, locationType, minMassIncome, minEnergyInco
         return false
     end
 
-    return true
+    return ApproveFactoryBuildRequest(aiBrain, 'air')
 end
 
 function ShouldForceFactoryRecovery(aiBrain)
@@ -2781,7 +2974,10 @@ function ShouldBuildT1FactoryType(aiBrain, factoryType, locationType)
     local capacity = GetAuthoritativeCapacityPlan(aiBrain)
     local recovery = GetRecovery(aiBrain) or {}
     local isPrimary = IsPrimaryLocation(aiBrain, locationType, 44)
-    if HasCriticalFactoryTask(aiBrain, kind) then
+    if IsFactoryGrowthHardBlocked(aiBrain, capacity, kind) then
+        return false
+    end
+    if capacity and IsFactoryCapacityOvershoot(capacity, kind, landFactories, airFactories, seaFactories) then
         return false
     end
 
@@ -2793,14 +2989,20 @@ function ShouldBuildT1FactoryType(aiBrain, factoryType, locationType)
     end
 
     if capacity then
+        local allow = false
         if kind == 'land' then
-            return capacity.AddLandFactory == true
+            allow = capacity.AddLandFactory == true
         elseif kind == 'air' then
-            return capacity.AddAirFactory == true
+            allow = capacity.AddAirFactory == true
         elseif kind == 'sea' or kind == 'naval' then
-            return director and director.NavalActive == true and capacity.AddSeaFactory == true
+            allow = director and director.NavalActive == true and capacity.AddSeaFactory == true
+        else
+            allow = false
         end
-        return false
+        if not allow then
+            return false
+        end
+        return ApproveFactoryBuildRequest(aiBrain, kind)
     end
 
     local completeFactories = GetCompletedUnitCount(aiBrain, categories.FACTORY * categories.STRUCTURE)
@@ -2812,13 +3014,13 @@ function ShouldBuildT1FactoryType(aiBrain, factoryType, locationType)
     if queueBlocked then
         if kind == 'land' then
             if landFactories <= 0 then
-                return true
+                return ApproveFactoryBuildRequest(aiBrain, kind)
             end
-            return recovery.ForceFactoryRecovery and landFactories <= 1
+            return recovery.ForceFactoryRecovery and landFactories <= 1 and ApproveFactoryBuildRequest(aiBrain, kind)
         elseif kind == 'air' then
-            return recovery.ForceFactoryAir and airFactories <= 0 and landFactories >= 1
+            return recovery.ForceFactoryAir and airFactories <= 0 and landFactories >= 1 and ApproveFactoryBuildRequest(aiBrain, kind)
         elseif kind == 'sea' or kind == 'naval' then
-            return recovery.ForceFactoryRecovery and director and director.NavalActive and seaFactories <= 0
+            return recovery.ForceFactoryRecovery and director and director.NavalActive and seaFactories <= 0 and ApproveFactoryBuildRequest(aiBrain, kind)
         end
         return false
     end
@@ -2834,7 +3036,7 @@ function ShouldBuildT1FactoryType(aiBrain, factoryType, locationType)
         if now >= 620 then
             target = 4
         end
-        return landFactories < target
+        return landFactories < target and ApproveFactoryBuildRequest(aiBrain, kind)
     elseif kind == 'air' then
         local target = 0
         if now >= 210 then
@@ -2843,10 +3045,10 @@ function ShouldBuildT1FactoryType(aiBrain, factoryType, locationType)
         if now >= 520 then
             target = 2
         end
-        return airFactories < target
+        return airFactories < target and ApproveFactoryBuildRequest(aiBrain, kind)
     elseif kind == 'sea' or kind == 'naval' then
         local navalActive = director and director.NavalActive
-        return navalActive and seaFactories < 1
+        return navalActive and seaFactories < 1 and ApproveFactoryBuildRequest(aiBrain, kind)
     end
     return false
 end

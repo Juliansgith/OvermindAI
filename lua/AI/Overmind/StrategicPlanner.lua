@@ -272,6 +272,11 @@ local function BuildSignals(aiBrain, runtime, now)
     local navalActive = ((zone.NavMarkerCount or 0) >= 3)
         or ((opp.Navy or 0) > 0)
         or ((navyTheater.PressureEMA or 0) > 0)
+    local mexThreatActive = (raid.LastThreatLabel == 'mex' or raid.LastThreatLabel == 'asset')
+        and (raid.UnderLandHarass == true or raid.UnderAirHarass == true)
+    local mexPeakReady = ((runtime.EngineerState or {}).PeakMexReady) or 0
+    local mexReady = (((((runtime.ProductionDirector or {}).Current or {}).Eco or {}).Mex or {}).Ready) or 0
+    local mexLossCount = math.max(0, mexPeakReady - mexReady)
 
     return {
         Time = now or 0,
@@ -317,6 +322,9 @@ local function BuildSignals(aiBrain, runtime, now)
         OuterContestUnits = forceStats.OuterContest or 0,
         UnderLandHarass = raid.UnderLandHarass == true,
         UnderAirHarass = raid.UnderAirHarass == true,
+        MexReady = mexReady,
+        MexThreatActive = mexThreatActive and true or false,
+        MexLossCount = mexLossCount,
         AttackWindow = (
             relativePower >= 0.98
             and mapControl >= 0.34
@@ -471,6 +479,22 @@ local function ScoreDirectives(signals, primaryTheater)
         scores.stabilize = scores.stabilize - 1.4
         scores.expand = scores.expand - 0.4
     end
+    local lowMexPressure = (signals.MexReady or 0) < 8
+    if lowMexPressure then
+        local deficit = math.min(4, 8 - (signals.MexReady or 0))
+        scores.stabilize = scores.stabilize - (0.65 + (deficit * 0.15))
+        scores.expand = scores.expand + (0.9 + (deficit * 0.18))
+        scores.trade_tech_for_tempo = scores.trade_tech_for_tempo + (0.55 + (deficit * 0.1))
+        scores.trade_map_for_tech = scores.trade_map_for_tech - (0.95 + (deficit * 0.12))
+    end
+    if signals.MexThreatActive or (signals.MexLossCount or 0) >= 1 then
+        local mexLoss = math.min(3, signals.MexLossCount or 0)
+        scores.stabilize = scores.stabilize - (signals.MexThreatActive and 0.9 or 0.45)
+        scores.expand = scores.expand + 0.7 + (mexLoss * 0.25)
+        scores.punish_greed = scores.punish_greed + 0.55 + (signals.MexThreatActive and 0.35 or 0)
+        scores.trade_tech_for_tempo = scores.trade_tech_for_tempo + 0.9 + (mexLoss * 0.2)
+        scores.trade_map_for_tech = scores.trade_map_for_tech - (1.1 + (mexLoss * 0.2))
+    end
     if signals.OuterRetentionActive then
         scores.stabilize = scores.stabilize - (signals.StrongHomeCollapse and 0.3 or 1.7)
         scores.expand = scores.expand + 1.0 + math.min(1.0, (signals.OuterContestValue or 0) * 0.12)
@@ -564,6 +588,9 @@ local function BuildDirectiveState(signals, primaryTheater, directive)
         or (directive == 'punish_greed' and not signals.DurableSurplus)
         or signals.PrioritizeProduction
         or signals.FocusOnT1Spam
+        or (signals.MexReady or 0) < 8
+        or signals.MexThreatActive
+        or (signals.MexLossCount or 0) >= 1
     local forceAirAnswer = (directive == 'force_air_answer' or signals.ForceAirAnswerCandidate)
         and not (signals.MacroObjective == 'first_land_hq' or signals.MacroObjective == 'first_t2_engineer')
         and not signals.TransitionLocked
@@ -631,6 +658,7 @@ local function BuildDirectiveState(signals, primaryTheater, directive)
         AggressionBias = aggressionBias,
         OuterRetentionActive = signals.OuterRetentionActive and true or false,
         ReclaimFirst = signals.ReclaimFirst and true or false,
+        MexPressure = (signals.MexThreatActive or ((signals.MexLossCount or 0) >= 1)) and true or false,
     }
 end
 
@@ -721,6 +749,12 @@ local function BuildGoalBiases(primaryTheater, directiveState, directive)
         bias.expand = bias.expand + 0.9
         bias.raid = bias.raid + 0.35
         bias.tech = bias.tech - 0.45
+    end
+    if directiveState.MexPressure then
+        bias.expand = bias.expand + 0.7
+        bias.raid = bias.raid + 1.0
+        bias.tech = bias.tech - 1.0
+        bias.hold = bias.hold - 0.2
     end
 
     return bias

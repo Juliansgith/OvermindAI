@@ -1,5 +1,6 @@
 local LegacyPath = '/mods/OvermindAI/lua/AI/Overmind/EngineerDirectorLegacy.lua'
 local ModularPath = '/mods/OvermindAI/lua/AI/Overmind/EngineerDirectorModular.lua'
+local PreferLegacy = true
 
 local ActiveModule = false
 local ActiveMode = false
@@ -24,6 +25,15 @@ end
 local function ResolveActiveModule(aiBrain, runtime)
     if ActiveModule then
         return ActiveModule
+    end
+
+    if PreferLegacy then
+        local okLegacy, legacy = pcall(import, LegacyPath)
+        if okLegacy and type(legacy) == 'table' and type(legacy.Update) == 'function' then
+            ActiveModule = legacy
+            SetImplementation(aiBrain, runtime, 'legacy', 'preferred')
+            return ActiveModule
+        end
     end
 
     local okModular, modular = pcall(import, ModularPath)

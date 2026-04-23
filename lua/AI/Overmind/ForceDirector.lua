@@ -372,6 +372,9 @@ function Module.Update(aiBrain, now)
     local ownPos = GetMainPos(aiBrain, runtime)
     local frontPos = intel.FrontLinePos or runtime.PrimaryEnemyPos or ownPos
     local raidPos = intel.BestRaidPos or runtime.PrimaryEnemyPos or frontPos
+    if raid.UnderLandHarass and raid.LastThreatLabel == 'mex' and raid.LastThreatPos then
+        raidPos = raid.LastThreatPos
+    end
     local outerContestPos = planner.ReclaimFieldPos or planner.OuterContestPos or intel.BestExpansionPos or raidPos
     local outerContestValue = math.max(planner.ReclaimFieldScore or 0, planner.OuterContestValue or 0)
     local acu = GetACU(aiBrain)
@@ -402,6 +405,9 @@ function Module.Update(aiBrain, now)
     local landCombatTotal = table.getn(direct) + table.getn(aa) + table.getn(indirect) + table.getn(scouts)
     local contestedZones = intel.ContestedZones or 0
     local airThreatZones = intel.AirThreatZones or 0
+    local bomberRaidSeverity = math.max(raid.BomberRaidSeverity or 0, raid.LastBomberEnemyCount or 0)
+    local severeBomberRaid = (((raid.BomberPanicUntil or -999) > now) or raid.ExposedMexUnderAirRaid == true)
+        and bomberRaidSeverity >= 3
     local staleZones = intel.StaleZones or 0
     local acuDist = Distance2D(acuPos, ownPos)
     local clusterState = runtime.EnemyClusterTracker or {}
@@ -418,12 +424,15 @@ function Module.Update(aiBrain, now)
     local assetSiege = raid.UnderLandHarass
         and ((raid.LastThreatLabel == 'asset') or (raid.LastThreatLabel == 'acu') or (raid.LastThreatLabel == 'main'))
         and ((raid.LastLandEnemyCount or 0) >= 4)
+    local mexUnderSiege = raid.UnderLandHarass
+        and (raid.LastThreatLabel == 'mex')
+        and ((raid.LastLandEnemyCount or 0) >= 1)
     local frontCrisis = (opp.T2Push == true or opp.IndirectHeavy == true or assetSiege)
         and (approachClose or contestedZones >= 2 or approachThreat >= 5.5 or assetSiege)
     local interceptPos = approachCluster.StagePos or approachCluster.Pos or frontPos
 
     local baseGuardDirectNeed = Clamp(4 + math.floor(homeThreat / 2) + contestedZones, 4, 12)
-    local baseGuardAANeed = Clamp(1 + math.min(2, airThreatZones) + (raid.UnderAirHarass and 2 or 0), 1, 6)
+    local baseGuardAANeed = Clamp(1 + math.min(2, airThreatZones) + (raid.UnderAirHarass and 2 or 0) + (severeBomberRaid and 1 or 0), 1, 7)
     local acuEscortNeed = 0
     if acuDist > 8 or localAcuThreat > (homeThreat + 1) or runtime.ACURole == 'push' then
         acuEscortNeed = Clamp(2 + math.floor(acuDist / 12) + ((localAcuThreat > 2) and 2 or 0), 2, 8)
@@ -438,7 +447,7 @@ function Module.Update(aiBrain, now)
         raiderNeed = Clamp(2 + math.floor(staleZones / 2) + math.min(3, table.getn(scouts)), 2, 8)
     end
     local mainlineNeed = Clamp(8 + (contestedZones * 4), 8, 34)
-    local airGuardNeed = Clamp(2 + (airThreatZones * 2) + (raid.UnderAirHarass and 2 or 0), 2, 10)
+    local airGuardNeed = Clamp(2 + (airThreatZones * 2) + (raid.UnderAirHarass and 2 or 0) + (severeBomberRaid and 2 or 0), 2, 12)
     local outerContestNeed = 0
     local previousOuterCount = (previousTasks.outer_contest and (previousTasks.outer_contest.CurrentUnits or 0)) or 0
     if approachClose then
@@ -480,6 +489,18 @@ function Module.Update(aiBrain, now)
     if tradeMapForTech then
         raiderNeed = math.max(0, raiderNeed - 1)
         mainlineNeed = math.max(8, mainlineNeed - 1)
+    end
+    if mexUnderSiege and not frontCrisis and not assetSiege then
+        baseGuardDirectNeed = Clamp(baseGuardDirectNeed + 1, 4, 16)
+        raiderNeed = Clamp(
+            math.max(raiderNeed, 4 + math.floor(math.min(6, (raid.LastLandEnemyCount or 0) * 0.8))),
+            2,
+            12)
+        mainlineNeed = Clamp(mainlineNeed + 1, 8, 42)
+        if raid.UnderAirHarass then
+            airGuardNeed = Clamp(airGuardNeed + 1, 2, 12)
+        end
+        outerContestNeed = math.max(outerContestNeed, 2)
     end
     if forceAirAnswer then
         airGuardNeed = Clamp(airGuardNeed + 1, 2, 12)
@@ -585,7 +606,7 @@ function Module.Update(aiBrain, now)
         and outerContestPos
         and not acuCrisisActive
         and not approachTowardHome
-        and not raid.UnderLandHarass
+        and (not raid.UnderLandHarass or mexUnderSiege)
         and not (primaryTheater == 'Home' and directive == 'stabilize' and homeThreat >= 8 and not reclaimFirst) then
         outerContestNeed = Clamp(
             2

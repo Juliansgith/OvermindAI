@@ -350,6 +350,9 @@ local function BuildConstraints(runtime, current, confidence, scoutingDebt, nava
             or (approachConfirmedUnits or 0) >= 1
         )
     local exposedMexAirRaid = raid.ExposedMexUnderAirRaid == true and raid.ExposedMexThreatPos ~= false
+    local bomberRaidSeverity = math.max(raid.BomberRaidSeverity or 0, raid.LastBomberEnemyCount or 0)
+    local severeBomberRaid = (bomberPanic or exposedMexAirRaid)
+        and (bomberRaidSeverity >= 3 or (raid.LastBomberEnemyCount or 0) >= 2)
     local approachPressure = 0
     if approachThreat > 0 and (approachConfirmedUnits > 0 or approachMemoryThreat >= 1.2 or approachConfidence >= 0.42) then
         local landBaseline = math.max(5, ((current.DomainStrength and current.DomainStrength.Land) or 0) * 0.55)
@@ -509,6 +512,9 @@ local function BuildConstraints(runtime, current, confidence, scoutingDebt, nava
     if bomberPanic or exposedMexAirRaid then
         engineerFloor = engineerFloor + 2
     end
+    if severeBomberRaid then
+        engineerFloor = engineerFloor + 1
+    end
 
     local contestStarterThreat = (policy.ContestMapMode == true or policy.PrioritizeProduction == true)
         and (
@@ -601,6 +607,8 @@ local function BuildConstraints(runtime, current, confidence, scoutingDebt, nava
         BomberWatch = bomberWatch and true or false,
         BomberPanic = bomberPanic and true or false,
         ExposedMexAirRaid = exposedMexAirRaid and true or false,
+        BomberRaidSeverity = Round(bomberRaidSeverity, 2),
+        SevereBomberRaid = severeBomberRaid and true or false,
         RadarCritical = radarCritical and true or false,
     }
 end
@@ -1060,6 +1068,10 @@ local function DecideRolePlan(runtime, current, constraints, demand, budget, con
     local policy = runtime.EcoPolicy or {}
     local opp = runtime.OpponentModel or {}
     local mexReady = (((current.Eco or {}).Mex or {}).Ready) or 0
+    local mexPeakReady = ((runtime.EngineerState or {}).PeakMexReady) or mexReady
+    local mexLossCount = math.max(0, mexPeakReady - mexReady)
+    local mexPressure = mexLossCount >= 1
+    local severeMexDeficit = mexReady < math.max(5, (constraints.StarterMexFloor or 6) - 1)
     local powerReady = (((current.Eco or {}).Power or {}).Ready) or 0
     local prioritizeProduction = policy.PrioritizeProduction == true
     local contestMapMode = policy.ContestMapMode == true
@@ -1103,6 +1115,9 @@ local function DecideRolePlan(runtime, current, constraints, demand, budget, con
     if outerRetentionActive then
         landTotal = landTotal + 3
     end
+    if mexPressure and not constraints.EconBootstrap then
+        landTotal = landTotal + math.min(8, 3 + (mexLossCount * 2))
+    end
     landTotal = Clamp(landTotal, ((constraints.EconBootstrap or constraints.StarterPhase) and 0) or 6, 72)
 
     local scoutDesired = Clamp(1 + math.floor(demand.IntelNeed * 0.18) + ((constraints.RaidPressure > 0.16) and 1 or 0), 1, 5)
@@ -1120,6 +1135,9 @@ local function DecideRolePlan(runtime, current, constraints, demand, budget, con
         and not constraints.EconBootstrap
     local landAAShare = 0.14 + math.min(0.16, (demand.AirRisk / 100)) + (constraints.AirPanic and 0.08 or 0)
         + ((constraints.BomberWatch or constraints.BomberPanic or constraints.ExposedMexAirRaid) and 0.08 or 0)
+    if constraints.SevereBomberRaid then
+        landAAShare = landAAShare + 0.05
+    end
     local landIndirectShare = 0.08 + ((mode == 'pressure') and 0.06 or 0) + math.min(0.08, constraints.ContestedZones * 0.02)
     if indirectCounterWindow then
         landIndirectShare = landIndirectShare + 0.08 + math.min(0.06, constraints.FrontPressure * 0.18)
@@ -1133,11 +1151,21 @@ local function DecideRolePlan(runtime, current, constraints, demand, budget, con
     local landAADesired = Clamp(math.floor(landTotal * landAAShare), (constraints.AirPanic and 2 or 1), 22)
     local landIndirectDesired = Clamp(math.floor(landTotal * landIndirectShare), ((mode == 'pressure' or constraints.ContestedZones >= 2) and 2 or 0), 16)
     local landDirectDesired = Clamp(landTotal - landAADesired - landIndirectDesired - scoutDesired, 4, 42)
+    if mexPressure then
+        landDirectDesired = Clamp(landDirectDesired + math.min(6, 2 + mexLossCount), 4, 42)
+        if constraints.BomberPanic or constraints.ExposedMexAirRaid then
+            landAADesired = Clamp(landAADesired + 1, 1, 22)
+        end
+    end
     if constraints.BomberWatch then
         landAADesired = math.max(landAADesired, constraints.StarterPhase and 1 or 2)
     end
     if constraints.BomberPanic or constraints.ExposedMexAirRaid then
         landAADesired = math.max(landAADesired, constraints.StarterPhase and 2 or 4)
+    end
+    if constraints.SevereBomberRaid then
+        local severeAAFloor = (constraints.StarterPhase and 3 or 5) + math.min(1, math.floor((constraints.BomberRaidSeverity or 0) / 4))
+        landAADesired = math.max(landAADesired, severeAAFloor)
     end
     if indirectCounterWindow then
         local indirectFloor = Clamp(
@@ -1197,6 +1225,9 @@ local function DecideRolePlan(runtime, current, constraints, demand, budget, con
         end
         if constraints.BomberPanic or constraints.ExposedMexAirRaid then
             airTotal = airTotal + 4
+        end
+        if constraints.SevereBomberRaid then
+            airTotal = airTotal + 2 + math.min(3, math.floor(constraints.BomberRaidSeverity or 0))
         end
         if constraints.CounterAirWindow then
             airTotal = airTotal + 3 + (constraints.EnemyIndirectHeavy and 1 or 0)
@@ -1291,6 +1322,10 @@ local function DecideRolePlan(runtime, current, constraints, demand, budget, con
     if constraints.BomberPanic or constraints.ExposedMexAirRaid then
         fighterDesired = math.max(fighterDesired, constraints.StarterPhase and 3 or 5)
     end
+    if constraints.SevereBomberRaid then
+        local severeFighterFloor = (constraints.StarterPhase and 4 or 7) + math.min(2, math.floor((constraints.BomberRaidSeverity or 0) / 3))
+        fighterDesired = math.max(fighterDesired, severeFighterFloor)
+    end
     if constraints.CounterAirWindow and airEnabled and not constraints.AirPanic then
         fighterDesired = math.max(fighterDesired, math.min(6, math.max(2, bomberDesired)))
     end
@@ -1352,16 +1387,25 @@ local function DecideRolePlan(runtime, current, constraints, demand, budget, con
     if constraints.BomberPanic or constraints.ExposedMexAirRaid then
         engineerDesired = engineerDesired + 2
     end
+    if constraints.SevereBomberRaid then
+        engineerDesired = engineerDesired + 1
+    end
+    if severeMexDeficit then
+        engineerDesired = engineerDesired + math.min(4, math.max(1, 6 - mexReady))
+    end
+    if mexPressure then
+        engineerDesired = engineerDesired + math.min(3, mexLossCount + 1)
+    end
     if outerRetentionActive then
         engineerDesired = engineerDesired + 1
     end
     if reclaimFirst then
         engineerDesired = engineerDesired + 1
     end
-    engineerDesired = Clamp(engineerDesired, 3, 18)
+    engineerDesired = Clamp(engineerDesired, 3, 20)
 
     return {
-        Engineer = BuildRoleEntry('Engineer', current.Roles.Engineer, current.RoleUnits.Engineer, engineerDesired, Clamp(0.42 + (demand.EcoRecovery * 0.08) + (constraints.CriticalFactory and 0.18 or 0), 0.2, 0.98), SelectReason((constraints.BomberPanic or constraints.ExposedMexAirRaid) and 'engineer_preserve' or (constraints.BomberWatch and 'bomber_watch' or (constraints.CriticalFactory and 'critical_factory' or (constraints.EcoWeak and 'eco_recovery' or 'worker_floor'))), (demand.ExpansionPressure > 0) and 'expansion' or nil, (constraints.QueueStarved and 'queue_recovery' or nil))),
+        Engineer = BuildRoleEntry('Engineer', current.Roles.Engineer, current.RoleUnits.Engineer, engineerDesired, Clamp(0.42 + (demand.EcoRecovery * 0.08) + (constraints.CriticalFactory and 0.18 or 0) + (mexPressure and 0.14 or 0) + (severeMexDeficit and 0.1 or 0), 0.2, 0.98), SelectReason((mexPressure or severeMexDeficit) and 'mex_recovery' or ((constraints.BomberPanic or constraints.ExposedMexAirRaid) and 'engineer_preserve' or (constraints.BomberWatch and 'bomber_watch' or (constraints.CriticalFactory and 'critical_factory' or (constraints.EcoWeak and 'eco_recovery' or 'worker_floor')))), (demand.ExpansionPressure > 0) and 'expansion' or nil, (constraints.QueueStarved and 'queue_recovery' or nil))),
         LandDirect = BuildRoleEntry('LandDirect', current.Roles.LandDirect, current.RoleUnits.LandDirect, landDirectDesired, Clamp(0.48 + (constraints.FrontPressure * 0.22) + (constraints.LandPanic and 0.15 or 0), 0.2, 0.98), SelectReason((constraints.FrontPressure > 0.08) and 'front_hold' or 'screen', (constraints.BasePressure > 0.08) and 'base_guard' or nil, (constraints.EscortPressure > 0.08) and 'acu_escort' or nil)),
         LandAA = BuildRoleEntry('LandAA', current.Roles.LandAA, current.RoleUnits.LandAA, landAADesired, Clamp(0.36 + (demand.AirRisk * 0.0035) + (constraints.AirPanic and 0.2 or 0), 0.15, 0.98), SelectReason((constraints.BomberPanic or constraints.ExposedMexAirRaid) and 'bomber_resilience' or (constraints.BomberWatch and 'bomber_watch' or ((constraints.AirPanic or demand.AirRisk > 25) and 'enemy_air_risk' or 'air_guard')), (constraints.FrontPressure > 0.08) and 'front_hold' or nil, (constraints.EscortPressure > 0.08) and 'acu_escort' or nil)),
         LandIndirect = BuildRoleEntry('LandIndirect', current.Roles.LandIndirect, current.RoleUnits.LandIndirect, landIndirectDesired, Clamp(0.24 + (constraints.ContestedZones * 0.05) + ((mode == 'pressure') and 0.08 or 0), 0.08, 0.9), SelectReason((mode == 'pressure') and 'front_support' or 'contested_lane', (constraints.ContestedZones >= 2) and 'front_hold' or nil, nil)),
@@ -1400,7 +1444,19 @@ local function DecideCapacityPlan(runtime, current, constraints, rolePlan)
     local mexReady = (((current.Eco or {}).Mex or {}).Ready) or 0
     local powerReady = (((current.Eco or {}).Power or {}).Ready) or 0
     local radarReady = (current.Structures and current.Structures.Radar) or 0
+    local totalFactories = (current.Factories and current.Factories.Total) or 0
+    local readyFactories = (current.Factories and current.Factories.Ready) or 0
+    local unfinishedFactoryCount = math.max(0, totalFactories - readyFactories)
+    local massTrend = eco.MassTrend or 0
+    local massStorageRatio = eco.MassStorageRatio or 0
     local powerBufferLow = constraints.PowerBufferLow == true
+    local factoryTaskDebt = factoryTask.Active
+        and ((factoryTask.AssignedBuilders or 0) < math.max(1, factoryTask.RequiredBuilders or 0))
+    local factoryTaskStalled = factoryTask.Active
+        and ((factoryTask.StallTime or 0) >= 8)
+    local genericFactoryCompletionDebt = factoryTaskDebt or factoryTaskStalled
+    local genericUnstaffedFactoryShell = factoryTask.Active
+        and ((factoryTask.AssignedBuilders or 0) <= 0 or factoryTaskStalled)
     local landFactoryCompletionDebt = factoryTask.Active
         and factoryTask.Domain == 'Land'
         and ((factoryTask.AssignedBuilders or 0) < math.max(1, factoryTask.RequiredBuilders or 0))
@@ -1506,6 +1562,27 @@ local function DecideCapacityPlan(runtime, current, constraints, rolePlan)
         or constraints.BomberPanic
         or constraints.ExposedMexAirRaid
         or constraints.CounterAirWindow
+    local severeAirRaidRecovery = constraints.SevereBomberRaid
+        and (now >= 300 or (constraints.BomberRaidSeverity or 0) >= 3)
+        and powerReady >= math.max(2, (constraints.StarterPowerFloor or 2) - 1)
+        and landCoreOnline
+        and not constraints.EcoCrash
+        and not constraints.CriticalFactory
+    local unfinishedFactoryHardCap = (constraints.SevereBomberRaid or constraints.BomberPanic or constraints.ExposedMexAirRaid) and 2 or 1
+    if constraints.EcoWeak then
+        unfinishedFactoryHardCap = 1
+    end
+    local tooManyUnfinishedFactoryShells = unfinishedFactoryCount >= unfinishedFactoryHardCap
+    local chronicMassDeficit = totalFactories >= 4
+        and massTrend <= -0.08
+        and massStorageRatio <= 0.34
+        and not constraints.EcoCrash
+    local deepMassStall = (
+            (massTrend <= -0.18 and massStorageRatio <= 0.22)
+            or (massTrend <= -0.3)
+            or (massTrend <= -0.1 and massStorageRatio <= 0.08)
+        )
+        and not constraints.EcoCrash
     local preHQAirClamp = needsFirstLandHQ
         and current.Factories.Land.Ready >= 4
         and not preserveAirWindow
@@ -1785,10 +1862,19 @@ local function DecideCapacityPlan(runtime, current, constraints, rolePlan)
     if counterAirFactory then
         airTarget = math.max(airTarget, 1)
     end
+    if severeAirRaidRecovery then
+        airTarget = math.max(airTarget, 1)
+        if current.Factories.Land.Ready >= 3
+            and mexReady >= math.max(6, constraints.StarterMexFloor or 5)
+            and not powerBufferLow then
+            airTarget = math.max(airTarget, math.min(airCap, 2))
+        end
+    end
     if current.Factories.Air.Total > 0
         and current.Factories.Land.Ready < 4
         and not constraints.AirPanic
         and not emergencyAirFactory
+        and not severeAirRaidRecovery
         and not constraints.BomberPanic
         and not constraints.ExposedMexAirRaid then
         airTarget = math.min(airTarget, 1)
@@ -1803,6 +1889,7 @@ local function DecideCapacityPlan(runtime, current, constraints, rolePlan)
     end
     if current.Factories.Land.Ready < 4
         and not emergencyAirFactory
+        and not severeAirRaidRecovery
         and not constraints.AirPanic
         and not constraints.BomberPanic
         and not constraints.ExposedMexAirRaid
@@ -1810,7 +1897,7 @@ local function DecideCapacityPlan(runtime, current, constraints, rolePlan)
         and not lowAirCounterWindow then
         airTarget = math.min(airTarget, math.min(1, current.Factories.Air.Total))
     end
-    if suppressEarlyAir and not preserveAirWindow then
+    if suppressEarlyAir and not preserveAirWindow and not severeAirRaidRecovery then
         if current.Factories.Land.Ready < 4 and not contestScoutAirWindow then
             airTarget = 0
         else
@@ -1834,7 +1921,14 @@ local function DecideCapacityPlan(runtime, current, constraints, rolePlan)
                 or constraints.CriticalStructureKind == 'Mex'
             ))
         )
-    local pauseGrowth = constraints.EcoCrash or constraints.QueueStarved or constraints.UnitCapPressure or constraints.CriticalFactory or structurePausesGrowth
+    local pauseGrowth = constraints.EcoCrash
+        or constraints.QueueStarved
+        or constraints.UnitCapPressure
+        or constraints.CriticalFactory
+        or structurePausesGrowth
+        or chronicMassDeficit
+        or tooManyUnfinishedFactoryShells
+        or (genericFactoryCompletionDebt and not severeAirRaidRecovery)
     local ignoreSingleFactoryPause = landEmergencyTempo
         and totalUnfinished <= 1
         and not structurePausesGrowth
@@ -1898,7 +1992,34 @@ local function DecideCapacityPlan(runtime, current, constraints, rolePlan)
         and not powerBufferLow then
         pauseGrowth = false
     end
-    if powerBufferLow and not emergencyAirFactory and not threatenedAirUnlock then
+    if genericFactoryCompletionDebt
+        and not emergencyAirFactory
+        and not threatenedAirUnlock
+        and not counterAirFactory
+        and not severeAirRaidRecovery then
+        pauseGrowth = true
+    end
+    if deepMassStall then
+        landTarget = math.min(landTarget, current.Factories.Land.Total)
+        seaTarget = math.min(seaTarget, current.Factories.Navy.Total)
+        if severeAirRaidRecovery then
+            airTarget = math.min(airTarget, math.max(1, current.Factories.Air.Total))
+        else
+            airTarget = math.min(airTarget, current.Factories.Air.Total)
+        end
+        pauseGrowth = true
+    end
+    if chronicMassDeficit and not deepMassStall then
+        landTarget = math.min(landTarget, current.Factories.Land.Total)
+        seaTarget = math.min(seaTarget, current.Factories.Navy.Total)
+        if severeAirRaidRecovery then
+            airTarget = math.min(airTarget, math.max(1, current.Factories.Air.Total))
+        else
+            airTarget = math.min(airTarget, current.Factories.Air.Total)
+        end
+        pauseGrowth = true
+    end
+    if powerBufferLow and not emergencyAirFactory and not threatenedAirUnlock and not severeAirRaidRecovery then
         airTarget = math.min(airTarget, current.Factories.Air.Total)
         if current.Factories.Total >= 2 then
             pauseGrowth = true
@@ -1946,7 +2067,10 @@ local function DecideCapacityPlan(runtime, current, constraints, rolePlan)
     if liveCombatWindow and current.Factories.Air.Ready >= 1 and current.Factories.Air.Total > 0 and not powerBufferLow then
         airTarget = math.max(airTarget, 1)
     end
-    local completionLock = unstaffedFactoryShell or (landFactoryCompletionDebt and current.Factories.Land.Total >= 2)
+    local completionLock = genericUnstaffedFactoryShell
+        or tooManyUnfinishedFactoryShells
+        or (factoryTaskDebt and (factoryTask.Domain ~= 'Land' or current.Factories.Land.Total >= 2))
+        or (deepMassStall and genericFactoryCompletionDebt)
     if constraints.SurplusSpendWindow
         and current.Factories.Land.Ready >= 4
         and not constraints.CriticalFactory
@@ -2002,8 +2126,84 @@ local function DecideCapacityPlan(runtime, current, constraints, rolePlan)
     if macroObjective == 'first_land_hq' and current.Factories.Land.Ready >= 4 and not completionLock then
         landTarget = math.min(landTarget, math.max(current.Factories.Land.Total, current.Factories.Land.Ready))
     end
+    local ecoFactoryCap = math.max(
+        4,
+        2 + math.floor((mexReady or 0) * 0.72) + math.floor((eco.MassIncome or 0) * 0.22)
+    )
+    local phaseFactoryHardCap = 6
+    if now >= 720 then
+        phaseFactoryHardCap = 7
+    end
+    if now >= 1320 then
+        phaseFactoryHardCap = 8
+    end
+    if now >= 2100 then
+        phaseFactoryHardCap = 10
+    end
+    if now >= 3000 then
+        phaseFactoryHardCap = 12
+    end
+    if severeAirRaidRecovery or constraints.CounterAirWindow then
+        phaseFactoryHardCap = phaseFactoryHardCap + 1
+    end
+    if constraints.SurplusSpendWindow and now >= 1800 then
+        phaseFactoryHardCap = phaseFactoryHardCap + 1
+    end
+    if constraints.StrongSurplusWindow and now >= 2400 then
+        phaseFactoryHardCap = phaseFactoryHardCap + 1
+    end
+    if constraints.EcoWeak or chronicMassDeficit then
+        phaseFactoryHardCap = phaseFactoryHardCap - 1
+    end
+    phaseFactoryHardCap = Clamp(phaseFactoryHardCap, 4, 13)
+    if now < 1200 then
+        ecoFactoryCap = math.min(ecoFactoryCap, 9)
+    end
+    if constraints.EcoWeak then
+        ecoFactoryCap = math.max(4, ecoFactoryCap - 1)
+    end
+    if severeAirRaidRecovery then
+        ecoFactoryCap = ecoFactoryCap + 1
+    end
+    if deepMassStall then
+        ecoFactoryCap = math.min(ecoFactoryCap, math.max(4, totalFactories - 1))
+    elseif chronicMassDeficit then
+        ecoFactoryCap = math.min(ecoFactoryCap, math.max(4, totalFactories))
+    end
+    ecoFactoryCap = math.min(ecoFactoryCap, phaseFactoryHardCap)
+    local desiredFactoryTotal = landTarget + airTarget + seaTarget
+    if desiredFactoryTotal > ecoFactoryCap then
+        local overflow = desiredFactoryTotal - ecoFactoryCap
+        local minLand = liveCombatWindow and (constraints.EcoWeak and 1 or 2) or 1
+        local minSea = (constraints.NavyLowValue and 0) or ((current.Factories.Navy.Total > 0) and 1 or 0)
+        local minAir = 0
+        if preserveAirWindow or severeAirRaidRecovery then
+            minAir = (current.Factories.Air.Total > 0) and 1 or 0
+            if severeAirRaidRecovery and current.Factories.Air.Total >= 2 and not powerBufferLow then
+                minAir = 2
+            end
+        end
+
+        local cut = math.min(math.max(0, landTarget - minLand), overflow)
+        landTarget = landTarget - cut
+        overflow = overflow - cut
+
+        if overflow > 0 then
+            cut = math.min(math.max(0, seaTarget - minSea), overflow)
+            seaTarget = seaTarget - cut
+            overflow = overflow - cut
+        end
+        if overflow > 0 then
+            cut = math.min(math.max(0, airTarget - minAir), overflow)
+            airTarget = airTarget - cut
+            overflow = overflow - cut
+        end
+        if overflow > 0 then
+            landTarget = math.max(1, landTarget - overflow)
+        end
+    end
     local landFactoryAllowed = (not pauseGrowth) and (not completionLock) and (current.Factories.Land.Total < landTarget)
-    local nonLandFactoryAllowed = (not pauseGrowth) and (not completionLock or emergencyAirFactory or threatenedAirUnlock or counterAirFactory)
+    local nonLandFactoryAllowed = (not pauseGrowth) and (not completionLock or emergencyAirFactory or threatenedAirUnlock or counterAirFactory or severeAirRaidRecovery)
 
     return {
         AddLandFactory = landFactoryAllowed,
@@ -2223,6 +2423,10 @@ local function DecideStructurePlan(runtime, current, constraints, confidence, mo
     local approachCluster = clusterState.ApproachCluster or {}
     local bigMap = TableCount(graph.Nodes or {}) >= 8
     local powerReady = (((current.Eco or {}).Power or {}).Ready) or 0
+    local mexReady = (((current.Eco or {}).Mex or {}).Ready) or 0
+    local severeBomberRaid = constraints.SevereBomberRaid == true
+    local bomberSeverity = constraints.BomberRaidSeverity or 0
+    local mexExpansionPressure = mexReady < math.max(8, (constraints.StarterMexFloor or 5) + 3)
     now = now or 0
 
     local radarDesired = 0
@@ -2238,6 +2442,9 @@ local function DecideStructurePlan(runtime, current, constraints, confidence, mo
     if (constraints.BomberWatch or constraints.BomberPanic or constraints.ExposedMexAirRaid) and powerReady > 0 then
         radarDesired = math.max(radarDesired, 1)
     end
+    if severeBomberRaid and powerReady > 0 then
+        radarDesired = math.max(radarDesired, 2)
+    end
     if (approachCluster.TotalThreat or 0) >= 6 and (approachCluster.HomeDistance or 999) < 260 and powerReady > 0 then
         radarDesired = math.max(radarDesired, 1)
     end
@@ -2249,6 +2456,15 @@ local function DecideStructurePlan(runtime, current, constraints, confidence, mo
     end
     if constraints.StarterPhase then
         radarDesired = (constraints.StarterRadarRequired and powerReady > 0) and 1 or 0
+    end
+    if mexExpansionPressure
+        and not constraints.AirPanic
+        and not constraints.BomberPanic
+        and not constraints.ExposedMexAirRaid
+        and not raid.UnderAirHarass
+        and not raid.UnderLandHarass
+        and not constraints.VisionPanic then
+        radarDesired = math.min(radarDesired, 1)
     end
     radarDesired = Clamp(radarDesired, 0, 3)
     local radarCritical = radarDesired > (current.Structures.Radar or 0)
@@ -2262,11 +2478,17 @@ local function DecideStructurePlan(runtime, current, constraints, confidence, mo
         baseAADesired = 0
     elseif constraints.AirPanic or raid.UnderAirHarass then
         baseAADesired = 2 + math.min(2, constraints.AirThreatZones)
+        if severeBomberRaid then
+            baseAADesired = baseAADesired + 1 + math.min(1, math.floor(bomberSeverity / 4))
+        end
     elseif constraints.AirThreatZones > 0 or (((opp.Air or 0) > 0) and confidence.Air >= 0.5 and now >= 300) then
         baseAADesired = 1
         if (mode == 'air_control' or now >= 600) and ((opp.Air or 0) >= 3 or constraints.AirThreatZones >= 2) then
             baseAADesired = 2
         end
+    end
+    if severeBomberRaid and powerReady > 0 and not constraints.StarterPhase and not constraints.EconBootstrap then
+        baseAADesired = math.max(baseAADesired, 3)
     end
 
     local pdDesired = 0
@@ -2278,18 +2500,29 @@ local function DecideStructurePlan(runtime, current, constraints, confidence, mo
         pdDesired = 1
     end
 
-    baseAADesired = Clamp(baseAADesired, 0, 4)
+    baseAADesired = Clamp(baseAADesired, 0, 5)
     pdDesired = Clamp(pdDesired, 0, 4)
     local exposedMexAADesired = 0
     if powerReady > 0 and (constraints.BomberPanic or constraints.ExposedMexAirRaid or raid.UnderAirHarass) then
         exposedMexAADesired = math.max(1, ((raid.LastBomberEnemyCount or 0) >= 2 or constraints.ExposedMexAirRaid) and 2 or 1)
+        if severeBomberRaid then
+            exposedMexAADesired = math.max(exposedMexAADesired, 2 + math.min(1, math.floor(bomberSeverity / 4)))
+        end
     end
     local navalDefenseDesired = (sonarDesired > 0 and (opp.Navy or 0) > 0 and confidence.Navy >= 0.45) and 1 or 0
 
-    if constraints.EcoWeak and not constraints.AirPanic then
+    if constraints.EcoWeak and not constraints.AirPanic and not severeBomberRaid then
         baseAADesired = math.min(baseAADesired, 2)
         pdDesired = math.min(pdDesired, 2)
         exposedMexAADesired = math.min(exposedMexAADesired, 1)
+    end
+    if mexExpansionPressure
+        and not constraints.LandPanic
+        and not constraints.AirPanic
+        and not raid.UnderLandHarass
+        and not raid.UnderAirHarass then
+        baseAADesired = math.min(baseAADesired, 1)
+        pdDesired = math.min(pdDesired, 1)
     end
 
     return {
@@ -2334,11 +2567,11 @@ local function DecideMacroObjective(aiBrain, runtime, current, constraints, tech
     local earlyMassBudget = (eco.MassIncome or 0)
         + math.max(0, (eco.MassTrend or 0) * 8)
         + math.max(0, ((eco.MassStorageRatio or 0) - 0.06) * 10)
-    local starterMexTarget = math.max(4, ((constraints.StarterMexFloor or 5) - 1))
+    local starterMexTarget = math.max(6, (constraints.StarterMexFloor or 5) + 1)
     local starterMexNeed = readyLand >= 1
         and powerReady >= 1
         and mexReady < starterMexTarget
-        and now < 420
+        and now < 600
         and not constraints.CriticalFactory
         and not constraints.CriticalStructure
 
