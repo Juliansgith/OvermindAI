@@ -296,7 +296,9 @@ local function TryReclaimFieldZone(aiBrain, runtime, eng, targetPos, now)
     end
 
     local planner = runtime and runtime.StrategicPlanner or {}
-    if not (planner.ReclaimFirst == true or planner.OuterRetentionActive == true) then
+    local policy = runtime and runtime.EcoPolicy or {}
+    local quotaForced = (policy.EngineerReclaimQuota or 0) > 0
+    if not (planner.ReclaimFirst == true or planner.OuterRetentionActive == true or quotaForced) then
         return false
     end
 
@@ -321,6 +323,9 @@ local function TryReclaimFieldZone(aiBrain, runtime, eng, targetPos, now)
     local threatCap = planner.ReclaimFirst and (outerBacked and 2.35 or 2.0) or (outerBacked and 1.8 or 1.5)
     local routeRiskCap = planner.ReclaimFirst and (outerBacked and 4.0 or 3.5) or (outerBacked and 3.4 or 3.0)
     local minSupport = planner.ReclaimFirst and (outerBacked and 1 or 2) or (outerBacked and 2 or 3)
+    local quietField = enemySupport <= 0
+        and supportWeightedThreat <= 0.25
+        and routeRisk <= (quotaForced and 2.8 or 2.2)
 
     if table.getn(reclaimTargets) <= 0 or reclaimMass < (planner.ReclaimFirst and 80 or 120) then
         return false
@@ -337,7 +342,7 @@ local function TryReclaimFieldZone(aiBrain, runtime, eng, targetPos, now)
     if enemySupport > math.max(1, supported) then
         return false
     end
-    if supported < minSupport and distMain > (outerBacked and 180 or 120) then
+    if supported < minSupport and distMain > (outerBacked and 180 or 120) and not quietField then
         return false
     end
     if HasEnemyCombatNear(aiBrain, targetPos, planner.ReclaimFirst and 20 or 24) and supported < (outerBacked and minSupport or (minSupport + 1)) then
