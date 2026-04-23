@@ -263,6 +263,59 @@ local function FallbackRole(kind, plan, eco)
     return false
 end
 
+local function CountLandScreenUnits(rolePlan)
+    return (((rolePlan.LandDirect or {}).CurrentUnits) or 0)
+        + (((rolePlan.LandAA or {}).CurrentUnits) or 0)
+        + (((rolePlan.LandIndirect or {}).CurrentUnits) or 0)
+end
+
+local function SelectEarlyLandScreenRole(kind, plan, rolePlan)
+    if kind ~= 'land' then
+        return false, 0
+    end
+
+    local current = plan.Current or {}
+    local factories = current.Factories or {}
+    local landFactories = factories.Land or {}
+    if (landFactories.Ready or 0) <= 0 then
+        return false, 0
+    end
+
+    local emerg = plan.EmergencyOverrides or {}
+    local constraints = plan.ConstraintState or {}
+    local engineer = rolePlan.Engineer or {}
+    local engineerUnits = engineer.CurrentUnits or 0
+    if engineerUnits <= 1 or emerg.EcoCrash then
+        return false, 0
+    end
+
+    local now = plan.Time or GetGameTimeSeconds()
+    local landScreenUnits = CountLandScreenUnits(rolePlan)
+    local scoutUnits = ((rolePlan.LandScout or {}).CurrentUnits) or 0
+    local screenFloor = 0
+    if now < 240 then
+        screenFloor = 3
+    elseif now < 420 then
+        screenFloor = 7
+    elseif now < 660 then
+        screenFloor = 12
+    end
+
+    if screenFloor > 0 and engineerUnits >= 3 and landScreenUnits < screenFloor then
+        return 'LandDirect', 965
+    end
+    if now >= 150 and now < 660 and engineerUnits >= 4 and scoutUnits < 1 and landScreenUnits >= 2 then
+        return 'LandScout', 930
+    end
+    if (emerg.LandPanic or emerg.FrontCollapse or constraints.ApproachReal or (constraints.BasePressure or 0) >= 0.14)
+        and engineerUnits >= 2
+        and landScreenUnits < 14 then
+        return 'LandDirect', 975
+    end
+
+    return false, 0
+end
+
 local function ComputeRoleUtility(roleName, entry, plan, eco, kind)
     local deficitStrength = (entry.DesiredStrength or entry.Desired or 0) - (entry.CurrentStrength or entry.Current or 0)
     local deficitUnits = (entry.DesiredUnits or 0) - (entry.CurrentUnits or 0)
@@ -354,6 +407,11 @@ local function PickPlannedRole(factory, runtime, eco)
     local roleNames = GetFactoryRoleNames(kind)
     local bestRole = false
     local bestUtility = -999999
+
+    local forcedRole, forcedUtility = SelectEarlyLandScreenRole(kind, plan, rolePlan)
+    if forcedRole and rolePlan[forcedRole] then
+        return forcedRole, forcedUtility, rolePlan[forcedRole]
+    end
 
     for _, roleName in roleNames do
         local entry = rolePlan[roleName]

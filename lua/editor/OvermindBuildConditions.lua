@@ -2443,6 +2443,7 @@ function ShouldBuildFactoryEngineer(aiBrain, locationType, minPerFactory, minTot
     local factoryCount = GetUnitCount(aiBrain, categories.FACTORY * categories.STRUCTURE)
     local engCount = GetUnitCount(aiBrain, categories.ENGINEER * categories.MOBILE)
     local mexCount = GetUnitCount(aiBrain, categories.MASSEXTRACTION * categories.STRUCTURE)
+    local now = GetGameTimeSeconds()
     local perFactory = minPerFactory or (policy and policy.EngineerFactoryRatio) or 0.95
     local targetTotal = math.max(
         minTotal or 6,
@@ -2493,6 +2494,16 @@ function ShouldBuildFactoryEngineer(aiBrain, locationType, minPerFactory, minTot
     if entry then
         local currentStrength, desiredStrength, currentUnits, desiredUnits = GetRolePlanMetrics(entry)
         desiredUnits = math.max(desiredUnits, minTotal or 0)
+        local landScreen = GetUnitCount(aiBrain, categories.MOBILE * categories.LAND * categories.TECH1 - categories.ENGINEER - categories.SCOUT - categories.COMMAND)
+        local earlyScreenFloor = (now < 240) and 4 or ((now < 420) and 8 or ((now < 660) and 12 or 0))
+        if earlyScreenFloor > 0
+            and factoryCount <= 2
+            and engCount >= 4
+            and landScreen < earlyScreenFloor
+            and not HasRecoveryFlag(aiBrain, 'ForceBaseEngineerRecovery')
+            and not recovery.ForceFactoryRecovery then
+            return false
+        end
         if factoryTask.Active and (factoryTask.AssignedBuilders or 0) < (factoryTask.RequiredBuilders or 0) then
             desiredUnits = desiredUnits + math.max(1, (factoryTask.RequiredBuilders or 0) - (factoryTask.AssignedBuilders or 0))
         end

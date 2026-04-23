@@ -1064,7 +1064,7 @@ local function BuildRoleEntry(roleName, currentStrength, currentUnits, desiredUn
     }
 end
 
-local function DecideRolePlan(runtime, current, constraints, demand, budget, confidence, mode, trends)
+local function DecideRolePlan(runtime, current, constraints, demand, budget, confidence, mode, trends, now)
     local policy = runtime.EcoPolicy or {}
     local opp = runtime.OpponentModel or {}
     local mexReady = (((current.Eco or {}).Mex or {}).Ready) or 0
@@ -1189,6 +1189,18 @@ local function DecideRolePlan(runtime, current, constraints, demand, budget, con
         landAADesired = 0
         landIndirectDesired = 0
         landDirectDesired = Clamp(landTotal, 0, 6)
+    end
+    local earlyLandScreenUnits = ((current.RoleUnits and current.RoleUnits.LandDirect) or 0)
+        + ((current.RoleUnits and current.RoleUnits.LandAA) or 0)
+        + ((current.RoleUnits and current.RoleUnits.LandIndirect) or 0)
+    if current.Factories.Land.Ready >= 1
+        and (now or 0) < 660
+        and not constraints.EcoCrash then
+        local earlyScreenFloor = ((now or 0) < 240) and 4 or (((now or 0) < 420) and 8 or 12)
+        landDirectDesired = math.max(landDirectDesired, earlyScreenFloor)
+        if (now or 0) >= 150 then
+            scoutDesired = math.max(scoutDesired, 1)
+        end
     end
 
     local airEnabled = (not constraints.EconBootstrap and (current.Factories.Air.Total > 0 or budget.Air >= 0.14 or constraints.AirPanic or constraints.VisionPanic))
@@ -1402,6 +1414,15 @@ local function DecideRolePlan(runtime, current, constraints, demand, budget, con
     if reclaimFirst then
         engineerDesired = engineerDesired + 1
     end
+    if current.Factories.Land.Ready >= 1
+        and (now or 0) < 660
+        and earlyLandScreenUnits < (((now or 0) < 240) and 4 or (((now or 0) < 420) and 8 or 12))
+        and not constraints.CriticalFactory
+        and not constraints.CriticalStructure
+        and not constraints.EcoCrash then
+        local engineerCap = ((now or 0) < 420) and 6 or 8
+        engineerDesired = math.min(engineerDesired, math.max(engineerCap, current.RoleUnits.Engineer or 0))
+    end
     engineerDesired = Clamp(engineerDesired, 3, 20)
 
     return {
@@ -1488,6 +1509,16 @@ local function DecideCapacityPlan(runtime, current, constraints, rolePlan)
         and not constraints.CriticalFactory
         and not constraints.CriticalStructure
         and not constraints.UnitCapPressure
+    local secondLandTempoReady = current.Factories.Land.Total <= 1
+        and current.Factories.Land.Ready >= 1
+        and current.Factories.Air.Total <= 0
+        and now >= 105
+        and powerReady >= math.max(2, (constraints.StarterPowerFloor or 2) - 1)
+        and engineerUnits >= 4
+        and (mexReady >= 1 or planner.ReclaimFirst == true or policy.ReclaimPressureMode == true or policy.ContestMapMode == true)
+        and not constraints.EcoCrash
+        and not constraints.CriticalFactory
+        and not constraints.UnitCapPressure
     local watchAirFactory = constraints.BomberWatch
         and powerReady >= 2
         and engineerUnits >= 4
@@ -1531,7 +1562,7 @@ local function DecideCapacityPlan(runtime, current, constraints, rolePlan)
         and not constraints.CriticalStructure
         and not constraints.UnitCapPressure
 
-    if secondLandEcoReady or secondLandBootstrap or current.Factories.Land.Total >= 2 or current.Factories.Land.Ready >= 2 then
+    if secondLandEcoReady or secondLandTempoReady or secondLandBootstrap or current.Factories.Land.Total >= 2 or current.Factories.Land.Ready >= 2 then
         state.SecondLandFloorLatched = true
     end
     local secondLandLatched = state.SecondLandFloorLatched == true
@@ -1686,7 +1717,7 @@ local function DecideCapacityPlan(runtime, current, constraints, rolePlan)
         landTarget = math.min(landTarget, 1)
         airTarget = 0
     end
-    if secondLandBootstrap then
+    if secondLandTempoReady or secondLandBootstrap then
         landTarget = math.max(landTarget, 2)
         if not (watchAirFactory or threatenedAirUnlock or emergencyAirFactory or counterAirFactory) then
             airTarget = 0
@@ -1761,7 +1792,7 @@ local function DecideCapacityPlan(runtime, current, constraints, rolePlan)
     end
     if constraints.StarterPhase then
         landTarget = 1
-        if secondLandEcoReady or secondLandBootstrap or contestStarterTempo then
+        if secondLandEcoReady or secondLandTempoReady or secondLandBootstrap or secondLandLatched or contestStarterTempo then
             landTarget = math.max(landTarget, 2)
         end
         if contestStarterTempo
@@ -1858,7 +1889,7 @@ local function DecideCapacityPlan(runtime, current, constraints, rolePlan)
         and not constraints.CriticalStructure then
         landTarget = math.max(landTarget, math.min(landCap, 5))
     end
-    if secondLandEcoReady and not emergencyAirFactory then
+    if (secondLandEcoReady or secondLandTempoReady) and not emergencyAirFactory then
         landTarget = math.max(landTarget, 2)
     end
     if emergencyAirFactory then
@@ -1922,6 +1953,8 @@ local function DecideCapacityPlan(runtime, current, constraints, rolePlan)
 
     local starterGrowthLock = constraints.StarterPhase
         and not contestStarterTempo
+        and not secondLandTempoReady
+        and not (secondLandLatched and current.Factories.Land.Total <= 1)
         and (
             current.Factories.Total <= 1
             or constraints.RadarCritical
@@ -1988,6 +2021,15 @@ local function DecideCapacityPlan(runtime, current, constraints, rolePlan)
         and not constraints.QueueStarved
         and not constraints.CriticalFactory
         and not structurePausesGrowth then
+        landTarget = math.max(landTarget, 2)
+        pauseGrowth = false
+    end
+    if secondLandTempoReady
+        and current.Factories.Land.Total <= 1
+        and totalUnfinished <= 0
+        and not constraints.EcoCrash
+        and not constraints.QueueStarved
+        and not constraints.CriticalFactory then
         landTarget = math.max(landTarget, 2)
         pauseGrowth = false
     end
@@ -2704,7 +2746,8 @@ function Module.Update(aiBrain, now)
     local structurePlan = DecideStructurePlan(runtime, current, constraints, confidence, mode, now)
     local demand = BuildDemandLedger(runtime, current, constraints, trends, confidence, mode)
     local budget = DecideDomainBudget(runtime, mode, constraints, demand, confidence, macroObjective.Name)
-    local rolePlan = DecideRolePlan(runtime, current, constraints, demand, budget, confidence, mode, trends)
+    state.Time = now
+    local rolePlan = DecideRolePlan(runtime, current, constraints, demand, budget, confidence, mode, trends, now)
     state.MacroObjective = macroObjective.Name
     state.MacroObjectiveReason = macroObjective.Reason
     local capacityPlan = DecideCapacityPlan(runtime, current, constraints, rolePlan)

@@ -506,7 +506,7 @@ BuilderGroup {
     Builder {
         BuilderName = 'Overmind T1Director Land Factory Floor',
         PlatoonTemplate = 'EngineerBuilder',
-        Priority = 1148,
+        Priority = 1162,
         InstanceCount = 1,
         BuilderConditions = {
             { OMBC, 'IsOvermindBrain', {} },
