@@ -139,4 +139,20 @@ function M.Refresh(aiBrain, runtime, now)
     return Refresh(runtime, now)
 end
 
+function PublishFactoryActivity(aiBrain, runtime, now, data)
+    return M.PublishFactoryActivity(aiBrain, runtime, now, data)
+end
+
+function PublishEngineerActivity(aiBrain, runtime, now, data)
+    return M.PublishEngineerActivity(aiBrain, runtime, now, data)
+end
+
+function PublishUpgradeActivity(aiBrain, runtime, now, data)
+    return M.PublishUpgradeActivity(aiBrain, runtime, now, data)
+end
+
+function PublishReclaimActivity(aiBrain, runtime, now, data)
+    return M.PublishReclaimActivity(aiBrain, runtime, now, data)
+end
+
 return M

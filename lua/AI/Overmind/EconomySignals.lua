@@ -382,4 +382,24 @@ function M.ComputeContestMapStructure(aiBrain, runtime)
     return ComputeContestMapStructure(aiBrain, runtime or {})
 end
 
+function Update(aiBrain, now)
+    return M.Update(aiBrain, now)
+end
+
+function GetSignals(runtime)
+    return M.GetSignals(runtime)
+end
+
+function GetStructure(aiBrain, runtime, now)
+    return M.GetStructure(aiBrain, runtime, now)
+end
+
+function GetVelocity(runtime)
+    return M.GetVelocity(runtime)
+end
+
+function GetPressure(runtime)
+    return M.GetPressure(runtime)
+end
+
 return M

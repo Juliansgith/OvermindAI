@@ -3,7 +3,7 @@ local OvermindScheduler = import('/mods/OvermindAI/lua/AI/Overmind/Scheduler.lua
 local OvermindMemory = import('/mods/OvermindAI/lua/AI/Overmind/Memory.lua')
 
 local ActiveBrains = {}
-local BuildFingerprint = 'v202-economy-signals-ledger-cutover'
+local BuildFingerprint = 'v203-economy-export-hotfix'
 
 local NavUtils = false
 do
