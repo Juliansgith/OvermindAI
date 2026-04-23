@@ -68,6 +68,12 @@ function Update(aiBrain, now)
         if okLegacy and type(legacy) == 'table' and type(legacy.Update) == 'function' then
             ActiveModule = legacy
             LastModularError = tostring(result)
+            if aiBrain and runtime then
+                runtime.EngineerDirectorLastError = LastModularError
+                WARN(string.format('*OVERMIND ENGDIR MODULAR ERROR A%d %s',
+                    aiBrain:GetArmyIndex(),
+                    LastModularError))
+            end
             SetImplementation(aiBrain, runtime, 'legacy', 'runtime-fallback:' .. LastModularError)
             return legacy.Update(aiBrain, now)
         end

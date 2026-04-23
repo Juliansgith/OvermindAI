@@ -1,4 +1,5 @@
 local OvermindAutoTune = import('/mods/OvermindAI/lua/AI/Overmind/AutoTune.lua')
+local OvermindEconomySignals = import('/mods/OvermindAI/lua/AI/Overmind/EconomySignals.lua')
 
 local function Clamp(v, minV, maxV)
     if v < minV then
@@ -14,166 +15,6 @@ local function TableCount(t)
     return t and table.getn(t) or 0
 end
 
-local function Distance2D(a, b)
-    local dx = (a[1] or 0) - (b[1] or 0)
-    local dz = (a[3] or 0) - (b[3] or 0)
-    return math.sqrt((dx * dx) + (dz * dz))
-end
-
-local function IsCivilianArmyName(name)
-    if not name or name == 'NEUTRAL_CIVILIAN' then
-        return true
-    end
-    if ScenarioInfo and ScenarioInfo.ArmySetup and ScenarioInfo.ArmySetup[name] then
-        local personality = string.lower(ScenarioInfo.ArmySetup[name].AIPersonality or '')
-        if string.find(personality, 'civilian') ~= nil then
-            return true
-        end
-    end
-    return false
-end
-
-local function CountActivePlayerBrains()
-    local count = 0
-    if not ArmyBrains then
-        return 2
-    end
-
-    for _, brain in ArmyBrains do
-        if brain and not IsCivilianArmyName(brain.Name) then
-            count = count + 1
-        end
-    end
-
-    return math.max(2, count)
-end
-
-local function ComputeContestMapStructure(aiBrain, runtime)
-    local graph = runtime.ZoneGraph or {}
-    local zone = runtime.ZoneModel or {}
-    local nodes = graph.Nodes or {}
-    local navMarkerCount = zone.NavMarkerCount or graph.WaterZones or 0
-    local ownPos = graph.OwnMainPos or zone.OwnMainPos
-    if not ownPos and aiBrain and aiBrain.GetArmyStartPos then
-        local sx, sz = aiBrain:GetArmyStartPos()
-        ownPos = { sx, 0, sz }
-    end
-    local enemyPos = graph.EnemyMainPos or runtime.PrimaryEnemyPos or false
-    local metrics = {
-        NavMarkerCount = navMarkerCount or 0,
-        TotalLandZones = 0,
-        TotalMass = 0,
-        OuterMass = 0,
-        ForwardOwnedMass = 0,
-        OuterMexShare = 0,
-        StartZoneMexShare = 0,
-        OuterHoldShare = 0,
-        SafeForwardMexCount = 0,
-        ContestableZoneCount = 0,
-        LandRouteDepth = 0,
-        FrontSecure = false,
-        StructuralContestMap = false,
-        PlayerCount = CountActivePlayerBrains(),
-        DirectEnemyDistance = (ownPos and enemyPos) and Distance2D(ownPos, enemyPos) or 999,
-        FocusOnT1Spam = false,
-    }
-
-    if navMarkerCount >= 3 then
-        return metrics
-    end
-
-    local depthTotal = 0
-    local depthCount = 0
-    for _, node in nodes do
-        if node and node.Medium == 'land' then
-            metrics.TotalLandZones = metrics.TotalLandZones + 1
-
-            local class = node.Classification or 'rear'
-            local massCount = node.MassCount or 0
-            local expansionCount = node.ExpansionCount or 0
-            local enemyMex = node.EnemyMex or 0
-            local threat = node.Threat or 0
-            local routeRisk = node.RouteRisk or 0
-            local friendlyLand = node.FriendlyLand or 0
-            local enemyLand = node.EnemyLand or 0
-            local friendlyStructures = node.FriendlyStructures or 0
-            local enemyStructures = node.EnemyStructures or 0
-            local hopHome = node.HopHome or 999
-            local outsideHome = class == 'front' or class == 'contested' or class == 'enemy_side'
-            local contestable = outsideHome and ((massCount + expansionCount + enemyMex) > 0)
-            local safeForward = (class == 'front' or class == 'contested')
-                and (massCount > 0 or enemyMex > 0)
-                and routeRisk <= 3.6
-                and threat <= 2.6
-                and enemyStructures <= 2
-            local heldForward = outsideHome
-                and class ~= 'enemy_side'
-                and (
-                    (class == 'front' and (friendlyLand >= enemyLand or (enemyLand <= 0 and friendlyStructures >= 1)))
-                    or (class == 'contested' and friendlyLand >= math.max(1, enemyLand) and routeRisk <= 3.2 and threat <= 2.2 and enemyStructures <= 1)
-                )
-
-            metrics.TotalMass = metrics.TotalMass + massCount
-            if outsideHome then
-                metrics.OuterMass = metrics.OuterMass + massCount
-            end
-            if heldForward then
-                metrics.ForwardOwnedMass = metrics.ForwardOwnedMass + math.max(1, massCount)
-            end
-            if contestable then
-                metrics.ContestableZoneCount = metrics.ContestableZoneCount + 1
-            end
-            if safeForward then
-                metrics.SafeForwardMexCount = metrics.SafeForwardMexCount + math.max(1, massCount)
-            end
-            if class == 'front' or class == 'contested' then
-                depthTotal = depthTotal + math.min(6, hopHome)
-                depthCount = depthCount + 1
-            end
-        end
-    end
-
-    metrics.OuterMexShare = (metrics.TotalMass > 0) and (metrics.OuterMass / metrics.TotalMass) or 0
-    metrics.OuterHoldShare = (metrics.OuterMass > 0) and (metrics.ForwardOwnedMass / metrics.OuterMass) or 0
-    metrics.LandRouteDepth = (depthCount > 0) and (depthTotal / depthCount) or 0
-    metrics.FrontSecure =
-        metrics.OuterMass <= 0
-        or (
-            metrics.OuterHoldShare >= 0.52
-            and (metrics.SafeForwardMexCount >= 2 or metrics.ContestableZoneCount <= 2)
-        )
-    metrics.StructuralContestMap =
-        metrics.TotalLandZones >= 6 and (
-            metrics.OuterMexShare >= 0.36
-            or metrics.SafeForwardMexCount >= 4
-            or (metrics.ContestableZoneCount >= 3 and metrics.LandRouteDepth >= 1.7)
-        )
-
-    local mexPercentThreshold = 0.45
-    if metrics.TotalMass > 80 or metrics.PlayerCount >= 4 then
-        if metrics.TotalMass > 130 then
-            mexPercentThreshold = 0.30
-        else
-            mexPercentThreshold = 0.375
-        end
-    end
-    local outsideStartThreshold = 1 - mexPercentThreshold
-    local smallMapLike = metrics.TotalLandZones <= 16
-        or metrics.DirectEnemyDistance <= 1100
-        or metrics.LandRouteDepth <= 2.6
-    metrics.StartZoneMexShare = (metrics.TotalMass > 0) and Clamp(1 - metrics.OuterMexShare, 0, 1) or 0
-    metrics.FocusOnT1Spam =
-        metrics.StructuralContestMap
-        and metrics.PlayerCount <= 4
-        and metrics.TotalMass > 0
-        and metrics.TotalMass < 150
-        and smallMapLike
-        and metrics.OuterMexShare >= outsideStartThreshold
-        and (metrics.SafeForwardMexCount >= 2 or metrics.ContestableZoneCount >= 2)
-
-    return metrics
-end
-
 local function GetUnitCount(aiBrain, category)
     if not aiBrain or not category then
         return 0
@@ -185,7 +26,7 @@ local function DetermineMacroPhase(aiBrain, runtime, eco, opp, recovery, now)
     local intel = runtime.IntelModel or {}
     local graph = runtime.ZoneGraph or {}
     local zone = runtime.ZoneModel or {}
-    local structure = ComputeContestMapStructure(aiBrain, runtime)
+    local structure = OvermindEconomySignals.GetStructure(aiBrain, runtime, now)
     local mexCount = GetUnitCount(aiBrain, categories.MASSEXTRACTION * categories.STRUCTURE)
     local landFactories = GetUnitCount(aiBrain, categories.FACTORY * categories.LAND * categories.STRUCTURE)
     local airFactories = GetUnitCount(aiBrain, categories.FACTORY * categories.AIR * categories.STRUCTURE)
@@ -329,13 +170,18 @@ function UpdatePolicy(aiBrain, now)
     runtime.MacroPhase = phase
     runtime.MacroCounts = macroCounts
 
-    local structure = ComputeContestMapStructure(aiBrain, runtime)
+    local signalSnapshot = OvermindEconomySignals.Update(aiBrain, now)
+    local structure = signalSnapshot.Structure or OvermindEconomySignals.GetStructure(aiBrain, runtime, now)
+    local velocity = signalSnapshot.Velocity or runtime.EcoVelocity or {}
+    local pressure = signalSnapshot.Pressure or runtime.EcoPressure or {}
+    local policySeed = signalSnapshot.PolicySeed or {}
+    local ledger = runtime.EconomyLedger or {}
     local mapControl = intel.MapControl or graph.MapControl or zone.MapControl or 0
     local contestedZones = intel.ContestedZones or graph.ContestedZones or 0
     local zoneCount = TableCount(graph.Nodes or {})
     local navMarkerCount = structure.NavMarkerCount or zone.NavMarkerCount or graph.WaterZones or 0
     local landContestMap = structure.StructuralContestMap or (navMarkerCount < 3 and zoneCount >= 6)
-    local focusOnT1Spam = structure.FocusOnT1Spam == true
+    local focusOnT1Spam = policySeed.FocusOnT1Spam == true or structure.FocusOnT1Spam == true
     local stableTempoEco = (eco.MassIncome or 0) >= 3.6
         and (eco.EnergyIncome or 0) >= 50
         and massTrend >= -0.08
@@ -350,6 +196,9 @@ function UpdatePolicy(aiBrain, now)
     if focusOnT1Spam then
         contestMapMode = true
     end
+    if policySeed.ContestMapMode == true then
+        contestMapMode = true
+    end
     local productionFirstWindow = (contestMapMode or focusOnT1Spam)
         and stableTempoEco
         and mapControl <= 0.68
@@ -358,6 +207,7 @@ function UpdatePolicy(aiBrain, now)
         or planner.PunishGreed
         or goal == 'all_in'
         or goal == 'raid'
+        or policySeed.PrioritizeProduction == true
         or focusOnT1Spam
         or productionFirstWindow
         or (stableTempoEco and phase == 'pressure' and contestedZones >= 2 and now < 900 and mapControl < 0.55)
@@ -404,6 +254,20 @@ function UpdatePolicy(aiBrain, now)
     policy.ReclaimPressureMode = false
     policy.ProductionTempoBias = 0
     policy.FocusOnT1Spam = false
+    policy.AlwaysEco = true
+    policy.MexUpgradeConcurrency = 1
+    policy.EngineerReclaimQuota = 0
+    policy.EngineerExpansionQuota = 1
+    policy.EngineerBaseQuota = 2
+    policy.EcoGrowthPressure = 0
+    policy.ApproachFailurePressure = pressure.ApproachFailurePressure or 0
+    policy.PolicyReason = policySeed.PolicyReason or 'normal'
+    policy.SpendSaturation = ((ledger.Aggregate or {}).SpendSaturation) or (velocity.SpendSaturation or 0)
+    policy.FactoryBusyRatio = ((ledger.Aggregate or {}).FactoryBusyRatio) or (velocity.FactoryThroughput or 0)
+    policy.EngineerBusyRatio = ((ledger.Aggregate or {}).EngineerBusyRatio) or (velocity.EngineerProductivity or 0)
+    policy.ReclaimRateShort = velocity.ReclaimRateShort or 0
+    policy.EcoStagnationTime = velocity.EcoStagnationTime or 0
+    policy.ReclaimStagnationTime = velocity.ReclaimStagnationTime or 0
     policy.OuterMexShare = structure.OuterMexShare or 0
     policy.StartZoneMexShare = structure.StartZoneMexShare or 0
     policy.OuterHoldShare = structure.OuterHoldShare or 0
@@ -480,6 +344,33 @@ function UpdatePolicy(aiBrain, now)
     policy.ForwardContestBias = forwardContestBias and true or false
     policy.ReclaimPressureMode = reclaimPressureMode and true or false
     policy.ProductionTempoBias = (focusOnT1Spam and 0.42) or (contestMapMode and 0.28) or (prioritizeProduction and 0.16) or 0
+    policy.AlwaysEco = pressure.SurvivalCrisis ~= true
+    policy.EcoGrowthPressure = Clamp(
+        ((velocity.EcoStagnationTime or 0) / 180)
+        + ((velocity.ReclaimStagnationTime or 0) / 240)
+        + (((ledger.Aggregate or {}).IdleEngineerCount or 0) * 0.08),
+        0,
+        1.5)
+    policy.MexUpgradeConcurrency = 1
+    if pressure.SurvivalCrisis == true then
+        policy.MexUpgradeConcurrency = 0
+    elseif (velocity.SpendSaturation or 0) >= 0.72 and (eco.MassTrend or 0) >= -0.10 and (eco.EnergyTrend or 0) >= -8 then
+        policy.MexUpgradeConcurrency = 2
+    elseif policy.EcoGrowthPressure >= 0.65 and (eco.MassIncome or 0) >= 3.4 and (eco.EnergyIncome or 0) >= 38 then
+        policy.MexUpgradeConcurrency = 1
+    end
+    if focusOnT1Spam or contestMapMode or prioritizeProduction then
+        policy.MexUpgradeConcurrency = math.min(policy.MexUpgradeConcurrency, frontSecureUpgradeWindow and 2 or 1)
+    end
+    policy.EngineerReclaimQuota = 0
+    if reclaimPressureMode or ((planner.ReclaimFirst == true or planner.OuterRetentionActive == true) and (planner.ReclaimFieldScore or 0) >= 90) then
+        policy.EngineerReclaimQuota = 1
+    end
+    if (planner.ReclaimFieldScore or 0) >= 190 and (velocity.ReclaimStagnationTime or 0) >= 45 and pressure.SurvivalCrisis ~= true then
+        policy.EngineerReclaimQuota = 2
+    end
+    policy.EngineerExpansionQuota = (contestMapMode or focusOnT1Spam) and 2 or 1
+    policy.EngineerBaseQuota = pressure.SurvivalCrisis and 4 or ((phase == 'bootstrap' or phase == 'recover') and 3 or 2)
 
     if now < 420 then
         policy.EngineerReserveMin = 5
@@ -796,5 +687,11 @@ function UpdatePolicy(aiBrain, now)
     policy.AcuLateMaxDistance = Clamp(policy.AcuLateMaxDistance, 35, 160)
     policy.UpgradeMassIncome = Clamp(policy.UpgradeMassIncome, 2.5, 12)
     policy.UpgradeEnergyIncome = Clamp(policy.UpgradeEnergyIncome, 15, 220)
+    policy.MexUpgradeConcurrency = Clamp(policy.MexUpgradeConcurrency or 0, 0, 4)
+    policy.EngineerReclaimQuota = Clamp(policy.EngineerReclaimQuota or 0, 0, 3)
+    policy.EngineerExpansionQuota = Clamp(policy.EngineerExpansionQuota or 1, 0, 4)
+    policy.EngineerBaseQuota = Clamp(policy.EngineerBaseQuota or 2, 1, 8)
+    policy.EcoGrowthPressure = Clamp(policy.EcoGrowthPressure or 0, 0, 1.5)
+    policy.ApproachFailurePressure = Clamp(policy.ApproachFailurePressure or 0, 0, 1.5)
     policy.LastUpdate = now
 end

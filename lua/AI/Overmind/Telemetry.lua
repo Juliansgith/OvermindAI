@@ -69,6 +69,11 @@ function Capture(aiBrain, now)
 
     local tele = runtime.Telemetry
     local eco = runtime.EcoState or {}
+    local policy = runtime.EcoPolicy or {}
+    local velocity = runtime.EcoVelocity or {}
+    local pressure = runtime.EcoPressure or {}
+    local ledger = runtime.EconomyLedger or {}
+    local ledgerAgg = ledger.Aggregate or {}
     local opp = runtime.OpponentModel or {}
     local planner = runtime.StrategicPlanner or {}
     local mem = aiBrain.OvermindMemory or {}
@@ -151,6 +156,19 @@ function Capture(aiBrain, now)
         FactoryQueueDeficit = recovery.FactoryQueueDeficit or 0,
         FactoryQueueDeficitRatio = recovery.FactoryQueueDeficitRatio or 0,
         MacroPhase = runtime.MacroPhase or (runtime.EcoPolicy and runtime.EcoPolicy.MacroPhase) or 'unknown',
+        EcoPolicyReason = policy.PolicyReason or 'none',
+        EcoAlways = policy.AlwaysEco and 1 or 0,
+        EcoGrowthPressure = policy.EcoGrowthPressure or 0,
+        EcoSpendSaturation = policy.SpendSaturation or ledgerAgg.SpendSaturation or velocity.SpendSaturation or 0,
+        EcoFactoryBusy = policy.FactoryBusyRatio or ledgerAgg.FactoryBusyRatio or velocity.FactoryThroughput or 0,
+        EcoEngineerBusy = policy.EngineerBusyRatio or ledgerAgg.EngineerBusyRatio or velocity.EngineerProductivity or 0,
+        EcoStagnation = velocity.EcoStagnationTime or policy.EcoStagnationTime or 0,
+        ReclaimStagnation = velocity.ReclaimStagnationTime or policy.ReclaimStagnationTime or 0,
+        ApproachFailurePressure = policy.ApproachFailurePressure or pressure.ApproachFailurePressure or 0,
+        MexUpgradeConcurrency = policy.MexUpgradeConcurrency or 0,
+        EngineerReclaimQuota = policy.EngineerReclaimQuota or 0,
+        LedgerUpgradeReason = ledgerAgg.UpgradeBlockedReason or 'none',
+        LedgerReclaimReason = ledgerAgg.ReclaimBlockedReason or 'none',
         ProdMode = prod.Mode or 'none',
         LandFacNeed = capacity.LandTarget or 0,
         AirFacNeed = capacity.AirTarget or 0,
@@ -372,7 +390,11 @@ function Tune(aiBrain, now)
         runtime.LastMetricsLogTime = now
         local recovery = runtime.Recovery or {}
         local planner = runtime.StrategicPlanner or {}
-        LOG(string.format('*OVERMIND METRICS A%d goal=%s strat=%s/%s/%s:%.2f posture=%s pivot=%s conf=%.2f prod=%s float=%.2f estall=%.2f mstall=%.2f aggr=%.2f stagn=%.1f rf=%d rs=%d',
+        local policy = runtime.EcoPolicy or {}
+        local velocity = runtime.EcoVelocity or {}
+        local ledger = runtime.EconomyLedger or {}
+        local aggregate = ledger.Aggregate or {}
+        LOG(string.format('*OVERMIND METRICS A%d goal=%s strat=%s/%s/%s:%.2f posture=%s pivot=%s conf=%.2f prod=%s float=%.2f estall=%.2f mstall=%.2f aggr=%.2f stagn=%.1f eco=%.2f sat=%.2f fbusy=%.2f ebusy=%.2f mexcap=%d reclaimq=%d reason=%s rf=%d rs=%d',
             aiBrain:GetArmyIndex(),
             runtime.StrategyGoal or 'hold',
             (planner.Directive or 'stabilize'),
@@ -388,6 +410,13 @@ function Tune(aiBrain, now)
             massStallRate,
             runtime.Aggression or 1,
             recovery.StagnationTime or 0,
+            policy.EcoGrowthPressure or 0,
+            policy.SpendSaturation or aggregate.SpendSaturation or velocity.SpendSaturation or 0,
+            policy.FactoryBusyRatio or aggregate.FactoryBusyRatio or velocity.FactoryThroughput or 0,
+            policy.EngineerBusyRatio or aggregate.EngineerBusyRatio or velocity.EngineerProductivity or 0,
+            policy.MexUpgradeConcurrency or 0,
+            policy.EngineerReclaimQuota or 0,
+            policy.PolicyReason or 'none',
             recovery.ForceFactoryRecovery and 1 or 0,
             recovery.ForceScoutRecovery and 1 or 0))
     end

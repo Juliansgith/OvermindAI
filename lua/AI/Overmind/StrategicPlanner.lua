@@ -102,6 +102,7 @@ end
 local function BuildBattlefieldObjectives(aiBrain, runtime, signals, state, now)
     local ownPos = GetOwnMainPos(aiBrain, runtime)
     local policy = runtime.EcoPolicy or {}
+    local structure = ((runtime.EconomySignals or {}).Structure) or {}
     local candidateList = {}
     local reclaimFieldPos = false
     local reclaimFieldScore = 0
@@ -151,8 +152,8 @@ local function BuildBattlefieldObjectives(aiBrain, runtime, signals, state, now)
         and (signals.PrioritizeProduction or signals.ContestMapMode or signals.StructuralContestMap)
         and (
             (signals.ContestedZones or 0) >= 2
-            or (policy.OuterHoldShare or 0) < 0.58
-            or (policy.SafeForwardMexCount or 0) >= 2
+            or (structure.OuterHoldShare or policy.OuterHoldShare or 0) < 0.58
+            or (structure.SafeForwardMexCount or policy.SafeForwardMexCount or 0) >= 2
             or (outerContestValue >= 3.0)
             or (reclaimFieldScore >= 160)
         )
@@ -201,11 +202,13 @@ local function BuildSignals(aiBrain, runtime, now)
     local raid = runtime.RaidDefense or {}
     local force = runtime.ForceDirector or runtime.ForceManager or {}
     local policy = runtime.EcoPolicy or {}
-    local phase = runtime.MacroPhase or policy.MacroPhase or 'consolidate'
-    local prioritizeProduction = policy.PrioritizeProduction == true
-    local contestMapMode = policy.ContestMapMode == true
-    local preferTempoFromSurplus = policy.PreferTempoFromSurplus == true
-    local structuralContestMap = policy.StructuralContestMap == true
+    local economySignals = runtime.EconomySignals or {}
+    local policySeed = economySignals.PolicySeed or {}
+    local phase = runtime.MacroPhase or policy.MacroPhase or policySeed.MacroPhase or 'consolidate'
+    local prioritizeProduction = policy.PrioritizeProduction == true or policySeed.PrioritizeProduction == true
+    local contestMapMode = policy.ContestMapMode == true or policySeed.ContestMapMode == true
+    local preferTempoFromSurplus = policy.PreferTempoFromSurplus == true or policySeed.PreferTempoFromSurplus == true
+    local structuralContestMap = policy.StructuralContestMap == true or economySignals.StructuralContestMap == true or policySeed.StructuralContestMap == true
     local macro = runtime.MacroController or {}
     local macroObjective = macro.Phase or ((runtime.ProductionDirector or {}).MacroObjective) or 'land_factory_floor'
     local transitionLocked = macro.TransitionLocked == true
@@ -277,6 +280,10 @@ local function BuildSignals(aiBrain, runtime, now)
     local mexPeakReady = ((runtime.EngineerState or {}).PeakMexReady) or 0
     local mexReady = (((((runtime.ProductionDirector or {}).Current or {}).Eco or {}).Mex or {}).Ready) or 0
     local mexLossCount = math.max(0, mexPeakReady - mexReady)
+    local focusOnT1Spam = policy.FocusOnT1Spam == true or economySignals.FocusOnT1Spam == true or policySeed.FocusOnT1Spam == true
+    if ((economySignals.Structure or {}).T1SpamSuppressedByFailure) == true then
+        focusOnT1Spam = false
+    end
 
     return {
         Time = now or 0,
@@ -343,7 +350,7 @@ local function BuildSignals(aiBrain, runtime, now)
         ACUCrisisActive = acuCrisisActive,
         PrioritizeProduction = prioritizeProduction,
         ContestMapMode = contestMapMode,
-        FocusOnT1Spam = policy.FocusOnT1Spam == true,
+        FocusOnT1Spam = focusOnT1Spam,
         PreferTempoFromSurplus = preferTempoFromSurplus,
         StructuralContestMap = structuralContestMap,
         MacroObjective = macroObjective,

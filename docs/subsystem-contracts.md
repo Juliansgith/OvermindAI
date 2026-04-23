@@ -48,6 +48,76 @@ Primary outputs:
 - `UnitCap`
 - `UnitLoad`
 
+### `runtime.EconomyLedger`
+
+Owner:
+
+- `EconomyLedger`
+
+Primary outputs:
+
+- `Factory`
+- `Engineer`
+- `Upgrade`
+- `Reclaim`
+- `Aggregate`
+- `FactoryBusyRatio`
+- `EngineerBusyRatio`
+- `SpendSaturation`
+- blocked spend reasons
+
+### `runtime.EconomySignals`
+
+Owner:
+
+- `EconomySignals`
+
+Primary outputs:
+
+- canonical structural contest-map metrics
+- `PolicySeed`
+- `StructuralContestMap`
+- `FocusOnT1Spam`
+- `ContestMapMode`
+- approach-failure suppression flags
+
+### `runtime.EcoVelocity`
+
+Owner:
+
+- `EconomySignals`
+
+Primary outputs:
+
+- `MassIncomeTrendShort`
+- `EnergyIncomeTrendShort`
+- `MapMassHeldTrend`
+- `ReclaimRateShort`
+- `FactoryThroughput`
+- `EngineerProductivity`
+- `SpendSaturation`
+- `EcoStagnationTime`
+- `ReclaimStagnationTime`
+
+### `runtime.EcoPressure`
+
+Owner:
+
+- `EconomySignals`
+
+Primary outputs:
+
+- `LandPressure`
+- `AirPressure`
+- `NavalPressure`
+- `HomePressure`
+- `OuterPressure`
+- `ReclaimOpportunity`
+- `MapContestPressure`
+- `SurvivalCrisis`
+- `ACUCrisis`
+- `ApproachFailurePressure`
+
 ### `runtime.RuntimeContracts`
 
 Owner:

@@ -1,4 +1,5 @@
 local OvermindMemory = import('/mods/OvermindAI/lua/AI/Overmind/Memory.lua')
+local OvermindEconomyLedger = import('/mods/OvermindAI/lua/AI/Overmind/EconomyLedger.lua')
 
 local Module = {}
 
@@ -301,7 +302,11 @@ local function PickMexTarget(aiBrain, runtime, state)
     local contestMapMode = policy.ContestMapMode == true
     local focusOnT1Spam = policy.FocusOnT1Spam == true
     local localMexOnly = policy.LocalMexUpgradeOnly == true
-    local localMexConcurrentCap = math.max(1, policy.LocalMexUpgradeMaxConcurrent or 2)
+    local policyMexConcurrency = policy.MexUpgradeConcurrency
+    if policyMexConcurrency == nil then
+        policyMexConcurrency = policy.LocalMexUpgradeMaxConcurrent or 2
+    end
+    local localMexConcurrentCap = math.max(1, policyMexConcurrency or 1)
     local frontSecure = policy.FrontSecure == true
     local outerMexShare = policy.OuterMexShare or 0
     local outerHoldShare = policy.OuterHoldShare or 0
@@ -355,6 +360,11 @@ local function PickMexTarget(aiBrain, runtime, state)
     state.InFlight = activeMexUpgrades
     state.LocalInFlight = activeUpgradeScopes.Local or 0
     state.RemoteInFlight = activeUpgradeScopes.Remote or 0
+    if (policyMexConcurrency or 0) <= 0 and activeMexUpgrades <= 0 then
+        state.Reason = 'policy_hold'
+        state.Cap = 0
+        return
+    end
     local inflightTarget = false
     local inflightTargetTech = false
     local inflightTargetScope = false
@@ -420,7 +430,7 @@ local function PickMexTarget(aiBrain, runtime, state)
     if contestMapMode or focusOnT1Spam then
         allowTech3 = false
     end
-    local dynamicT2Cap = math.max(budgetT2Cap, ComputeDynamicMexCap(eco, readyLand, totalLand, powerReady, mexReady, surplusSpendWindow, strongSurplusWindow))
+    local dynamicT2Cap = math.max(policyMexConcurrency or 0, budgetT2Cap, ComputeDynamicMexCap(eco, readyLand, totalLand, powerReady, mexReady, surplusSpendWindow, strongSurplusWindow))
     if macroObjective == 'mass_consolidation' then
         dynamicT2Cap = math.max(dynamicT2Cap, math.max(1, budgetT2Cap))
     elseif macroObjective == 'first_land_hq' or macroObjective == 'first_t2_engineer' or macroObjective == 'first_t2_power' then
@@ -458,7 +468,7 @@ local function PickMexTarget(aiBrain, runtime, state)
         return
     end
 
-    if focusOnT1Spam and not strongSurplusWindow and not frontUpgradeReopen then
+    if focusOnT1Spam and not strongSurplusWindow and not frontUpgradeReopen and (policyMexConcurrency or 0) <= 0 then
         state.Reason = 't1_spam'
         state.Cap = 0
         return
@@ -854,6 +864,19 @@ local function UpdateDirector(aiBrain, now)
     PickMexTarget(aiBrain, runtime, state.Extractor)
     MaybeStartMexUpgrade(aiBrain, now, state.Extractor)
     PickFactoryTarget(aiBrain, runtime, state.Factory)
+
+    OvermindEconomyLedger.PublishUpgradeActivity(aiBrain, runtime, now, {
+        ActiveMexUpgrades = state.Extractor.InFlight or 0,
+        TargetTech = state.Extractor.TargetTech or 'none',
+        TargetScope = state.Extractor.Scope or 'none',
+        Reason = state.Extractor.Reason or 'none',
+        Cap = state.Extractor.Cap or 0,
+        Enabled = state.Extractor.Enabled and true or false,
+        LocalInFlight = state.Extractor.LocalInFlight or 0,
+        RemoteInFlight = state.Extractor.RemoteInFlight or 0,
+        FactoryEnabled = state.Factory.Enabled and true or false,
+        FactoryReason = state.Factory.Reason or 'none',
+    })
 
     if (now - (state.LastLogTime or -999)) >= 20 then
         state.LastLogTime = now

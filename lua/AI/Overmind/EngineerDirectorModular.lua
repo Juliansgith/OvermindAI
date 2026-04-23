@@ -4,6 +4,7 @@ local Policy = import('/mods/OvermindAI/lua/AI/Overmind/EngineerDirector/Policy.
 local Expansion = import('/mods/OvermindAI/lua/AI/Overmind/EngineerDirector/Expansion.lua')
 local Recovery = import('/mods/OvermindAI/lua/AI/Overmind/EngineerDirector/Recovery.lua')
 local Assignments = import('/mods/OvermindAI/lua/AI/Overmind/EngineerDirector/Assignments.lua')
+local OvermindEconomyLedger = import('/mods/OvermindAI/lua/AI/Overmind/EconomyLedger.lua')
 
 local T1MexCategory = categories.STRUCTURE * categories.MASSEXTRACTION * categories.TECH1
 local EnemyMexCategory = categories.STRUCTURE * categories.MASSEXTRACTION
@@ -16,6 +17,34 @@ local AADefenseCategory = categories.STRUCTURE * categories.DEFENSE * categories
 local DefenseCategory = categories.STRUCTURE * categories.DEFENSE
 local BuilderCategory = categories.ENGINEER * categories.MOBILE + categories.COMMAND
 local LandCombatCategory = categories.MOBILE * categories.LAND - categories.ENGINEER - categories.SCOUT - categories.COMMAND
+
+local function CountEngineerActivity(engineers)
+    local activity = {
+        TotalCount = 0,
+        IdleCount = 0,
+        ConstructingCount = 0,
+        ReclaimingCount = 0,
+        AssistingCount = 0,
+    }
+    for _, eng in (engineers or {}) do
+        if eng and not eng.Dead then
+            activity.TotalCount = activity.TotalCount + 1
+            if Common.IsIdle(eng) then
+                activity.IdleCount = activity.IdleCount + 1
+            end
+            if Common.IsConstructing(eng) then
+                activity.ConstructingCount = activity.ConstructingCount + 1
+            end
+            if eng:IsUnitState('Reclaiming') then
+                activity.ReclaimingCount = activity.ReclaimingCount + 1
+            end
+            if eng:IsUnitState('Guarding') or eng:IsUnitState('Attached') then
+                activity.AssistingCount = activity.AssistingCount + 1
+            end
+        end
+    end
+    return activity
+end
 
 local function FallbackGetMainPos(aiBrain, runtime)
     if aiBrain and aiBrain.BuilderManagers and aiBrain.BuilderManagers.MAIN and aiBrain.BuilderManagers.MAIN.Position then
@@ -420,26 +449,28 @@ function Update(aiBrain, now)
             (structureTask.AssignedBuilders or 0) >= math.max(1, math.min(2, (structureTask.RequiredBuilders or 0)))
             and (structureTask.StallTime or 0) < 20
         )
+    local desiredReclaimQuota = policy.EngineerReclaimQuota or 0
+    local firstReclaimBaseReady = baseEngineers >= math.max(2, baseFloor - 1)
     local fieldBaseReady = baseEngineers >= math.max(3, baseFloor)
     engState.ReclaimFieldStickyUntil = engState.ReclaimFieldStickyUntil or -999
     engState.ReclaimFieldStickyQuota = engState.ReclaimFieldStickyQuota or 0
     local fieldStickyActive = now < (engState.ReclaimFieldStickyUntil or -999)
     local fieldTaskQuota = 0
-    if contestFieldMode
+    if (contestFieldMode or desiredReclaimQuota > 0)
         and reclaimFieldPos
-        and fieldBaseReady
+        and (fieldBaseReady or (desiredReclaimQuota > 0 and firstReclaimBaseReady))
         and not ecoCrash
         and not severeFactoryStarve
-        and factoryTaskStable
-        and structureTaskStable then
-        if (planner.ReclaimFirst == true or planner.OuterRetentionActive == true or outerContestUnits > 0)
+        and (factoryTaskStable or desiredReclaimQuota > 0)
+        and (structureTaskStable or desiredReclaimQuota > 0) then
+        if ((planner.ReclaimFirst == true or planner.OuterRetentionActive == true or outerContestUnits > 0) or desiredReclaimQuota > 0)
             and reclaimFieldScore >= 90 then
-            fieldTaskQuota = 1
+            fieldTaskQuota = math.max(1, desiredReclaimQuota)
         end
         if reclaimFieldScore >= 180
             and outerContestUnits >= 1
             and baseEngineers >= (baseFloor + 2) then
-            fieldTaskQuota = 2
+            fieldTaskQuota = math.max(fieldTaskQuota, 2)
         end
     end
     if fieldTaskQuota > 0 then
@@ -447,13 +478,13 @@ function Update(aiBrain, now)
         engState.ReclaimFieldStickyQuota = math.max(engState.ReclaimFieldStickyQuota or 0, fieldTaskQuota)
         fieldStickyActive = true
     elseif fieldStickyActive
-        and contestFieldMode
+        and (contestFieldMode or desiredReclaimQuota > 0)
         and reclaimFieldPos
-        and fieldBaseReady
+        and (fieldBaseReady or (desiredReclaimQuota > 0 and firstReclaimBaseReady))
         and not ecoCrash
         and not severeFactoryStarve
-        and factoryTaskStable
-        and structureTaskStable then
+        and (factoryTaskStable or desiredReclaimQuota > 0)
+        and (structureTaskStable or desiredReclaimQuota > 0) then
         fieldTaskQuota = math.max(1, engState.ReclaimFieldStickyQuota or 1)
     else
         engState.ReclaimFieldStickyUntil = -999
@@ -464,7 +495,7 @@ function Update(aiBrain, now)
     local ctx = {
         bomberPanic = bomberPanic,
         constraints = constraints,
-        contestFieldMode = contestFieldMode,
+        contestFieldMode = (contestFieldMode or desiredReclaimQuota > 0) and true or false,
         dispatchedExpand = 0,
         enemyPos = enemyPos,
         factoryTargetObject = factoryTargetObject,
@@ -508,12 +539,12 @@ function Update(aiBrain, now)
             and (structureTask.AssignedBuilders or 0) >= math.max(1, (structureTask.RequiredBuilders or 0))
             and (structureTask.StallTime or 0) < 12
         )
-    ctx.fieldTaskWindow = contestFieldMode
+    ctx.fieldTaskWindow = (contestFieldMode or desiredReclaimQuota > 0)
         and not severeFactoryStarve
         and not ecoCrash
-        and factoryTaskStable
-        and structureTaskStable
-        and fieldBaseReady
+        and (factoryTaskStable or desiredReclaimQuota > 0)
+        and (structureTaskStable or desiredReclaimQuota > 0)
+        and (fieldBaseReady or (desiredReclaimQuota > 0 and firstReclaimBaseReady))
         and fieldTaskQuota > 0
     for _, eng in engineers do
         ProcessEngineer(aiBrain, runtime, eng, now, ctx)
@@ -561,6 +592,25 @@ function Update(aiBrain, now)
     runtime.LastEngineerReclaimField = ctx.reclaimField
     runtime.LastEngineerPowerRecovery = ctx.powerRecoveryCount
     runtime.LastEngineerSurplusSpend = ctx.surplusSpendCount
+
+    local activity = CountEngineerActivity(engineers)
+    activity.BaseEngineers = baseEngineers
+    activity.NeedBase = math.max(0, baseFloor - baseEngineers)
+    activity.RecoverCount = ctx.recoverCount
+    activity.ThreatRecallCount = ctx.threatenedCount
+    activity.FactoryRecoverCount = ctx.forcedFactoryRecover
+    activity.StructureRecoverCount = structureTask.AssignedBuilders or 0
+    activity.ExpansionDispatchCount = ctx.dispatchedExpand
+    activity.ReclaimFieldCount = ctx.reclaimField
+    activity.ReclaimEnemyMexCount = ctx.reclaimEnemyMex
+    activity.PowerRecoveryCount = ctx.powerRecoveryCount
+    activity.SurplusSpendCount = ctx.surplusSpendCount
+    activity.ReclaimQuota = fieldTaskQuota
+    activity.BlockedReason = severeFactoryStarve and 'factory_starve'
+        or ecoCrash and 'eco_crash'
+        or fieldTaskQuota <= 0 and 'no_reclaim_quota'
+        or 'none'
+    OvermindEconomyLedger.PublishEngineerActivity(aiBrain, runtime, now, activity)
 
     local shouldLog = (ctx.recoverCount + ctx.threatenedCount + ctx.forcedFactoryRecover + ctx.dispatchedExpand + ctx.reclaimEnemyMex + ctx.reclaimField) > 0
         or ctx.powerRecoveryCount > 0

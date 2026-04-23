@@ -4,6 +4,32 @@ local DeclaredStateInitializers = {
     EcoState = function()
         return {}
     end,
+    EconomyLedger = function()
+        return {
+            Factory = {},
+            Engineer = {},
+            Upgrade = {},
+            Reclaim = {},
+            Aggregate = {},
+            LastUpdate = -999,
+        }
+    end,
+    EconomySignals = function()
+        return {
+            Structure = {},
+            Velocity = {},
+            Pressure = {},
+            PolicySeed = {},
+            History = {},
+            LastUpdate = -999,
+        }
+    end,
+    EcoVelocity = function()
+        return {}
+    end,
+    EcoPressure = function()
+        return {}
+    end,
     RuntimeContracts = function()
         return {
             LastLogTime = -999,
@@ -290,6 +316,10 @@ function Update(aiBrain, now)
     local contract = EnsureStateSlice(runtime, 'RuntimeContracts')
 
     local econ = EnsureEcoState(aiBrain, runtime)
+    EnsureStateSlice(runtime, 'EconomyLedger')
+    EnsureStateSlice(runtime, 'EconomySignals')
+    EnsureStateSlice(runtime, 'EcoVelocity')
+    EnsureStateSlice(runtime, 'EcoPressure')
     EnsureStateSlice(runtime, 'ZoneGraph')
     EnsureStateSlice(runtime, 'ZoneModel')
     EnsureStateSlice(runtime, 'ReconState')

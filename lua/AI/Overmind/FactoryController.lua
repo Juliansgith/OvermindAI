@@ -1,5 +1,6 @@
 local Module = {}
 local OvermindRoleWeights = import('/mods/OvermindAI/lua/AI/Overmind/RoleWeights.lua')
+local OvermindEconomyLedger = import('/mods/OvermindAI/lua/AI/Overmind/EconomyLedger.lua')
 
 local LandDirectCategory = categories.MOBILE * categories.LAND * categories.DIRECTFIRE
     - categories.ENGINEER - categories.SCOUT - categories.ANTIAIR - categories.COMMAND
@@ -638,6 +639,18 @@ function Module.Update(aiBrain, now)
 
     local allFactories = aiBrain:GetListOfUnits(categories.FACTORY * categories.STRUCTURE, false, true)
     if not allFactories or table.getn(allFactories) <= 0 then
+        OvermindEconomyLedger.PublishFactoryActivity(aiBrain, runtime, now, {
+            TotalCount = 0,
+            ReadyCount = 0,
+            EmptyCount = 0,
+            IdleCount = 0,
+            IssuedCount = 0,
+            ToppedCount = 0,
+            QueueDepthTarget = 0,
+            DomainReady = { Land = 0, Air = 0, Navy = 0, Other = 0 },
+            DomainIdle = { Land = 0, Air = 0, Navy = 0, Other = 0 },
+            BlockedReason = 'no_factories',
+        })
         return
     end
 
@@ -646,6 +659,8 @@ function Module.Update(aiBrain, now)
     local idleFactories = 0
     local issued = 0
     local topped = 0
+    local domainReady = { Land = 0, Air = 0, Navy = 0, Other = 0 }
+    local domainIdle = { Land = 0, Air = 0, Navy = 0, Other = 0 }
     local eco = GetEcon(runtime)
     local queueDepthTarget = DesiredQueueDepth(runtime, eco)
 
@@ -657,10 +672,14 @@ function Module.Update(aiBrain, now)
 
             if IsFactoryReady(factory) then
                 readyFactories = readyFactories + 1
+                local kind = ClassifyFactory(factory)
+                local domain = kind == 'land' and 'Land' or kind == 'air' and 'Air' or kind == 'sea' and 'Navy' or 'Other'
+                domainReady[domain] = (domainReady[domain] or 0) + 1
                 local q = factory.GetCommandQueue and factory:GetCommandQueue() or false
                 local qLen = q and table.getn(q) or 0
                 if qLen <= 0 then
                     emptyFactories = emptyFactories + 1
+                    domainIdle[domain] = (domainIdle[domain] or 0) + 1
                 end
                 if qLen < queueDepthTarget then
                     if qLen <= 0 and not factory:IsUnitState('Building') then
@@ -688,6 +707,21 @@ function Module.Update(aiBrain, now)
     ctrl.LastEmptyCount = emptyFactories
     ctrl.LastIssued = issued
     ctrl.LastTopped = topped
+    ctrl.DomainReady = domainReady
+    ctrl.DomainIdle = domainIdle
+
+    OvermindEconomyLedger.PublishFactoryActivity(aiBrain, runtime, now, {
+        TotalCount = table.getn(allFactories),
+        ReadyCount = readyFactories,
+        EmptyCount = emptyFactories,
+        IdleCount = idleFactories,
+        IssuedCount = issued,
+        ToppedCount = topped,
+        QueueDepthTarget = queueDepthTarget,
+        DomainReady = domainReady,
+        DomainIdle = domainIdle,
+        BlockedReason = emptyFactories > 0 and issued <= 0 and 'no_issue' or 'none',
+    })
 
     if issued > 0 or now - (ctrl.LastLogTime or -999) >= 28 then
         ctrl.LastLogTime = now

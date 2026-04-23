@@ -424,7 +424,7 @@ local function DispatchExpansionEngineer(aiBrain, runtime, now, engineers, mainP
     end
     local dispatchRadius = mexEmergency and 340 or 220
     for _, eng in engineers do
-        if eng and not eng.Dead and not IsConstructing(eng) and IsIdle(eng) then
+        if eng and not eng.Dead and not Common.IsConstructing(eng) and Common.IsIdle(eng) then
             local pos = eng:GetPosition()
             if pos and Common.Distance2D(pos, mainPos) <= dispatchRadius then
                 local sourcePos = { pos[1], pos[2] or 0, pos[3], EngineerId = Common.GetEntityId(eng) }

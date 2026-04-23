@@ -641,7 +641,15 @@ local function ProcessEngineer(aiBrain, runtime, eng, now, ctx)
     local acted = false
 
     if isIdle and not constructing then
-        if ctx.structureTask.Active
+        if ctx.contestFieldMode
+            and ctx.fieldTaskWindow
+            and ctx.reclaimField < ctx.fieldTaskQuota
+            and ctx.needBase <= 0
+            and not (ctx.factoryTask.Active and (ctx.factoryTask.AssignedBuilders or 0) <= 0 and (ctx.macroPhase == 'bootstrap_factory' or ctx.macroPhase == 'land_factory_floor'))
+            and Reclaim.TryReclaimFieldZone(aiBrain, runtime, eng, ctx.reclaimFieldPos, now) then
+            ctx.reclaimField = ctx.reclaimField + 1
+            acted = true
+        elseif ctx.structureTask.Active
             and (ctx.structureTask.Kind == 'Power' or ctx.structureTask.Kind == 'Mex')
             and (ctx.macroPhase ~= 'starter_mex_claim' or ctx.structureTask.Kind == 'Power')
             and ctx.structureTargetObject

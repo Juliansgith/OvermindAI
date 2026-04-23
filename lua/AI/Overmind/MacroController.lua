@@ -3,6 +3,8 @@ local Module = {
     StateSlice = 'MacroController',
 }
 
+local OvermindEconomySignals = import('/mods/OvermindAI/lua/AI/Overmind/EconomySignals.lua')
+
 local TransitionPhases = {
     bootstrap_factory = true,
     starter_mex_claim = true,
@@ -79,74 +81,6 @@ local function ComputeMassBudget(eco)
         + math.max(0, ((eco.MassStorageRatio or 0) - 0.04) * 10)
 end
 
-local function ComputeContestMapStructure(runtime)
-    local graph = runtime.ZoneGraph or {}
-    local zone = runtime.ZoneModel or {}
-    local nodes = graph.Nodes or {}
-    local navMarkerCount = zone.NavMarkerCount or graph.WaterZones or 0
-    local metrics = {
-        NavMarkerCount = navMarkerCount or 0,
-        OuterMexShare = 0,
-        SafeForwardMexCount = 0,
-        ContestableZoneCount = 0,
-        LandRouteDepth = 0,
-        StructuralContestMap = false,
-    }
-
-    if navMarkerCount >= 3 then
-        return metrics
-    end
-
-    local totalMass = 0
-    local outerMass = 0
-    local depthTotal = 0
-    local depthCount = 0
-    local landZones = 0
-    for _, node in nodes do
-        if node and node.Medium == 'land' then
-            landZones = landZones + 1
-            local class = node.Classification or 'rear'
-            local massCount = node.MassCount or 0
-            local expansionCount = node.ExpansionCount or 0
-            local enemyMex = node.EnemyMex or 0
-            local routeRisk = node.RouteRisk or 0
-            local threat = node.Threat or 0
-            local enemyStructures = node.EnemyStructures or 0
-            local hopHome = node.HopHome or 999
-            local outsideHome = class == 'front' or class == 'contested' or class == 'enemy_side'
-
-            totalMass = totalMass + massCount
-            if outsideHome then
-                outerMass = outerMass + massCount
-            end
-            if outsideHome and ((massCount + expansionCount + enemyMex) > 0) then
-                metrics.ContestableZoneCount = metrics.ContestableZoneCount + 1
-            end
-            if (class == 'front' or class == 'contested')
-                and (massCount > 0 or enemyMex > 0)
-                and routeRisk <= 3.6
-                and threat <= 2.6
-                and enemyStructures <= 2 then
-                metrics.SafeForwardMexCount = metrics.SafeForwardMexCount + math.max(1, massCount)
-            end
-            if class == 'front' or class == 'contested' then
-                depthTotal = depthTotal + math.min(6, hopHome)
-                depthCount = depthCount + 1
-            end
-        end
-    end
-
-    metrics.OuterMexShare = (totalMass > 0) and (outerMass / totalMass) or 0
-    metrics.LandRouteDepth = (depthCount > 0) and (depthTotal / depthCount) or 0
-    metrics.StructuralContestMap =
-        landZones >= 6 and (
-            metrics.OuterMexShare >= 0.36
-            or metrics.SafeForwardMexCount >= 4
-            or (metrics.ContestableZoneCount >= 3 and metrics.LandRouteDepth >= 1.7)
-        )
-    return metrics
-end
-
 local function HasCriticalLandFactoryDebt(runtime, readyLand)
     local task = ((runtime.EngineerState or {}).UnfinishedFactoryTask) or {}
     if not task.Active or task.Domain ~= 'Land' then
@@ -168,6 +102,8 @@ local function DetermineDesiredPhase(aiBrain, runtime, now)
     local eco = runtime.EcoState or {}
     local policy = runtime.EcoPolicy or {}
     local recovery = runtime.Recovery or {}
+    local economySignals = runtime.EconomySignals or {}
+    local policySeed = economySignals.PolicySeed or {}
     local raid = runtime.RaidDefense or {}
     local opp = runtime.OpponentModel or {}
     local intel = runtime.IntelModel or {}
@@ -195,19 +131,17 @@ local function DetermineDesiredPhase(aiBrain, runtime, now)
     local approachReal = constraints.ApproachReal == true
     local landPanic = constraints.LandPanic == true
     local acuCrisisActive = now < (runtime.ACUCrisisUntil or -999)
-    local structure = ComputeContestMapStructure(runtime)
+    local structure = OvermindEconomySignals.GetStructure(aiBrain, runtime, now)
     local contestTempoMap = structure.StructuralContestMap
         and (contestedZones >= 2 or structure.ContestableZoneCount >= 3)
         and now < 840
         and mapControl <= 0.62
         and (opp.RelativePower or 1) <= 1.08
-    local focusOnT1Spam = policy.FocusOnT1Spam == true
-        or (
-            contestTempoMap
-            and structure.OuterMexShare >= 0.55
-            and (structure.SafeForwardMexCount >= 2 or structure.ContestableZoneCount >= 2)
-            and now < 960
-        )
+    if policySeed.ContestMapMode == true then
+        contestTempoMap = true
+    end
+    local focusOnT1Spam = policySeed.FocusOnT1Spam == true
+        or (policy.FocusOnT1Spam == true and not structure.T1SpamSuppressedByFailure)
     local starterMexTarget = (contestTempoMap or focusOnT1Spam) and 5 or 6
     local starterMexDeadline = contestTempoMap and 420 or 540
     local landFactoryFloorTarget = (contestTempoMap or focusOnT1Spam) and 2 or 3

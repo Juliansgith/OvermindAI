@@ -1553,11 +1553,22 @@ local function DecideCapacityPlan(runtime, current, constraints, rolePlan)
         and powerReady >= math.max(7, constraints.StarterPowerFloor or 2)
         and engineerUnits >= math.max(10, constraints.StarterEngineerFloor or 6)
     local needsFirstLandHQ = factoryUpgrade.NeedsFirstLandHQ == true
+    local landCrisisAirVeto = planner.ForceAirAnswer == true
+        and (
+            constraints.LandPanic
+            or constraints.FrontCollapse
+            or (now < (runtime.ACUCrisisUntil or -999))
+            or landRoleGap >= 12
+        )
+        and not constraints.AirPanic
+        and not constraints.BomberPanic
+        and not constraints.ExposedMexAirRaid
+        and not constraints.CounterAirWindow
     local preserveAirWindow = emergencyAirFactory
         or threatenedAirUnlock
         or watchAirFactory
         or counterAirFactory
-        or planner.ForceAirAnswer
+        or (planner.ForceAirAnswer and not landCrisisAirVeto)
         or constraints.AirPanic
         or constraints.BomberPanic
         or constraints.ExposedMexAirRaid
@@ -1781,7 +1792,7 @@ local function DecideCapacityPlan(runtime, current, constraints, rolePlan)
     if planner.TradeMapForTech and not constraints.LandPanic and not constraints.AirPanic then
         airTarget = math.min(airTarget, math.max(1, current.Factories.Air.Total))
     end
-    if planner.ForceAirAnswer and landCoreOnline and not constraints.EcoCrash and powerReady >= 2 then
+    if planner.ForceAirAnswer and not landCrisisAirVeto and landCoreOnline and not constraints.EcoCrash and powerReady >= 2 then
         airTarget = math.max(airTarget, 1)
     end
     if tempoRecoveryWindow then
