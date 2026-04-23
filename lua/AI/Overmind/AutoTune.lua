@@ -12,7 +12,7 @@ local function ClampNumber(value, minV, maxV, fallback)
 end
 
 local DefaultConfig = {
-    Version = 2,
+    Version = 3,
     CandidateId = 'baseline',
     ParentCandidateId = 'manual',
     Score = 0,
@@ -46,6 +46,20 @@ local DefaultConfig = {
     AirFactoryTimeBias = 0,
     RadarTimeBias = 0,
     PowerNeedRatioBias = 0,
+    StrategyExpandBias = 0,
+    StrategyStabilizeBias = 0,
+    StrategyTempoBias = 0,
+    StrategyTechBias = 0,
+    StrategyAirBias = 0,
+    StrategyForwardTheaterBias = 0,
+    ReclaimRiskBias = 0,
+    ReclaimSupportBias = 0,
+    ReclaimNearbyBias = 0,
+    MexUpgradeBudgetBias = 0,
+    MexUpgradeRiskBias = 0,
+    MexUpgradeCapBias = 0,
+    FactoryHQTimingBias = 0,
+    FactoryHQEcoBias = 0,
 }
 
 local CachedConfig = false
@@ -92,6 +106,20 @@ local function MergeConfig(source)
     cfg.AirFactoryTimeBias = ClampNumber(cfg.AirFactoryTimeBias, -180, 240, DefaultConfig.AirFactoryTimeBias)
     cfg.RadarTimeBias = ClampNumber(cfg.RadarTimeBias, -180, 240, DefaultConfig.RadarTimeBias)
     cfg.PowerNeedRatioBias = ClampNumber(cfg.PowerNeedRatioBias, -0.14, 0.16, DefaultConfig.PowerNeedRatioBias)
+    cfg.StrategyExpandBias = ClampNumber(cfg.StrategyExpandBias, -1.4, 1.8, DefaultConfig.StrategyExpandBias)
+    cfg.StrategyStabilizeBias = ClampNumber(cfg.StrategyStabilizeBias, -1.8, 1.2, DefaultConfig.StrategyStabilizeBias)
+    cfg.StrategyTempoBias = ClampNumber(cfg.StrategyTempoBias, -1.4, 1.8, DefaultConfig.StrategyTempoBias)
+    cfg.StrategyTechBias = ClampNumber(cfg.StrategyTechBias, -1.5, 1.5, DefaultConfig.StrategyTechBias)
+    cfg.StrategyAirBias = ClampNumber(cfg.StrategyAirBias, -1.6, 1.4, DefaultConfig.StrategyAirBias)
+    cfg.StrategyForwardTheaterBias = ClampNumber(cfg.StrategyForwardTheaterBias, -1.2, 1.5, DefaultConfig.StrategyForwardTheaterBias)
+    cfg.ReclaimRiskBias = ClampNumber(cfg.ReclaimRiskBias, -0.45, 0.75, DefaultConfig.ReclaimRiskBias)
+    cfg.ReclaimSupportBias = ClampNumber(cfg.ReclaimSupportBias, -1, 1, DefaultConfig.ReclaimSupportBias)
+    cfg.ReclaimNearbyBias = ClampNumber(cfg.ReclaimNearbyBias, -0.35, 0.65, DefaultConfig.ReclaimNearbyBias)
+    cfg.MexUpgradeBudgetBias = ClampNumber(cfg.MexUpgradeBudgetBias, -2.5, 3, DefaultConfig.MexUpgradeBudgetBias)
+    cfg.MexUpgradeRiskBias = ClampNumber(cfg.MexUpgradeRiskBias, -0.45, 0.7, DefaultConfig.MexUpgradeRiskBias)
+    cfg.MexUpgradeCapBias = ClampNumber(cfg.MexUpgradeCapBias, -1, 2, DefaultConfig.MexUpgradeCapBias)
+    cfg.FactoryHQTimingBias = ClampNumber(cfg.FactoryHQTimingBias, -120, 180, DefaultConfig.FactoryHQTimingBias)
+    cfg.FactoryHQEcoBias = ClampNumber(cfg.FactoryHQEcoBias, -1, 1, DefaultConfig.FactoryHQEcoBias)
 
     return cfg
 end
@@ -115,7 +143,7 @@ function GetConfig(aiBrain)
     CachedConfig = cfg
 
     if aiBrain and aiBrain.GetArmyIndex and LOG then
-        LOG(string.format('*OVERMIND AUTOTUNE A%d id=%s score=%.1f floor=%d/%d/%d scout=%d acu=%d/%d/%d facBias=%.2f reclaimBias=%.2f quotaBias=%.1f expandBias=%.1f riskBias=%.2f',
+        LOG(string.format('*OVERMIND AUTOTUNE A%d id=%s score=%.1f floor=%d/%d/%d scout=%d acu=%d/%d/%d facBias=%.2f reclaimBias=%.2f quotaBias=%.1f expandBias=%.1f riskBias=%.2f strat=%.2f/%.2f/%.2f recRisk=%.2f upg=%.2f/%.2f',
             aiBrain:GetArmyIndex(),
             tostring(cfg.CandidateId or 'baseline'),
             cfg.Score or 0,
@@ -130,7 +158,13 @@ function GetConfig(aiBrain)
             cfg.ReclaimScoreBias or 0,
             cfg.ReclaimQuotaBias or 0,
             cfg.ExpansionQuotaBias or 0,
-            cfg.SafeExpandHotspotCapBias))
+            cfg.SafeExpandHotspotCapBias,
+            cfg.StrategyExpandBias or 0,
+            cfg.StrategyTempoBias or 0,
+            cfg.StrategyTechBias or 0,
+            cfg.ReclaimRiskBias or 0,
+            cfg.MexUpgradeBudgetBias or 0,
+            cfg.FactoryHQTimingBias or 0))
     end
 
     return cfg

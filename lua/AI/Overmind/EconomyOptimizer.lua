@@ -339,6 +339,14 @@ function UpdatePolicy(aiBrain, now)
     policy.RadarDesiredCap = 1
     policy.MaxAirBomberShare = 0.32
     policy.PrimaryFactorySoftCap = 3
+    policy.ReclaimRiskBias = tune.ReclaimRiskBias or 0
+    policy.ReclaimSupportBias = tune.ReclaimSupportBias or 0
+    policy.ReclaimNearbyBias = tune.ReclaimNearbyBias or 0
+    policy.MexUpgradeBudgetBias = tune.MexUpgradeBudgetBias or 0
+    policy.MexUpgradeRiskBias = tune.MexUpgradeRiskBias or 0
+    policy.MexUpgradeCapBias = tune.MexUpgradeCapBias or 0
+    policy.FactoryHQTimingBias = tune.FactoryHQTimingBias or 0
+    policy.FactoryHQEcoBias = tune.FactoryHQEcoBias or 0
     policy.AcuOpeningMaxDistance = math.min(tune.ACUOpeningMaxDistance or 20, 16)
     policy.AcuMidMaxDistance = math.min(tune.ACUMidMaxDistance or 36, 24)
     policy.AcuLateMaxDistance = math.min(tune.ACULateMaxDistance or 60, 38)
@@ -372,6 +380,7 @@ function UpdatePolicy(aiBrain, now)
     if focusOnT1Spam or contestMapMode or prioritizeProduction then
         policy.MexUpgradeConcurrency = math.min(policy.MexUpgradeConcurrency, frontSecureUpgradeWindow and 2 or 1)
     end
+    policy.MexUpgradeConcurrency = Clamp(policy.MexUpgradeConcurrency, 0, 4)
     local reclaimCrisisOverride = reclaimFieldScore >= 150
         and (macroCounts.Engineers or 0) >= 7
         and (eco.MassTrend or 0) >= -0.45

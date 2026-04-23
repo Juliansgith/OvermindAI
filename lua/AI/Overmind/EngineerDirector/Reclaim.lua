@@ -86,6 +86,8 @@ local function TryReclaimEnemyMex(aiBrain, runtime, eng, now)
         or policy.ForwardContestBias == true
         or policy.PrioritizeProduction == true
         or policy.ContestMapMode == true
+    local riskBias = policy.ReclaimRiskBias or 0
+    local supportBias = policy.ReclaimSupportBias or 0
 
     runtime.EngineerEnemyMexReclaimCooldown = runtime.EngineerEnemyMexReclaimCooldown or {}
     local entityId = eng.EntityId or 0
@@ -105,8 +107,8 @@ local function TryReclaimEnemyMex(aiBrain, runtime, eng, now)
         pos,
         24,
         'Ally') or 0
-    local localThreatCap = aggressiveContest and 1.05 or 0.8
-    local minEscort = aggressiveContest and 3 or 4
+    local localThreatCap = (aggressiveContest and 1.05 or 0.8) + riskBias
+    local minEscort = math.max(1, (aggressiveContest and 3 or 4) - math.floor(supportBias))
     if localThreat > localThreatCap or escort < minEscort or Threat.HasEnemyCombatNear(aiBrain, pos, aggressiveContest and 32 or 28) then
         return false
     end
@@ -124,9 +126,9 @@ local function TryReclaimEnemyMex(aiBrain, runtime, eng, now)
                 targetPos,
                 24,
                 'Enemy') or 0) or 999
-            local routeRiskCap = aggressiveContest and 1.7 or 1.35
-            local targetThreatCap = aggressiveContest and 0.85 or 0.6
-            local enemyGuardCap = aggressiveContest and 1 or 0
+            local routeRiskCap = (aggressiveContest and 1.7 or 1.35) + (riskBias * 1.5)
+            local targetThreatCap = (aggressiveContest and 0.85 or 0.6) + (riskBias * 0.8)
+            local enemyGuardCap = (aggressiveContest and 1 or 0) + math.max(0, math.floor(riskBias * 2))
             if targetPos and routeRisk <= routeRiskCap and targetThreat <= targetThreatCap and enemyGuard <= enemyGuardCap and not Threat.HasEnemyCombatNear(aiBrain, targetPos, aggressiveContest and 28 or 24) then
                 table.insert(reclaimTargets, target)
             end
@@ -185,6 +187,9 @@ local function TryReclaimFieldZone(aiBrain, runtime, eng, targetPos, now)
     local planner = runtime and runtime.StrategicPlanner or {}
     local policy = runtime and runtime.EcoPolicy or {}
     local quotaForced = (policy.EngineerReclaimQuota or 0) > 0
+    local riskBias = policy.ReclaimRiskBias or 0
+    local supportBias = policy.ReclaimSupportBias or 0
+    local nearbyBias = policy.ReclaimNearbyBias or 0
     if not (planner.ReclaimFirst == true or planner.OuterRetentionActive == true or quotaForced) then
         return false
     end
@@ -221,17 +226,17 @@ local function TryReclaimFieldZone(aiBrain, runtime, eng, targetPos, now)
         return false
     end
 
-    local reclaimRadius = planner.ReclaimFirst and 46 or 40
-    local minTargetMass = planner.ReclaimFirst and 1.5 or 2.5
+    local reclaimRadius = (planner.ReclaimFirst and 46 or 40) + (nearbyBias * 18)
+    local minTargetMass = math.max(0.5, (planner.ReclaimFirst and 1.5 or 2.5) - nearbyBias)
     if quotaForced then
         reclaimRadius = math.max(reclaimRadius, 48)
         minTargetMass = math.min(minTargetMass, 1.0)
     end
     local reclaimTargets, reclaimMass = GetReclaimFieldTargets(targetPos, reclaimRadius, minTargetMass)
     local supportWeightedThreat = math.max(0, localThreat - (supported * 0.18))
-    local threatCap = planner.ReclaimFirst and (outerBacked and 2.75 or 2.35) or (outerBacked and 2.15 or 1.85)
-    local routeRiskCap = planner.ReclaimFirst and (outerBacked and 5.2 or 4.5) or (outerBacked and 4.4 or 3.8)
-    local minSupport = planner.ReclaimFirst and (outerBacked and 1 or 2) or (outerBacked and 2 or 3)
+    local threatCap = (planner.ReclaimFirst and (outerBacked and 2.75 or 2.35) or (outerBacked and 2.15 or 1.85)) + riskBias
+    local routeRiskCap = (planner.ReclaimFirst and (outerBacked and 5.2 or 4.5) or (outerBacked and 4.4 or 3.8)) + (riskBias * 1.4)
+    local minSupport = math.max(0, (planner.ReclaimFirst and (outerBacked and 1 or 2) or (outerBacked and 2 or 3)) - math.floor(supportBias))
     if quotaForced then
         threatCap = threatCap + 0.35
         routeRiskCap = routeRiskCap + 0.55
@@ -241,7 +246,8 @@ local function TryReclaimFieldZone(aiBrain, runtime, eng, targetPos, now)
         segment.LastMassEstimate = reclaimMass
     end
 
-    if table.getn(reclaimTargets) <= 0 or reclaimMass < (quotaForced and 30 or (planner.ReclaimFirst and 42 or 58)) then
+    local requiredMass = math.max(18, (quotaForced and 30 or (planner.ReclaimFirst and 42 or 58)) * (1 - (nearbyBias * 0.22)))
+    if table.getn(reclaimTargets) <= 0 or reclaimMass < requiredMass then
         return false
     end
     if distMain > (((runtime.EcoPolicy or {}).SafeExpandDistance or 680) + 100) then
@@ -310,9 +316,12 @@ local function TryReclaimNearby(aiBrain, runtime, eng, now, radius, minMass, opt
     end
 
     options = options or {}
+    local policy = runtime and runtime.EcoPolicy or {}
+    local riskBias = policy.ReclaimRiskBias or 0
+    local nearbyBias = policy.ReclaimNearbyBias or 0
     local escort = aiBrain:GetNumUnitsAroundPoint(LandCombatCategory, pos, 28, 'Ally') or 0
     local localThreat = aiBrain:GetThreatAtPosition(pos, 1, true, 'AntiSurface') or 0
-    local maxThreat = options.MaxThreat or (escort >= 2 and 2.4 or 1.4)
+    local maxThreat = (options.MaxThreat or (escort >= 2 and 2.4 or 1.4)) + riskBias
     if localThreat > maxThreat then
         return false
     end
@@ -320,8 +329,9 @@ local function TryReclaimNearby(aiBrain, runtime, eng, now, radius, minMass, opt
         return false
     end
 
-    local reclaimTargets, reclaimMass = GetReclaimFieldTargets(pos, radius or 42, minMass or 1)
-    if table.getn(reclaimTargets) <= 0 or reclaimMass < (options.MinTotalMass or 8) then
+    local reclaimTargets, reclaimMass = GetReclaimFieldTargets(pos, (radius or 42) + (nearbyBias * 12), minMass or 1)
+    local minTotalMass = math.max(4, (options.MinTotalMass or 8) * (1 - (nearbyBias * 0.25)))
+    if table.getn(reclaimTargets) <= 0 or reclaimMass < minTotalMass then
         return false
     end
 
@@ -336,7 +346,7 @@ local function TryReclaimNearby(aiBrain, runtime, eng, now, radius, minMass, opt
     end
     if IssueReclaim then
         local issued = 0
-        local maxTargets = options.MaxTargets or 18
+        local maxTargets = math.max(8, (options.MaxTargets or 18) + math.floor(nearbyBias * 8))
         for _, reclaim in reclaimTargets do
             if reclaim and (reclaim.MaxMassReclaim or 0) > 0 then
                 IssueReclaim({ eng }, reclaim)

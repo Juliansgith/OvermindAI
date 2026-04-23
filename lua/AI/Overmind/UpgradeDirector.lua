@@ -324,6 +324,9 @@ local function PickMexTarget(aiBrain, runtime, state)
     local safeForwardMexCount = policy.SafeForwardMexCount or 0
     local contestableZoneCount = policy.ContestableZoneCount or 0
     local scoutingDebt = techPlan.ExtractorUpgradeReason == 'scouting_debt'
+    local upgradeBudgetBias = policy.MexUpgradeBudgetBias or 0
+    local upgradeRiskBias = policy.MexUpgradeRiskBias or 0
+    local upgradeCapBias = math.floor(policy.MexUpgradeCapBias or 0)
     local surplusSpendWindow = constraints.SurplusSpendWindow == true
     local strongSurplusWindow = constraints.StrongSurplusWindow == true
     local macroObjective = GetMacroObjective(runtime)
@@ -335,6 +338,16 @@ local function PickMexTarget(aiBrain, runtime, state)
         and contestableZoneCount <= 2
         and outerHoldShare >= 0.48
     local mexBudget, budgetT2Cap = ComputeEarlyMexUpgradeBudget(eco, readyLand, totalLand, powerReady, mexReady)
+    mexBudget = mexBudget + upgradeBudgetBias
+    if upgradeBudgetBias > 0 and budgetT2Cap <= 0 and mexBudget >= 7.0 and (eco.EnergyTrend or 0) >= -14 and (eco.EnergyStorageRatio or 0) >= 0.03 then
+        budgetT2Cap = 1
+    end
+    if upgradeBudgetBias > 1.2 and budgetT2Cap < 2 and mexBudget >= 11.0 and (eco.MassTrend or 0) >= -0.16 and (eco.MassStorageRatio or 0) >= 0.06 then
+        budgetT2Cap = 2
+    end
+    if upgradeBudgetBias < 0 and mexBudget < 7.5 then
+        budgetT2Cap = 0
+    end
     local activeMexUpgrades = CountActiveMexUpgrades(aiBrain)
     local activeUpgradeScopes = CountActiveMexUpgradeScopes(aiBrain, mainPos, factoryClusterPos, localRadius)
     local stableFactoryFloor = readyLand >= 2
@@ -449,10 +462,10 @@ local function PickMexTarget(aiBrain, runtime, state)
     end
 
     local allowGeneralT2 = techPlan.UpgradeExtractors == true
-        and (eco.MassIncome or 0) >= 3.2
-        and (eco.EnergyIncome or 0) >= 40
-        and (eco.MassStorageRatio or 0) >= 0.16
-        and (eco.EnergyStorageRatio or 0) >= 0.14
+        and (eco.MassIncome or 0) >= (3.2 - (upgradeBudgetBias * 0.22))
+        and (eco.EnergyIncome or 0) >= (40 - (upgradeBudgetBias * 3.5))
+        and (eco.MassStorageRatio or 0) >= (0.16 - (upgradeBudgetBias * 0.012))
+        and (eco.EnergyStorageRatio or 0) >= (0.14 - (upgradeBudgetBias * 0.01))
         and (confidence.Global or 0) >= 0.55
     if budgetT2Cap >= 1 then
         allowGeneralT2 = true
@@ -477,10 +490,10 @@ local function PickMexTarget(aiBrain, runtime, state)
         and readyLand >= 4
         and powerReady >= 5
         and mexReady >= 4
-        and (eco.MassIncome or 0) >= 5
-        and (eco.EnergyIncome or 0) >= 70
-        and (eco.MassStorageRatio or 0) >= 0.24
-        and (eco.EnergyStorageRatio or 0) >= 0.24
+        and (eco.MassIncome or 0) >= (5 - (upgradeBudgetBias * 0.18))
+        and (eco.EnergyIncome or 0) >= (70 - (upgradeBudgetBias * 3.0))
+        and (eco.MassStorageRatio or 0) >= (0.24 - (upgradeBudgetBias * 0.008))
+        and (eco.EnergyStorageRatio or 0) >= (0.24 - (upgradeBudgetBias * 0.008))
         and (eco.MassTrend or 0) >= -0.05
         and (eco.EnergyTrend or 0) >= 2
         and (confidence.Global or 0) >= 0.62
@@ -492,6 +505,7 @@ local function PickMexTarget(aiBrain, runtime, state)
         allowTech3 = false
     end
     local dynamicT2Cap = math.max(policyMexConcurrency or 0, budgetT2Cap, ComputeDynamicMexCap(eco, readyLand, totalLand, powerReady, mexReady, surplusSpendWindow, strongSurplusWindow))
+    dynamicT2Cap = Clamp(dynamicT2Cap + upgradeCapBias, 0, 5)
     if macroObjective == 'mass_consolidation' then
         dynamicT2Cap = math.max(dynamicT2Cap, math.max(1, budgetT2Cap))
     elseif macroObjective == 'first_land_hq' or macroObjective == 'first_t2_engineer' or macroObjective == 'first_t2_power' then
@@ -559,8 +573,8 @@ local function PickMexTarget(aiBrain, runtime, state)
                 local isLocal = distMain <= localRadius
                 local scopeClass = ClassifyMexScope(distMain, distAnchor)
                 local localScopeEligible = scopeClass == 'core' or scopeClass == 'inner_local' or ((not localMexOnly) and scopeClass == 'outer_local')
-                local localRiskCap = (budgetT2Cap >= 1 or postT2LocalConsolidation) and 3.8 or 3.2
-                local localThreatCap = (budgetT2Cap >= 1 or postT2LocalConsolidation) and 2.2 or 1.8
+                local localRiskCap = ((budgetT2Cap >= 1 or postT2LocalConsolidation) and 3.8 or 3.2) + upgradeRiskBias
+                local localThreatCap = ((budgetT2Cap >= 1 or postT2LocalConsolidation) and 2.2 or 1.8) + (upgradeRiskBias * 0.7)
                 if tech == 1 and allowLocalT2 and isLocal and localScopeEligible and risk <= localRiskCap and threat <= localThreatCap then
                     local localScore = score
                         + 90
@@ -585,7 +599,7 @@ local function PickMexTarget(aiBrain, runtime, state)
                         bestTech = 'tech2'
                         bestScope = scopeClass == 'core' and 'core' or 'local'
                     end
-                elseif tech == 1 and allowGeneralT2 and not localMexOnly and risk <= (isLocal and 3.4 or 2.4) and threat <= (isLocal and 1.9 or 1.1) then
+                elseif tech == 1 and allowGeneralT2 and not localMexOnly and risk <= ((isLocal and 3.4 or 2.4) + upgradeRiskBias) and threat <= ((isLocal and 1.9 or 1.1) + (upgradeRiskBias * 0.7)) then
                     local generalScore = score + (isLocal and 70 or 28) + ((mapControl >= 0.5) and 10 or 0) + (surplusSpendWindow and 18 or 0) + (tempoMode and 18 or 0) + (scoutingDebt and 12 or 0)
                         + (scopeClass == 'core' and 120 or 0)
                         + (scopeClass == 'inner_local' and 45 or 0)
@@ -600,7 +614,7 @@ local function PickMexTarget(aiBrain, runtime, state)
                         bestTech = 'tech2'
                         bestScope = scopeClass == 'core' and 'core' or (isLocal and 'local' or 'remote')
                     end
-                elseif tech == 2 and allowTech3 and risk <= (isLocal and 2.8 or 2.0) and threat <= (isLocal and 1.6 or 0.9) then
+                elseif tech == 2 and allowTech3 and risk <= ((isLocal and 2.8 or 2.0) + upgradeRiskBias) and threat <= ((isLocal and 1.6 or 0.9) + (upgradeRiskBias * 0.7)) then
                     local t3Score = score + (isLocal and 34 or 12)
                         + (scopeClass == 'core' and 90 or 0)
                         + (scopeClass == 'inner_local' and 35 or 0)
@@ -686,6 +700,7 @@ local function PickFactoryTarget(aiBrain, runtime, state, now)
     local constraints = director.ConstraintState or {}
     local planner = runtime.StrategicPlanner or {}
     local macro = runtime.MacroController or {}
+    local policy = runtime.EcoPolicy or {}
     local eco = runtime.EcoState or {}
     local macroObjective = GetMacroObjective(runtime)
     local mainPos = GetMainPos(aiBrain, runtime)
@@ -699,6 +714,8 @@ local function PickFactoryTarget(aiBrain, runtime, state, now)
     local upgradeCount = CountActiveLandFactoryUpgrades(aiBrain)
     local t2LandFactories = aiBrain:GetCurrentUnits(categories.FACTORY * categories.LAND * categories.STRUCTURE * categories.TECH2) or 0
     local factoryTask = current.FactoryTask or {}
+    local hqTimingBias = policy.FactoryHQTimingBias or 0
+    local hqEcoBias = policy.FactoryHQEcoBias or 0
 
     state.Managed = true
     state.TargetUnit = false
@@ -723,7 +740,7 @@ local function PickFactoryTarget(aiBrain, runtime, state, now)
         and not constraints.EcoCrash
     local forceFirstHQAfterEscape = firstHQEscapeFloorReady
         and (
-            now >= 330
+            now >= (330 + hqTimingBias)
             or readyLand >= 4
             or macro.NeedFirstLandHQ == true
         )
@@ -840,12 +857,18 @@ local function PickFactoryTarget(aiBrain, runtime, state, now)
     end
     local surplusSpendWindow = constraints.SurplusSpendWindow == true
     local strongSurplusWindow = constraints.StrongSurplusWindow == true
-    local firstHQMassIncomeFloor = mandatoryFirstHQ and ((airFactoryDebt and 1.5) or 1.7) or 3.2
-    local firstHQEnergyIncomeFloor = mandatoryFirstHQ and ((airFactoryDebt and 8) or 10) or 58
-    local firstHQMassStorageFloor = mandatoryFirstHQ and ((airFactoryDebt and 0.00) or 0.01) or 0.06
-    local firstHQEnergyStorageFloor = mandatoryFirstHQ and 0.00 or 0.12
-    local firstHQMassTrendFloor = mandatoryFirstHQ and ((airFactoryDebt and -0.70) or -0.55) or -0.14
-    local firstHQEnergyTrendFloor = mandatoryFirstHQ and ((airFactoryDebt and -18) or -14) or -2
+    local firstHQMassIncomeFloor = (mandatoryFirstHQ and ((airFactoryDebt and 1.5) or 1.7) or 3.2) + (hqEcoBias * (mandatoryFirstHQ and 0.35 or 0.75))
+    local firstHQEnergyIncomeFloor = (mandatoryFirstHQ and ((airFactoryDebt and 8) or 10) or 58) + (hqEcoBias * (mandatoryFirstHQ and 4 or 14))
+    local firstHQMassStorageFloor = (mandatoryFirstHQ and ((airFactoryDebt and 0.00) or 0.01) or 0.06) + (hqEcoBias * 0.012)
+    local firstHQEnergyStorageFloor = (mandatoryFirstHQ and 0.00 or 0.12) + (hqEcoBias * 0.014)
+    local firstHQMassTrendFloor = (mandatoryFirstHQ and ((airFactoryDebt and -0.70) or -0.55) or -0.14) + (hqEcoBias * 0.055)
+    local firstHQEnergyTrendFloor = (mandatoryFirstHQ and ((airFactoryDebt and -18) or -14) or -2) + (hqEcoBias * 4.5)
+    firstHQMassIncomeFloor = Clamp(firstHQMassIncomeFloor, mandatoryFirstHQ and 0.8 or 2.0, mandatoryFirstHQ and 2.8 or 4.6)
+    firstHQEnergyIncomeFloor = Clamp(firstHQEnergyIncomeFloor, mandatoryFirstHQ and 4 or 34, mandatoryFirstHQ and 22 or 86)
+    firstHQMassStorageFloor = Clamp(firstHQMassStorageFloor, 0, mandatoryFirstHQ and 0.08 or 0.14)
+    firstHQEnergyStorageFloor = Clamp(firstHQEnergyStorageFloor, 0, mandatoryFirstHQ and 0.08 or 0.2)
+    firstHQMassTrendFloor = Clamp(firstHQMassTrendFloor, mandatoryFirstHQ and -0.85 or -0.28, mandatoryFirstHQ and -0.25 or 0.02)
+    firstHQEnergyTrendFloor = Clamp(firstHQEnergyTrendFloor, mandatoryFirstHQ and -24 or -10, mandatoryFirstHQ and -4 or 8)
 
     if readyLand < 3 or totalLand < 3 or powerReady < 3 or mexReady < 3 then
         state.Reason = 'factory_floor'

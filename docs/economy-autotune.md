@@ -16,13 +16,16 @@ The runtime clamps all config values before use. Neutral values preserve the han
 - base engineer floor and engineer-to-factory ratio
 - safe expansion distance, risk cap, and enemy buffer
 - reclaim-field thresholds and reclaim engineer quota
+- reclaim risk tolerance, support requirements, and nearby opportunistic reclaim sensitivity
 - expansion engineer quota
-- mex upgrade timing
+- strategic posture bias for expand, stabilize, tempo, tech, air response, and forward theater retention
+- mex upgrade timing, risk, budget, and concurrency
+- first land HQ timing and economy strictness
 - early air timing
 - radar timing
 - power safety pressure
 
-`EconomyOptimizer` applies these values to the live economy policy. Other systems continue to consume the normal policy outputs; they do not read candidate files directly.
+`EconomyOptimizer` applies economy values to the live policy, while `StrategicPlanner`, `EngineerDirector`, and `UpgradeDirector` consume the expanded policy surface. Other systems continue to consume normal runtime outputs; they do not read arbitrary candidate files directly.
 
 ## Harness
 
@@ -43,6 +46,7 @@ The harness performs this loop:
 - read the current `AutoTuneConfig.lua` as the baseline
 - run the baseline unless `-SkipBaseline` is passed
 - generate bounded mutated candidates
+- bias mutations toward the current dominant failure class and historical high-performing directions
 - sync each candidate to the live mounted mod copies
 - launch autorun games in parallel
 - run the existing autorun analyzer and KPI extractor

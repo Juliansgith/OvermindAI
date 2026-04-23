@@ -56,12 +56,10 @@ The important runtime config loading bug is fixed as of v260. `AutoTuneConfig.lu
 
 What is not solved yet:
 
-- scoring still needs stronger multi-objective promotion rules
-- a single score can still overvalue stall survival
-- candidate generation is random mutation, not intelligent search
-- no overnight wrapper exists
-- no retest/champion archive exists
-- only economy knobs are currently exposed
+- scoring can still be made more matchup-specific as more logs accumulate
+- the exposed policy genome is still hand-designed, not a learned neural model
+- combat and pathing knobs are intentionally still narrower than economy/strategy knobs
+- map-specific champion selection is not implemented yet
 
 ## Why Not Train A Neural Network Inside FAF
 
@@ -349,9 +347,17 @@ The base tuner now supports:
 - multi-map retest packs with `-RetestMaps`
 - top-candidate retesting with `-RetestTop` and `-RetestGames`
 - adaptive mutation hints from previous `score.json` files
+- failure-aware mutation from the current best candidate's dominant failure class
 - failure classification per candidate
 - JSON summaries and Markdown session reports
 - champion archiving on promotion
+
+The promoted runtime config now affects more than narrow economy thresholds. The learner can directly bias:
+
+- strategic posture: expand, stabilize, tempo, tech, air-response, and forward theater preference
+- reclaim behavior: field risk tolerance, required support, and nearby opportunistic reclaim sensitivity
+- upgrade behavior: mex upgrade budget, mex upgrade risk, mex upgrade concurrency, first land HQ timing, and first land HQ eco strictness
+- existing economy behavior: factory floors, factory tempo, expansion safety, reclaim quotas, radar/air timing, ACU distance, and power safety
 
 The overnight runner now supports:
 

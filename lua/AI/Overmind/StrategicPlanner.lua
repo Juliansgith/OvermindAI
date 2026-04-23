@@ -1,4 +1,5 @@
 local OvermindMemory = import('/mods/OvermindAI/lua/AI/Overmind/Memory.lua')
+local OvermindAutoTune = import('/mods/OvermindAI/lua/AI/Overmind/AutoTune.lua')
 
 local Module = {
     Name = 'StrategicPlanner',
@@ -402,7 +403,7 @@ local function PickStableKey(state, fieldName, switchFieldName, scores, fallback
     return bestKey
 end
 
-local function ScoreTheaters(signals)
+local function ScoreTheaters(signals, tune)
     local scores = {}
     scores.Home =
         (signals.HomePressure * 0.85)
@@ -439,10 +440,15 @@ local function ScoreTheaters(signals)
         scores.Navy = -1
     end
 
+    local forwardBias = (tune and tune.StrategyForwardTheaterBias) or 0
+    scores.Home = scores.Home - (forwardBias * 0.45)
+    scores.Front = scores.Front + (forwardBias * 0.65)
+    scores.Enemy = scores.Enemy + (forwardBias * 0.8)
+
     return scores
 end
 
-local function ScoreDirectives(signals, primaryTheater)
+local function ScoreDirectives(signals, primaryTheater, tune)
     local scores = {}
     scores.stabilize =
         (signals.EcoWeak and 1.6 or 0)
@@ -600,10 +606,22 @@ local function ScoreDirectives(signals, primaryTheater)
         scores.trade_tech_for_tempo = scores.trade_tech_for_tempo + 0.8
     end
 
+    local expandBias = (tune and tune.StrategyExpandBias) or 0
+    local stabilizeBias = (tune and tune.StrategyStabilizeBias) or 0
+    local tempoBias = (tune and tune.StrategyTempoBias) or 0
+    local techBias = (tune and tune.StrategyTechBias) or 0
+    local airBias = (tune and tune.StrategyAirBias) or 0
+    scores.expand = scores.expand + expandBias
+    scores.stabilize = scores.stabilize + stabilizeBias
+    scores.punish_greed = scores.punish_greed + (tempoBias * 0.55) + (expandBias * 0.15)
+    scores.trade_tech_for_tempo = scores.trade_tech_for_tempo + tempoBias
+    scores.trade_map_for_tech = scores.trade_map_for_tech + techBias
+    scores.force_air_answer = scores.force_air_answer + airBias
+
     return scores
 end
 
-local function BuildDirectiveState(signals, primaryTheater, directive)
+local function BuildDirectiveState(signals, primaryTheater, directive, tune)
     local punishGreed = directive == 'punish_greed'
         or signals.GreedWindow
         or signals.FocusOnT1Spam
@@ -661,6 +679,11 @@ local function BuildDirectiveState(signals, primaryTheater, directive)
         techBias = 0.05
     end
 
+    local tunedTempo = (tune and tune.StrategyTempoBias) or 0
+    local tunedTech = (tune and tune.StrategyTechBias) or 0
+    tempoBias = Clamp(tempoBias + (tunedTempo * 0.22) - (tunedTech * 0.08), -0.95, 1.05)
+    techBias = Clamp(techBias + (tunedTech * 0.22) - (tunedTempo * 0.08), -0.95, 0.95)
+
     local aggressionBias = Clamp(
         (tempoBias * 0.55)
         + ((primaryTheater == 'Enemy') and 0.06 or 0)
@@ -689,7 +712,7 @@ local function BuildDirectiveState(signals, primaryTheater, directive)
     }
 end
 
-local function BuildGoalBiases(primaryTheater, directiveState, directive)
+local function BuildGoalBiases(primaryTheater, directiveState, directive, tune)
     local bias = {
         hold = 0,
         expand = 0,
@@ -784,6 +807,14 @@ local function BuildGoalBiases(primaryTheater, directiveState, directive)
         bias.hold = bias.hold - 0.2
     end
 
+    if tune then
+        bias.expand = bias.expand + ((tune.StrategyExpandBias or 0) * 0.45)
+        bias.hold = bias.hold + ((tune.StrategyStabilizeBias or 0) * 0.45)
+        bias.raid = bias.raid + ((tune.StrategyTempoBias or 0) * 0.35) + ((tune.StrategyForwardTheaterBias or 0) * 0.25)
+        bias.all_in = bias.all_in + ((tune.StrategyTempoBias or 0) * 0.25)
+        bias.tech = bias.tech + ((tune.StrategyTechBias or 0) * 0.45)
+    end
+
     return bias
 end
 
@@ -833,17 +864,18 @@ function Module.Update(aiBrain, now)
     }
 
     local state = runtime.StrategicPlanner
+    local tune = OvermindAutoTune.GetConfig(aiBrain)
     local signals = BuildSignals(aiBrain, runtime, now)
     local battlefield = BuildBattlefieldObjectives(aiBrain, runtime, signals, state, now)
     for key, value in pairs(battlefield) do
         signals[key] = value
     end
-    local theaterScores = ScoreTheaters(signals)
+    local theaterScores = ScoreTheaters(signals, tune)
     local primaryTheater = PickStableKey(state, 'PrimaryTheater', 'LastTheaterSwitch', theaterScores, 'Front', now, 45, 0.35)
-    local directiveScores = ScoreDirectives(signals, primaryTheater)
+    local directiveScores = ScoreDirectives(signals, primaryTheater, tune)
     local directive = PickStableKey(state, 'Directive', 'LastDirectiveSwitch', directiveScores, 'stabilize', now, 55, 0.45)
-    local directiveState = BuildDirectiveState(signals, primaryTheater, directive)
-    local goalBiases = BuildGoalBiases(primaryTheater, directiveState, directive)
+    local directiveState = BuildDirectiveState(signals, primaryTheater, directive, tune)
+    local goalBiases = BuildGoalBiases(primaryTheater, directiveState, directive, tune)
     local focusPos, focusZoneKey, focusReason = DetermineFocus(signals, primaryTheater, directive, directiveState)
     local confidence = Clamp(
         ((signals.GraphReady and 0.12) or 0)

@@ -101,6 +101,18 @@ function Clamp-Number {
     return $Value
 }
 
+function Get-ObjectPropertyValue {
+    param($Object, [string]$Name)
+    if ($null -eq $Object -or [string]::IsNullOrWhiteSpace($Name)) {
+        return 0
+    }
+    $prop = $Object.PSObject.Properties[$Name]
+    if ($null -eq $prop) {
+        return 0
+    }
+    return $prop.Value
+}
+
 function New-TuneSpecs {
     return [ordered]@{
         FactoryFloorEarly = @{ Min = 2; Max = 7; Step = 1; Kind = 'int'; Sigma = 1 }
@@ -133,12 +145,26 @@ function New-TuneSpecs {
         AirFactoryTimeBias = @{ Min = -180; Max = 240; Step = 10; Kind = 'int'; Sigma = 50 }
         RadarTimeBias = @{ Min = -180; Max = 240; Step = 10; Kind = 'int'; Sigma = 45 }
         PowerNeedRatioBias = @{ Min = -0.14; Max = 0.16; Step = 0.01; Kind = 'double'; Sigma = 0.035 }
+        StrategyExpandBias = @{ Min = -1.4; Max = 1.8; Step = 0.05; Kind = 'double'; Sigma = 0.35 }
+        StrategyStabilizeBias = @{ Min = -1.8; Max = 1.2; Step = 0.05; Kind = 'double'; Sigma = 0.35 }
+        StrategyTempoBias = @{ Min = -1.4; Max = 1.8; Step = 0.05; Kind = 'double'; Sigma = 0.35 }
+        StrategyTechBias = @{ Min = -1.5; Max = 1.5; Step = 0.05; Kind = 'double'; Sigma = 0.35 }
+        StrategyAirBias = @{ Min = -1.6; Max = 1.4; Step = 0.05; Kind = 'double'; Sigma = 0.35 }
+        StrategyForwardTheaterBias = @{ Min = -1.2; Max = 1.5; Step = 0.05; Kind = 'double'; Sigma = 0.3 }
+        ReclaimRiskBias = @{ Min = -0.45; Max = 0.75; Step = 0.025; Kind = 'double'; Sigma = 0.12 }
+        ReclaimSupportBias = @{ Min = -1; Max = 1; Step = 0.25; Kind = 'double'; Sigma = 0.35 }
+        ReclaimNearbyBias = @{ Min = -0.35; Max = 0.65; Step = 0.025; Kind = 'double'; Sigma = 0.12 }
+        MexUpgradeBudgetBias = @{ Min = -2.5; Max = 3; Step = 0.1; Kind = 'double'; Sigma = 0.65 }
+        MexUpgradeRiskBias = @{ Min = -0.45; Max = 0.7; Step = 0.025; Kind = 'double'; Sigma = 0.12 }
+        MexUpgradeCapBias = @{ Min = -1; Max = 2; Step = 1; Kind = 'int'; Sigma = 1 }
+        FactoryHQTimingBias = @{ Min = -120; Max = 180; Step = 10; Kind = 'int'; Sigma = 40 }
+        FactoryHQEcoBias = @{ Min = -1; Max = 1; Step = 0.05; Kind = 'double'; Sigma = 0.28 }
     }
 }
 
 function Get-DefaultTuneConfig {
     $cfg = [ordered]@{
-        Version = 2
+        Version = 3
         CandidateId = 'baseline'
         ParentCandidateId = 'manual'
         GeneratedAt = (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')
@@ -299,8 +325,8 @@ function Get-AdaptiveHints {
     $bottom = @($sorted | Select-Object -Last $take)
     $directions = @{}
     foreach ($name in (New-TuneSpecs).Keys) {
-        $topAvg = (@($top | ForEach-Object { To-Double $_.Config.$name }) | Measure-Object -Average).Average
-        $bottomAvg = (@($bottom | ForEach-Object { To-Double $_.Config.$name }) | Measure-Object -Average).Average
+        $topAvg = (@($top | ForEach-Object { To-Double (Get-ObjectPropertyValue -Object $_.Config -Name $name) }) | Measure-Object -Average).Average
+        $bottomAvg = (@($bottom | ForEach-Object { To-Double (Get-ObjectPropertyValue -Object $_.Config -Name $name) }) | Measure-Object -Average).Average
         $step = To-Double ((New-TuneSpecs)[$name].Step)
         if ($null -ne $topAvg -and $null -ne $bottomAvg -and [math]::Abs($topAvg - $bottomAvg) -ge ($step * 0.9)) {
             $directions[$name] = if ($topAvg -gt $bottomAvg) { 1 } else { -1 }
@@ -310,6 +336,91 @@ function Get-AdaptiveHints {
     return [pscustomobject]@{
         Directions = $directions
         SourceCount = $rows.Count
+    }
+}
+
+function Get-FailureMutationHints {
+    param([string]$FailureClass)
+
+    $directions = @{}
+    switch ($FailureClass) {
+        'eco_starved' {
+            $directions['StrategyExpandBias'] = 1
+            $directions['ExpansionQuotaBias'] = 1
+            $directions['BaseEngineerFloorBias'] = 1
+            $directions['EngineerFactoryRatioBias'] = 1
+            $directions['FactoryToMexCapBias'] = -1
+            $directions['FactoryMassIncomeBias'] = 1
+        }
+        'no_expansion' {
+            $directions['StrategyExpandBias'] = 1
+            $directions['StrategyForwardTheaterBias'] = 1
+            $directions['StrategyStabilizeBias'] = -1
+            $directions['ExpansionQuotaBias'] = 1
+            $directions['SafeExpandDistanceBias'] = 1
+            $directions['SafeExpandThreatCapBias'] = 1
+            $directions['SafeExpandEnemyBufferBias'] = -1
+        }
+        'reclaim_failure' {
+            $directions['ReclaimQuotaBias'] = 1
+            $directions['ReclaimScoreBias'] = -1
+            $directions['ReclaimRiskBias'] = 1
+            $directions['ReclaimSupportBias'] = 1
+            $directions['ReclaimNearbyBias'] = 1
+            $directions['StrategyForwardTheaterBias'] = 1
+        }
+        'factory_spend_stall' {
+            $directions['FactoryMassIncomeBias'] = -1
+            $directions['FactoryEnergyIncomeBias'] = -1
+            $directions['FactoryMassRatioBias'] = -1
+            $directions['FactoryEnergyRatioBias'] = -1
+            $directions['FactoryMassPerFactoryBias'] = -1
+            $directions['FactoryToMexCapBias'] = 1
+            $directions['FactoryTempoBias'] = 1
+        }
+        'over_defensive_stall' {
+            $directions['StrategyStabilizeBias'] = -1
+            $directions['StrategyExpandBias'] = 1
+            $directions['StrategyTempoBias'] = 1
+            $directions['StrategyForwardTheaterBias'] = 1
+            $directions['ReclaimRiskBias'] = 1
+            $directions['FactoryTempoBias'] = 1
+        }
+        'over_greedy_collapse' {
+            $directions['StrategyStabilizeBias'] = 1
+            $directions['StrategyTempoBias'] = -1
+            $directions['StrategyExpandBias'] = -1
+            $directions['ReclaimRiskBias'] = -1
+            $directions['SafeExpandThreatCapBias'] = -1
+            $directions['FactoryToMexCapBias'] = -1
+        }
+        'map_control_collapse' {
+            $directions['StrategyExpandBias'] = 1
+            $directions['StrategyTempoBias'] = 1
+            $directions['StrategyForwardTheaterBias'] = 1
+            $directions['StrategyTechBias'] = -1
+            $directions['StrategyAirBias'] = -1
+            $directions['ExpansionQuotaBias'] = 1
+            $directions['ReclaimQuotaBias'] = 1
+        }
+        'engineer_collapse' {
+            $directions['BaseEngineerFloorMin'] = 1
+            $directions['BaseEngineerFloorBias'] = 1
+            $directions['EngineerFactoryRatioBias'] = 1
+            $directions['StrategyStabilizeBias'] = 1
+            $directions['ReclaimRiskBias'] = -1
+        }
+        default {
+            return [pscustomobject]@{
+                Directions = $directions
+                SourceFailureClass = $FailureClass
+            }
+        }
+    }
+
+    return [pscustomobject]@{
+        Directions = $directions
+        SourceFailureClass = $FailureClass
     }
 }
 
@@ -324,7 +435,8 @@ function New-MutatedConfig {
         [hashtable]$Parent,
         [int]$CandidateIndex,
         [System.Random]$Random,
-        $AdaptiveHints = $null
+        $AdaptiveHints = $null,
+        $FailureHints = $null
     )
 
     $specs = New-TuneSpecs
@@ -333,7 +445,7 @@ function New-MutatedConfig {
         $cfg[$key] = $Parent[$key]
     }
 
-    $cfg.Version = 2
+    $cfg.Version = 3
     $cfg.CandidateId = "candidate-$CandidateIndex"
     $cfg.ParentCandidateId = [string]($Parent.CandidateId)
     $cfg.GeneratedAt = (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')
@@ -343,12 +455,25 @@ function New-MutatedConfig {
     $cfg.MapName = $MapName
 
     $mutated = 0
+    $forcedNames = @()
+    if ($FailureHints -and $FailureHints.Directions -and $FailureHints.Directions.Count -gt 0 -and $CandidateIndex -le [math]::Min(6, $Candidates)) {
+        $hintNames = @($FailureHints.Directions.Keys)
+        $forceCount = [math]::Min(3, $hintNames.Count)
+        while ($forcedNames.Count -lt $forceCount) {
+            $pick = [string]$hintNames[$Random.Next(0, $hintNames.Count)]
+            if ($forcedNames -notcontains $pick) {
+                $forcedNames += $pick
+            }
+        }
+    }
     foreach ($name in $specs.Keys) {
         $spec = $specs[$name]
         $value = To-Double $cfg[$name]
-        if ($Random.NextDouble() -le $MutationRate) {
+        if (($forcedNames -contains $name) -or $Random.NextDouble() -le $MutationRate) {
             $direction = if ($Random.NextDouble() -lt 0.5) { -1 } else { 1 }
-            if ($AdaptiveHints -and $AdaptiveHints.Directions.ContainsKey($name) -and $Random.NextDouble() -lt 0.65) {
+            if ($FailureHints -and $FailureHints.Directions.ContainsKey($name) -and $Random.NextDouble() -lt 0.78) {
+                $direction = [int]$FailureHints.Directions[$name]
+            } elseif ($AdaptiveHints -and $AdaptiveHints.Directions.ContainsKey($name) -and $Random.NextDouble() -lt 0.65) {
                 $direction = [int]$AdaptiveHints.Directions[$name]
             }
             $magnitude = 0.35 + ($Random.NextDouble() * 1.3)
@@ -937,7 +1062,11 @@ if (-not $SkipBaseline) {
 $best = $results[0]
 for ($i = 1; $i -le $Candidates; $i++) {
     $parent = $best.Config
-    $candidateConfig = New-MutatedConfig -Parent $parent -CandidateIndex $i -Random $rng -AdaptiveHints $adaptiveHints
+    $failureHints = Get-FailureMutationHints -FailureClass $best.PrimaryFailureClass
+    if ($i -eq 1 -and $failureHints.Directions.Count -gt 0) {
+        Write-Host ("  failure-aware mutation class={0} hints={1}" -f $failureHints.SourceFailureClass, $failureHints.Directions.Count)
+    }
+    $candidateConfig = New-MutatedConfig -Parent $parent -CandidateIndex $i -Random $rng -AdaptiveHints $adaptiveHints -FailureHints $failureHints
     $candidateSeed = $BaseSeed + ($i * 100000)
     $candidateResult = Run-Candidate -CandidateId ("candidate-$i") -Config $candidateConfig -SessionDir $sessionDir -SeedBase $candidateSeed
     $results += $candidateResult
@@ -1059,6 +1188,7 @@ $summary = [pscustomobject]@{
     RetestGames = $RetestGames
     RetestMaps = Get-RetestMapList
     AdaptiveMutationSources = $adaptiveHints.SourceCount
+    FailureAwareMutation = $true
     BaselineScore = $promotionBaseline.Score
     BaselineAvgGameTime = $promotionBaseline.AvgGameTime
     BaselineAvgMassRatio = $promotionBaseline.AvgMassRatio
