@@ -620,6 +620,38 @@ local function ClaimRadarBuild(aiBrain, seconds, now)
     runtime.RadarBuildClaimUntil = math.max(runtime.RadarBuildClaimUntil or -999, t + (seconds or 8))
 end
 
+local function NormalizeFactoryDomain(domain)
+    local normalized = string.lower(domain or '')
+    if normalized == 'sea' or normalized == 'naval' then
+        return 'navy'
+    end
+    if normalized == 'land' or normalized == 'air' or normalized == 'navy' then
+        return normalized
+    end
+    return 'unknown'
+end
+
+local function IsFactoryBuildClaimed(aiBrain, domain, now)
+    local runtime = aiBrain and aiBrain.OvermindRuntime
+    local t = now or GetGameTimeSeconds()
+    if not runtime then
+        return false
+    end
+    local claims = runtime.FactoryBuildClaims or {}
+    return (claims[NormalizeFactoryDomain(domain)] or -999) > t
+end
+
+local function ClaimFactoryBuild(aiBrain, domain, seconds, now)
+    local runtime = aiBrain and aiBrain.OvermindRuntime
+    local t = now or GetGameTimeSeconds()
+    if not runtime then
+        return
+    end
+    runtime.FactoryBuildClaims = runtime.FactoryBuildClaims or {}
+    local key = NormalizeFactoryDomain(domain)
+    runtime.FactoryBuildClaims[key] = math.max(runtime.FactoryBuildClaims[key] or -999, t + (seconds or 12))
+end
+
 local function ShouldBypassGenericFirstRadar(aiBrain)
     local director = GetProductionDirector(aiBrain)
     local structurePlan = director and director.StructurePlan or {}
@@ -1005,6 +1037,11 @@ local function ApproveFactoryBuildRequest(aiBrain, domain)
         return true
     end
 
+    local now = GetGameTimeSeconds()
+    if IsFactoryBuildClaimed(aiBrain, domain, now) then
+        return false
+    end
+
     local capacity = GetAuthoritativeCapacityPlan(aiBrain)
     if capacity and not HasCriticalFactoryTask(aiBrain, domain) then
         local landFactories = GetExistingUnitCount(aiBrain, categories.FACTORY * categories.LAND * categories.STRUCTURE)
@@ -1017,7 +1054,6 @@ local function ApproveFactoryBuildRequest(aiBrain, domain)
 
     local gate = runtime.FactoryBuildGate or {}
     runtime.FactoryBuildGate = gate
-    local now = GetGameTimeSeconds()
     local totalFactories = GetExistingUnitCount(aiBrain, categories.FACTORY * categories.STRUCTURE)
     local strictCap = 5
     if now >= 720 then
@@ -1053,6 +1089,7 @@ local function ApproveFactoryBuildRequest(aiBrain, domain)
     gate.LockUntil = now + cooldown
     gate.LastIssueTime = now
     gate.LastDomain = domain or 'any'
+    ClaimFactoryBuild(aiBrain, domain, cooldown + 4, now)
 
     return true
 end

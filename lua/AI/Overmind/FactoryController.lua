@@ -488,6 +488,15 @@ local function GetMacroObjective(runtime)
     return prod.MacroObjective or 'land_factory_floor'
 end
 
+local function NeedsFirstLandHQ(runtime)
+    local macroObjective = GetMacroObjective(runtime)
+    if macroObjective == 'first_land_hq' or macroObjective == 'first_t2_engineer' or macroObjective == 'first_t2_power' then
+        return true
+    end
+    local factoryUpgrade = (((runtime or {}).UpgradeDirector or {}).Factory) or {}
+    return factoryUpgrade.NeedsFirstLandHQ == true and factoryUpgrade.Enabled ~= true
+end
+
 local function ShouldForceFirstTechEngineer(aiBrain, factory, runtime, eco)
     if not factory or factory.Dead then
         return false
@@ -663,6 +672,11 @@ local function TryIssuePlannedBuild(aiBrain, factory, runtime, now, state, queue
         state.NextIssueTime = now + 1.0
         return true, 'FactoryUpgrade'
     end
+    if NeedsFirstLandHQ(runtime) and ClassifyFactory(factory) == 'land' then
+        state.LastRole = 'FactoryUpgradeReserve'
+        state.NextIssueTime = now + 1.0
+        return false, 'reserved-hq-upgrade'
+    end
     local roleName, utility, entry = PickPlannedRole(factory, runtime, eco)
     if not roleName then
         return false, 'no-role'
@@ -721,6 +735,10 @@ function Module.Update(aiBrain, now)
     local domainIdle = { Land = 0, Air = 0, Navy = 0, Other = 0 }
     local eco = GetEcon(runtime)
     local queueDepthTarget = DesiredQueueDepth(runtime, eco)
+    local firstHQReserve = NeedsFirstLandHQ(runtime)
+    if firstHQReserve then
+        queueDepthTarget = math.min(queueDepthTarget, 1)
+    end
 
     for _, factory in allFactories do
         if factory and not factory.Dead then
@@ -739,7 +757,7 @@ function Module.Update(aiBrain, now)
                     emptyFactories = emptyFactories + 1
                     domainIdle[domain] = (domainIdle[domain] or 0) + 1
                 end
-                if qLen < queueDepthTarget then
+                if qLen < queueDepthTarget or (firstHQReserve and kind == 'land' and qLen <= 0) then
                     if qLen <= 0 and not factory:IsUnitState('Building') then
                         idleFactories = idleFactories + 1
                     end

@@ -1908,10 +1908,12 @@ BuilderGroup {
     Builder {
         BuilderName = 'Overmind T1 Land Factory',
         PlatoonTemplate = 'EngineerBuilder',
+        InstanceCount = 1,
         Priority = 1008,
         BuilderConditions = {
             { OMBC, 'IsOvermindBrain', {} },
             { IBC, 'BrainNotLowPowerMode', {} },
+            { UCBC, 'LocationEngineersBuildingLess', { 'LocationType', 1, 'FACTORY' } },
             { OMBC, 'HasNoUnfinishedFactoriesAtLocation', { 'LocationType', 180, 0 } },
             { UCBC, 'FactoryCapCheck', { 'LocationType', 'Land' } },
             { UCBC, 'UnitCapCheckLess', { 0.92 } },
@@ -1930,10 +1932,12 @@ BuilderGroup {
     Builder {
         BuilderName = 'Overmind T1 Air Factory',
         PlatoonTemplate = 'EngineerBuilder',
+        InstanceCount = 1,
         Priority = 1002,
         BuilderConditions = {
             { OMBC, 'IsOvermindBrain', {} },
             { IBC, 'BrainNotLowPowerMode', {} },
+            { UCBC, 'LocationEngineersBuildingLess', { 'LocationType', 1, 'FACTORY' } },
             { OMBC, 'HasNoUnfinishedFactoriesAtLocation', { 'LocationType', 180, 0 } },
             { UCBC, 'FactoryCapCheck', { 'LocationType', 'Air' } },
             { UCBC, 'UnitCapCheckLess', { 0.92 } },
@@ -1952,10 +1956,12 @@ BuilderGroup {
     Builder {
         BuilderName = 'Overmind T2 Land Factory',
         PlatoonTemplate = 'T2EngineerBuilder',
+        InstanceCount = 1,
         Priority = 980,
         BuilderConditions = {
             { OMBC, 'IsOvermindBrain', {} },
             { IBC, 'BrainNotLowPowerMode', {} },
+            { UCBC, 'LocationEngineersBuildingLess', { 'LocationType', 1, 'FACTORY' } },
             { OMBC, 'HasNoUnfinishedFactoriesAtLocation', { 'LocationType', 180, 0 } },
             { UCBC, 'FactoryCapCheck', { 'LocationType', 'Land' } },
             { UCBC, 'FactoryLessAtLocation', { 'LocationType', 5, 'LAND' } },
@@ -1975,10 +1981,12 @@ BuilderGroup {
     Builder {
         BuilderName = 'Overmind T2 Air Factory',
         PlatoonTemplate = 'T2EngineerBuilder',
+        InstanceCount = 1,
         Priority = 975,
         BuilderConditions = {
             { OMBC, 'IsOvermindBrain', {} },
             { IBC, 'BrainNotLowPowerMode', {} },
+            { UCBC, 'LocationEngineersBuildingLess', { 'LocationType', 1, 'FACTORY' } },
             { OMBC, 'HasNoUnfinishedFactoriesAtLocation', { 'LocationType', 180, 0 } },
             { UCBC, 'FactoryCapCheck', { 'LocationType', 'Air' } },
             { UCBC, 'FactoryLessAtLocation', { 'LocationType', 5, 'AIR' } },
