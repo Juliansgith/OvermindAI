@@ -852,15 +852,54 @@ local function IsFactoryExpansionEcoBlocked(aiBrain, landFactories, airFactories
     return false
 end
 
+local function HasSecondLandFactoryBootstrapDebt(aiBrain, capacity, domain)
+    local normalized = string.lower(domain or '')
+    if normalized ~= 'land' then
+        return false
+    end
+
+    local now = GetGameTimeSeconds()
+    if now > 600 then
+        return false
+    end
+
+    local landFactories = GetExistingUnitCount(aiBrain, categories.FACTORY * categories.LAND * categories.STRUCTURE)
+    local readyLandFactories = GetCompletedUnitCount(aiBrain, categories.FACTORY * categories.LAND * categories.STRUCTURE)
+    if readyLandFactories < 1 or landFactories >= 2 then
+        return false
+    end
+
+    local activeCapacity = capacity or GetAuthoritativeCapacityPlan(aiBrain)
+    if activeCapacity and type(activeCapacity) == 'table' then
+        local target = activeCapacity.LandTarget or 0
+        if target < 2 and activeCapacity.AddLandFactory ~= true then
+            return false
+        end
+    end
+
+    local readyMex = GetCompletedUnitCount(aiBrain, categories.MASSEXTRACTION * categories.STRUCTURE)
+    local readyPower = GetCompletedUnitCount(aiBrain, categories.ENERGYPRODUCTION * categories.STRUCTURE)
+    if readyMex < 4 or readyPower < 2 then
+        return false
+    end
+
+    local econ = GetEcon(aiBrain)
+    local severeEnergyCrash = (econ.EnergyStorageRatio or 0) <= 0.01 and (econ.EnergyTrend or 0) <= -30
+    return not severeEnergyCrash
+end
+
 local function IsFactoryGrowthHardBlocked(aiBrain, capacity, domain)
     if HasCriticalFactoryTask(aiBrain, domain) then
         return true
     end
 
     local activeCapacity = capacity or GetAuthoritativeCapacityPlan(aiBrain)
+    local secondLandBootstrapDebt = HasSecondLandFactoryBootstrapDebt(aiBrain, activeCapacity, domain)
     if activeCapacity then
         if activeCapacity.PauseFactoryGrowth == true or activeCapacity.FactoryCompletionLock == true then
-            return true
+            if not secondLandBootstrapDebt then
+                return true
+            end
         end
     end
 
@@ -2164,7 +2203,7 @@ function ShouldAddLandFactory(aiBrain, locationType, minMassIncome, minEnergyInc
         if not IsPrimaryLocation(aiBrain, locationType, 44) then
             allow = capacity.AddLandFactory == true and IsSecondaryExpansionReady(aiBrain, recovery, now, GetEcon(aiBrain), factoryCount)
         else
-            allow = capacity.AddLandFactory == true
+            allow = capacity.AddLandFactory == true or HasSecondLandFactoryBootstrapDebt(aiBrain, capacity, 'land')
         end
         if not allow then
             return false
@@ -3076,7 +3115,7 @@ function ShouldBuildT1FactoryType(aiBrain, factoryType, locationType)
     if capacity then
         local allow = false
         if kind == 'land' then
-            allow = capacity.AddLandFactory == true
+            allow = capacity.AddLandFactory == true or (isPrimary and HasSecondLandFactoryBootstrapDebt(aiBrain, capacity, kind))
         elseif kind == 'air' then
             allow = capacity.AddAirFactory == true
         elseif kind == 'sea' or kind == 'naval' then
