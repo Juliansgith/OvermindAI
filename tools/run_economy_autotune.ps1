@@ -10,14 +10,19 @@ param(
     [double]$PromoteScoreMargin = 0.03,
     [double]$MutationRate = 0.55,
     [double]$RequireMassRatioGain = 0,
+    [double]$MinMassRatioAbsolute = 0,
     [double]$MaxMassRatioRegression = 0,
+    [int]$MinAvgGameTime = 0,
     [double]$MaxSurvivalRegression = 0.25,
     [int]$RetestTop = 0,
     [int]$RetestGames = 0,
+    [string]$RetestMaps = '',
     [string]$RunRoot = '',
     [string]$ChampionDir = '',
     [switch]$SkipBaseline,
     [switch]$NoPromote,
+    [switch]$RestoreOriginalOnExit,
+    [switch]$DisableAdaptiveMutation,
     [switch]$DryRun,
     [switch]$KeepLosingCandidateConfig
 )
@@ -57,7 +62,9 @@ if ($ParallelInstances -lt 1) { throw 'ParallelInstances must be at least 1.' }
 if ($TargetSpeed -lt 1) { throw 'TargetSpeed must be at least 1.' }
 if ($MutationRate -lt 0 -or $MutationRate -gt 1) { throw 'MutationRate must be between 0 and 1.' }
 if ($RequireMassRatioGain -lt 0) { throw 'RequireMassRatioGain must be zero or higher.' }
+if ($MinMassRatioAbsolute -lt 0) { throw 'MinMassRatioAbsolute must be zero or higher.' }
 if ($MaxMassRatioRegression -lt 0) { throw 'MaxMassRatioRegression must be zero or higher.' }
+if ($MinAvgGameTime -lt 0) { throw 'MinAvgGameTime must be zero or higher.' }
 if ($MaxSurvivalRegression -lt 0 -or $MaxSurvivalRegression -gt 1) { throw 'MaxSurvivalRegression must be between 0 and 1.' }
 if ($RetestTop -lt 0) { throw 'RetestTop must be zero or higher.' }
 if ($RetestGames -lt 0) { throw 'RetestGames must be zero or higher.' }
@@ -237,6 +244,75 @@ function Get-SafeName {
     return ($Value -replace '[^A-Za-z0-9_.-]', '-')
 }
 
+function Get-RetestMapList {
+    if ([string]::IsNullOrWhiteSpace($RetestMaps)) {
+        return @($MapName)
+    }
+
+    $maps = @()
+    foreach ($entry in ($RetestMaps -split ',')) {
+        $trimmed = $entry.Trim()
+        if (-not [string]::IsNullOrWhiteSpace($trimmed)) {
+            $maps += $trimmed
+        }
+    }
+    if ($maps.Count -eq 0) {
+        return @($MapName)
+    }
+    return $maps
+}
+
+function Get-AdaptiveHints {
+    param([string]$Path)
+
+    $empty = [pscustomobject]@{
+        Directions = @{}
+        SourceCount = 0
+    }
+    if ($DisableAdaptiveMutation -or [string]::IsNullOrWhiteSpace($Path) -or -not (Test-Path -LiteralPath $Path)) {
+        return $empty
+    }
+
+    $scoreFiles = @(Get-ChildItem -LiteralPath $Path -Recurse -Filter 'score.json' -ErrorAction SilentlyContinue |
+        Select-Object -ExpandProperty FullName)
+    if ($scoreFiles.Count -lt 8) {
+        return $empty
+    }
+
+    $rows = @()
+    foreach ($file in $scoreFiles) {
+        try {
+            $data = Get-Content -LiteralPath $file -Raw | ConvertFrom-Json
+            if ($data.CandidateId -and $data.CandidateId -notmatch '^baseline|^retest-baseline' -and $data.RuntimeClean -and $data.Config) {
+                $rows += $data
+            }
+        } catch {
+        }
+    }
+    if ($rows.Count -lt 8) {
+        return $empty
+    }
+
+    $sorted = @($rows | Sort-Object -Property Score -Descending)
+    $take = [math]::Min(12, [math]::Max(3, [int][math]::Floor($sorted.Count * 0.25)))
+    $top = @($sorted | Select-Object -First $take)
+    $bottom = @($sorted | Select-Object -Last $take)
+    $directions = @{}
+    foreach ($name in (New-TuneSpecs).Keys) {
+        $topAvg = (@($top | ForEach-Object { To-Double $_.Config.$name }) | Measure-Object -Average).Average
+        $bottomAvg = (@($bottom | ForEach-Object { To-Double $_.Config.$name }) | Measure-Object -Average).Average
+        $step = To-Double ((New-TuneSpecs)[$name].Step)
+        if ($null -ne $topAvg -and $null -ne $bottomAvg -and [math]::Abs($topAvg - $bottomAvg) -ge ($step * 0.9)) {
+            $directions[$name] = if ($topAvg -gt $bottomAvg) { 1 } else { -1 }
+        }
+    }
+
+    return [pscustomobject]@{
+        Directions = $directions
+        SourceCount = $rows.Count
+    }
+}
+
 function Round-To-Step {
     param([double]$Value, [double]$Step)
     if ($Step -le 0) { return $Value }
@@ -247,7 +323,8 @@ function New-MutatedConfig {
     param(
         [hashtable]$Parent,
         [int]$CandidateIndex,
-        [System.Random]$Random
+        [System.Random]$Random,
+        $AdaptiveHints = $null
     )
 
     $specs = New-TuneSpecs
@@ -271,6 +348,9 @@ function New-MutatedConfig {
         $value = To-Double $cfg[$name]
         if ($Random.NextDouble() -le $MutationRate) {
             $direction = if ($Random.NextDouble() -lt 0.5) { -1 } else { 1 }
+            if ($AdaptiveHints -and $AdaptiveHints.Directions.ContainsKey($name) -and $Random.NextDouble() -lt 0.65) {
+                $direction = [int]$AdaptiveHints.Directions[$name]
+            }
             $magnitude = 0.35 + ($Random.NextDouble() * 1.3)
             $delta = $direction * (To-Double $spec.Sigma) * $magnitude
             $value = $value + $delta
@@ -309,11 +389,13 @@ function Invoke-AutorunBatch {
         [string]$CandidateId,
         [string]$CandidateDir,
         [int]$Games,
-        [int]$SeedBase
+        [int]$SeedBase,
+        [string]$MapOverride = ''
     )
 
     $logDir = Join-Path $CandidateDir 'logs'
     Ensure-Directory $logDir
+    $runMap = if ([string]::IsNullOrWhiteSpace($MapOverride)) { $MapName } else { $MapOverride }
 
     $launchedLogs = @()
     $remaining = $Games
@@ -341,7 +423,7 @@ function Invoke-AutorunBatch {
             '-File', $StartScript,
             '-Instances', $instances,
             '-TargetSpeed', $TargetSpeed,
-            '-MapName', $MapName,
+            '-MapName', $runMap,
             '-BaseSeed', $seed,
             '-LogDir', $logDir,
             '-ExitDelaySeconds', 4
@@ -454,6 +536,40 @@ function Get-RawLogMetrics {
     }
 }
 
+function Get-FailureClass {
+    param(
+        [double]$GameTime,
+        [double]$MassRatio,
+        [double]$SpendRatio,
+        [double]$MexAt240,
+        [double]$MexAt360,
+        [double]$ExpandOrders,
+        [double]$FieldOrders,
+        $Raw,
+        [bool]$RuntimeClean
+    )
+
+    if (-not $RuntimeClean -or $Raw.ModularError -or $Raw.RuntimeFallback) { return 'runtime_failure' }
+    if ($Raw.MinEngAfter240 -gt 0 -and $Raw.MinEngAfter240 -lt 3) { return 'engineer_collapse' }
+    if ($MassRatio -lt 0.20 -and $GameTime -ge 900) { return 'over_defensive_stall' }
+    if ($GameTime -lt 650 -and $MassRatio -ge 0.25) { return 'over_greedy_collapse' }
+    if ($Raw.MaxMex -lt 4 -or ($MexAt360 -lt 4 -and $GameTime -ge 420)) { return 'eco_starved' }
+    if ($ExpandOrders -le 0 -and $Raw.MaxMex -lt 8) { return 'no_expansion' }
+    if ($FieldOrders -le 0 -and $Raw.MaxReclaimMass -lt 500 -and $GameTime -ge 600) { return 'reclaim_failure' }
+    if ($SpendRatio -lt ($MassRatio * 0.72)) { return 'factory_spend_stall' }
+    if ($MassRatio -lt 0.28) { return 'map_control_collapse' }
+    return 'combat_or_acu_loss'
+}
+
+function Get-PrimaryFailureClass {
+    param($Runs)
+    $groups = @($Runs | Group-Object -Property FailureClass | Sort-Object -Property Count -Descending)
+    if ($groups.Count -eq 0) {
+        return 'unknown'
+    }
+    return [string]$groups[0].Name
+}
+
 function Score-Candidate {
     param(
         [string]$CandidateId,
@@ -470,6 +586,7 @@ function Score-Candidate {
             AvgGameTime = 0
             AvgMassRatio = 0
             RuntimeClean = $true
+            PrimaryFailureClass = 'dry_run'
             Config = $Config
         }
     }
@@ -494,7 +611,8 @@ function Score-Candidate {
         $opp = @($playerRows | Where-Object { $_.log_name -eq $logName -and $_.player_name -match 'M27|M28' } | Select-Object -First 1)
         $kpi = @($kpiRows | Where-Object { $_.log_name -eq $logName } | Select-Object -First 1)
         $raw = Get-RawLogMetrics -Path $run.log_path
-        if ($raw.ModularError -or $raw.RuntimeFallback -or (To-Int $run.errors) -gt 0) {
+        $runClean = -not ($raw.ModularError -or $raw.RuntimeFallback -or (To-Int $run.errors) -gt 0)
+        if (-not $runClean) {
             $runtimeClean = $false
         }
 
@@ -544,6 +662,7 @@ function Score-Candidate {
         $runScore -= (To-Double $run.errors) * 6000.0
         if ($raw.ModularError) { $runScore -= 10000.0 }
         if ($raw.RuntimeFallback) { $runScore -= 7000.0 }
+        $failureClass = Get-FailureClass -GameTime $gameTime -MassRatio $massRatio -SpendRatio $spendRatio -MexAt240 $mex240 -MexAt360 $mex360 -ExpandOrders $expandOrders -FieldOrders $fieldOrders -Raw $raw -RuntimeClean $runClean
         $scores += [pscustomobject]@{
             LogName = $logName
             Score = [math]::Round($runScore, 2)
@@ -555,6 +674,7 @@ function Score-Candidate {
             MaxFac = $raw.MaxFac
             ReclaimMass = $raw.MaxReclaimMass
             MinEngAfter240 = $raw.MinEngAfter240
+            FailureClass = $failureClass
         }
     }
 
@@ -571,6 +691,7 @@ function Score-Candidate {
         AvgGameTime = [math]::Round($avgTime, 2)
         AvgMassRatio = [math]::Round($avgMassRatio, 4)
         RuntimeClean = $runtimeClean
+        PrimaryFailureClass = Get-PrimaryFailureClass -Runs $scores
         Runs = $scores
         Config = $Config
     }
@@ -584,16 +705,18 @@ function Run-Candidate {
         [hashtable]$Config,
         [string]$SessionDir,
         [int]$SeedBase,
-        [int]$GamesOverride = 0
+        [int]$GamesOverride = 0,
+        [string]$MapOverride = ''
     )
 
     $candidateDir = Join-Path $SessionDir $CandidateId
     Ensure-Directory $candidateDir
     $runGames = if ($GamesOverride -gt 0) { $GamesOverride } else { $GamesPerCandidate }
+    $runMap = if ([string]::IsNullOrWhiteSpace($MapOverride)) { $MapName } else { $MapOverride }
     $Config.CandidateId = $CandidateId
     $Config.GeneratedAt = (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')
     $Config.Games = $runGames
-    $Config.MapName = $MapName
+    $Config.MapName = $runMap
 
     $candidateConfigPath = Join-Path $candidateDir 'AutoTuneConfig.lua'
     Write-TuneConfig -Config $Config -Path $candidateConfigPath
@@ -605,7 +728,7 @@ function Run-Candidate {
         Write-Host "[DRYRUN] generated candidate config: $candidateConfigPath"
     }
 
-    $logDir = Invoke-AutorunBatch -CandidateId $CandidateId -CandidateDir $candidateDir -Games $runGames -SeedBase $SeedBase
+    $logDir = Invoke-AutorunBatch -CandidateId $CandidateId -CandidateDir $candidateDir -Games $runGames -SeedBase $SeedBase -MapOverride $runMap
     [void](Invoke-Analysis -CandidateDir $candidateDir -LogDir $logDir)
     $result = Score-Candidate -CandidateId $CandidateId -CandidateDir $candidateDir -Config $Config
     Write-Host ("[$CandidateId] score={0} games={1} winRate={2} avgTime={3} massRatio={4} clean={5}" -f $result.Score, $result.Games, $result.WinRate, $result.AvgGameTime, $result.AvgMassRatio, $result.RuntimeClean)
@@ -634,11 +757,17 @@ function Get-PromotionDecision {
     if ($RequireMassRatioGain -gt 0) {
         $requiredMassRatio = [double]$Baseline.AvgMassRatio + $RequireMassRatioGain
     }
+    if ($MinMassRatioAbsolute -gt 0 -and $requiredMassRatio -lt $MinMassRatioAbsolute) {
+        $requiredMassRatio = $MinMassRatioAbsolute
+    }
     if ([double]$Candidate.AvgMassRatio -lt $requiredMassRatio) {
         $reasons += ("mass ratio {0} below required {1}" -f $Candidate.AvgMassRatio, [math]::Round($requiredMassRatio, 4))
     }
 
     $minimumGameTime = [double]$Baseline.AvgGameTime * (1.0 - $MaxSurvivalRegression)
+    if ($MinAvgGameTime -gt 0 -and $minimumGameTime -lt $MinAvgGameTime) {
+        $minimumGameTime = $MinAvgGameTime
+    }
     if ([double]$Candidate.AvgGameTime -lt $minimumGameTime) {
         $reasons += ("avg game time {0} below required {1}" -f $Candidate.AvgGameTime, [math]::Round($minimumGameTime, 2))
     }
@@ -689,6 +818,71 @@ function Save-Champion {
     $manifest | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $ChampionDir ("{0}-{1}.json" -f $sessionTag, $safeId)) -Encoding UTF8
 }
 
+function New-AggregatedResult {
+    param(
+        [string]$CandidateId,
+        [array]$Items,
+        [hashtable]$Config
+    )
+
+    if ($Items.Count -eq 0) {
+        return $null
+    }
+
+    return [pscustomobject]@{
+        CandidateId = $CandidateId
+        Score = [math]::Round((@($Items | Measure-Object -Property Score -Average).Average), 2)
+        Games = (@($Items | Measure-Object -Property Games -Sum).Sum)
+        WinRate = [math]::Round((@($Items | Measure-Object -Property WinRate -Average).Average), 4)
+        AvgGameTime = [math]::Round((@($Items | Measure-Object -Property AvgGameTime -Average).Average), 2)
+        AvgMassRatio = [math]::Round((@($Items | Measure-Object -Property AvgMassRatio -Average).Average), 4)
+        RuntimeClean = (@($Items | Where-Object { -not $_.RuntimeClean }).Count -eq 0)
+        PrimaryFailureClass = Get-PrimaryFailureClass -Runs @($Items | ForEach-Object { [pscustomobject]@{ FailureClass = $_.PrimaryFailureClass } })
+        Runs = @()
+        Config = $Config
+    }
+}
+
+function Write-SessionReport {
+    param(
+        [string]$Path,
+        $Summary,
+        [array]$Results
+    )
+
+    $lines = @()
+    $lines += '# Economy Autotune Session'
+    $lines += ''
+    $lines += "- Session: $($Summary.Session)"
+    $lines += "- Map: $($Summary.MapName)"
+    $lines += "- Promoted: $($Summary.Promoted)"
+    $lines += "- Best: $($Summary.BestCandidate)"
+    $lines += "- Best score: $($Summary.BestScore)"
+    $lines += "- Best average mass ratio: $($Summary.BestAvgMassRatio)"
+    $lines += "- Best average game time: $($Summary.BestAvgGameTime)"
+    $lines += "- Baseline score: $($Summary.BaselineScore)"
+    $lines += "- Baseline average mass ratio: $($Summary.BaselineAvgMassRatio)"
+    $lines += "- Baseline average game time: $($Summary.BaselineAvgGameTime)"
+    $lines += ''
+    if ($Summary.PromotionBlockedReasons -and $Summary.PromotionBlockedReasons.Count -gt 0) {
+        $lines += '## Promotion Blockers'
+        $lines += ''
+        foreach ($reason in $Summary.PromotionBlockedReasons) {
+            $lines += "- $reason"
+        }
+        $lines += ''
+    }
+    $lines += '## Candidates'
+    $lines += ''
+    $lines += '| Candidate | Score | Games | Avg Time | Mass Ratio | Failure | Clean |'
+    $lines += '| --- | ---: | ---: | ---: | ---: | --- | --- |'
+    foreach ($row in @($Results | Sort-Object -Property Score -Descending)) {
+        $lines += "| $($row.CandidateId) | $($row.Score) | $($row.Games) | $($row.AvgGameTime) | $($row.AvgMassRatio) | $($row.PrimaryFailureClass) | $($row.RuntimeClean) |"
+    }
+    $lines += ''
+    Set-Content -LiteralPath $Path -Value ($lines -join [Environment]::NewLine) -Encoding UTF8
+}
+
 Ensure-Directory $RunRoot
 $sessionTag = Get-Date -Format 'yyyyMMdd-HHmmss'
 $sessionDir = Join-Path $RunRoot $sessionTag
@@ -698,6 +892,7 @@ if ($BaseSeed -le 0) {
     $BaseSeed = Get-Random -Minimum 1 -Maximum 2000000000
 }
 $rng = [System.Random]::new($BaseSeed)
+$adaptiveHints = Get-AdaptiveHints -Path $RunRoot
 $baselineConfig = Read-TuneConfig -Path $ConfigPath
 $baselineConfig.CandidateId = if ($baselineConfig.CandidateId) { [string]$baselineConfig.CandidateId } else { 'baseline' }
 $baselineRawPath = Join-Path $sessionDir 'baseline-AutoTuneConfig.raw.lua'
@@ -713,6 +908,9 @@ Write-TuneConfig -Config $baselineConfig -Path $baselinePath
 Write-Host "Economy autotune session: $sessionTag"
 Write-Host "  candidates=$Candidates gamesPerCandidate=$GamesPerCandidate parallel=$ParallelInstances speed=$TargetSpeed map=$MapName seed=$BaseSeed"
 Write-Host "  runDir=$sessionDir"
+if ($adaptiveHints.SourceCount -gt 0) {
+    Write-Host ("  adaptive mutation hints={0} sourceCandidates={1}" -f $adaptiveHints.Directions.Count, $adaptiveHints.SourceCount)
+}
 
 $results = @()
 if (-not $SkipBaseline) {
@@ -730,6 +928,7 @@ if (-not $SkipBaseline) {
         AvgGameTime = 0
         AvgMassRatio = 0
         RuntimeClean = $true
+        PrimaryFailureClass = 'skipped_baseline'
         Runs = @()
         Config = $baselineConfig
     }
@@ -738,7 +937,7 @@ if (-not $SkipBaseline) {
 $best = $results[0]
 for ($i = 1; $i -le $Candidates; $i++) {
     $parent = $best.Config
-    $candidateConfig = New-MutatedConfig -Parent $parent -CandidateIndex $i -Random $rng
+    $candidateConfig = New-MutatedConfig -Parent $parent -CandidateIndex $i -Random $rng -AdaptiveHints $adaptiveHints
     $candidateSeed = $BaseSeed + ($i * 100000)
     $candidateResult = Run-Candidate -CandidateId ("candidate-$i") -Config $candidateConfig -SessionDir $sessionDir -SeedBase $candidateSeed
     $results += $candidateResult
@@ -754,30 +953,52 @@ $retestResults = @()
 
 if ($RetestTop -gt 0 -and -not $DryRun) {
     $retestGamesActual = if ($RetestGames -gt 0) { $RetestGames } else { $GamesPerCandidate }
+    $retestMapList = Get-RetestMapList
     $topCandidates = @($results |
         Where-Object { $_.CandidateId -ne 'baseline' -and $_.RuntimeClean } |
         Sort-Object -Property Score -Descending |
         Select-Object -First $RetestTop)
 
     if ($topCandidates.Count -gt 0) {
-        Write-Host ("Retesting top {0} candidate(s), games={1}" -f $topCandidates.Count, $retestGamesActual)
+        Write-Host ("Retesting top {0} candidate(s), games={1}, maps={2}" -f $topCandidates.Count, $retestGamesActual, ($retestMapList -join ','))
         $retestSeed = $BaseSeed + 900000000
-        $baselineRetestConfig = Copy-TuneConfig -Config $baselineConfig
-        $promotionBaseline = Run-Candidate -CandidateId 'retest-baseline' -Config $baselineRetestConfig -SessionDir $sessionDir -SeedBase $retestSeed -GamesOverride $retestGamesActual
-        $retestResults += $promotionBaseline
+        $baselineRetests = @()
+        $candidateRetests = @{}
+        $mapIndex = 0
+        foreach ($retestMap in $retestMapList) {
+            $mapIndex += 1
+            $safeMap = Get-SafeName -Value $retestMap
+            $baselineRetestConfig = Copy-TuneConfig -Config $baselineConfig
+            $baselineRetest = Run-Candidate -CandidateId ("retest-baseline-{0}" -f $safeMap) -Config $baselineRetestConfig -SessionDir $sessionDir -SeedBase ($retestSeed + ($mapIndex * 1000000)) -GamesOverride $retestGamesActual -MapOverride $retestMap
+            $baselineRetests += $baselineRetest
+            $retestResults += $baselineRetest
 
-        $candidateIndex = 0
-        foreach ($candidate in $topCandidates) {
-            $candidateIndex += 1
-            $candidateConfig = Copy-TuneConfig -Config $candidate.Config
-            $candidateConfig.ParentCandidateId = [string]$candidate.CandidateId
-            $retestResult = Run-Candidate -CandidateId ("retest-{0}" -f (Get-SafeName -Value ([string]$candidate.CandidateId))) -Config $candidateConfig -SessionDir $sessionDir -SeedBase ($retestSeed + ($candidateIndex * 100000)) -GamesOverride $retestGamesActual
-            $retestResults += $retestResult
+            $candidateIndex = 0
+            foreach ($candidate in $topCandidates) {
+                $candidateIndex += 1
+                $candidateConfig = Copy-TuneConfig -Config $candidate.Config
+                $candidateConfig.ParentCandidateId = [string]$candidate.CandidateId
+                $candidateKey = [string]$candidate.CandidateId
+                $retestResult = Run-Candidate -CandidateId ("retest-{0}-{1}" -f (Get-SafeName -Value $candidateKey), $safeMap) -Config $candidateConfig -SessionDir $sessionDir -SeedBase ($retestSeed + ($mapIndex * 1000000) + ($candidateIndex * 100000)) -GamesOverride $retestGamesActual -MapOverride $retestMap
+                if (-not $candidateRetests.ContainsKey($candidateKey)) {
+                    $candidateRetests[$candidateKey] = @()
+                }
+                $candidateRetests[$candidateKey] += $retestResult
+                $retestResults += $retestResult
+            }
         }
 
         $results += $retestResults
-        $promotionBest = @($retestResults |
-            Where-Object { $_.CandidateId -ne 'retest-baseline' -and $_.RuntimeClean } |
+        $promotionBaseline = New-AggregatedResult -CandidateId 'retest-baseline' -Items $baselineRetests -Config $baselineConfig
+        $aggregatedCandidates = @()
+        foreach ($candidate in $topCandidates) {
+            $candidateKey = [string]$candidate.CandidateId
+            if ($candidateRetests.ContainsKey($candidateKey)) {
+                $aggregatedCandidates += New-AggregatedResult -CandidateId ("retest-{0}" -f (Get-SafeName -Value $candidateKey)) -Items $candidateRetests[$candidateKey] -Config $candidate.Config
+            }
+        }
+        $promotionBest = @($aggregatedCandidates |
+            Where-Object { $_.RuntimeClean } |
             Sort-Object -Property Score -Descending |
             Select-Object -First 1)[0]
         if (-not $promotionBest) {
@@ -830,24 +1051,38 @@ $summary = [pscustomobject]@{
     NoPromote = [bool]$NoPromote
     PromoteScoreMargin = $PromoteScoreMargin
     RequireMassRatioGain = $RequireMassRatioGain
+    MinMassRatioAbsolute = $MinMassRatioAbsolute
     MaxMassRatioRegression = $MaxMassRatioRegression
+    MinAvgGameTime = $MinAvgGameTime
     MaxSurvivalRegression = $MaxSurvivalRegression
     RetestTop = $RetestTop
     RetestGames = $RetestGames
+    RetestMaps = Get-RetestMapList
+    AdaptiveMutationSources = $adaptiveHints.SourceCount
     BaselineScore = $promotionBaseline.Score
     BaselineAvgGameTime = $promotionBaseline.AvgGameTime
     BaselineAvgMassRatio = $promotionBaseline.AvgMassRatio
+    BaselinePrimaryFailureClass = $promotionBaseline.PrimaryFailureClass
     BestCandidate = $promotionBest.CandidateId
     BestScore = $promotionBest.Score
     BestAvgGameTime = $promotionBest.AvgGameTime
     BestAvgMassRatio = $promotionBest.AvgMassRatio
+    BestPrimaryFailureClass = $promotionBest.PrimaryFailureClass
     Margin = [math]::Round($margin, 5)
     PromotionAllowed = [bool]$promotionDecision.Allowed
     PromotionBlockedReasons = $promotionDecision.Reasons
-    Results = $results | Select-Object CandidateId, Score, Games, WinRate, AvgGameTime, AvgMassRatio, RuntimeClean
+    Results = $results | Select-Object CandidateId, Score, Games, WinRate, AvgGameTime, AvgMassRatio, PrimaryFailureClass, RuntimeClean
 }
 $summary | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $sessionDir 'session-summary.json') -Encoding UTF8
-$results | Select-Object CandidateId, Score, Games, WinRate, AvgGameTime, AvgMassRatio, RuntimeClean |
+$results | Select-Object CandidateId, Score, Games, WinRate, AvgGameTime, AvgMassRatio, PrimaryFailureClass, RuntimeClean |
     Export-Csv -Path (Join-Path $sessionDir 'candidate-scores.csv') -NoTypeInformation -Encoding UTF8
+Write-SessionReport -Path (Join-Path $sessionDir 'session-report.md') -Summary $summary -Results $results
+
+if ($RestoreOriginalOnExit -and -not $DryRun -and (Test-Path -LiteralPath $baselineRawPath)) {
+    Copy-Item -LiteralPath $baselineRawPath -Destination $ConfigPath -Force
+    Invoke-ReleaseSync
+    Write-Host "RestoreOriginalOnExit set; restored baseline config from $baselineRawPath"
+}
 
 Write-Host "Session summary: $(Join-Path $sessionDir 'session-summary.json')"
+Write-Host "Session report: $(Join-Path $sessionDir 'session-report.md')"

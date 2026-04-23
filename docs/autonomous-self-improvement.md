@@ -318,8 +318,11 @@ Required overnight features:
 
 - `-NoPromote`
 - `-RequireMassRatioGain`
+- `-MinMassRatioAbsolute`
+- `-MinAvgGameTime`
 - `-RequireNoRuntimeErrors`
 - `-RetestTop`
+- `-RetestMaps`
 - `-ChampionDir`
 - `-MaxCampaigns`
 - `-StopOnPromotion`
@@ -327,6 +330,76 @@ Required overnight features:
 - `-WriteDashboard`
 
 The runner should be safe to stop at any time. On exit, it should restore the current champion config.
+
+## Implemented Tooling
+
+The current offline-learning tooling is split across:
+
+- `tools/run_economy_autotune.ps1`
+- `tools/run_overnight_autotune.ps1`
+
+The base tuner now supports:
+
+- report-only mode with `-NoPromote`
+- explicit restore behavior with `-RestoreOriginalOnExit`
+- absolute promotion gates with `-MinMassRatioAbsolute`
+- minimum survival gates with `-MinAvgGameTime`
+- mass-ratio gain gates with `-RequireMassRatioGain`
+- bounded survival regression with `-MaxSurvivalRegression`
+- multi-map retest packs with `-RetestMaps`
+- top-candidate retesting with `-RetestTop` and `-RetestGames`
+- adaptive mutation hints from previous `score.json` files
+- failure classification per candidate
+- JSON summaries and Markdown session reports
+- champion archiving on promotion
+
+The overnight runner now supports:
+
+- repeated campaigns
+- promotion-safe gates passed through to the base tuner
+- optional report-only operation
+- optional stop after first promotion
+- optional original-config restore on abort
+- overnight JSON and Markdown reports
+
+Recommended safe overnight command:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\tools\run_overnight_autotune.ps1 `
+    -Campaigns 20 `
+    -Candidates 12 `
+    -GamesPerCandidate 20 `
+    -ParallelInstances 20 `
+    -TargetSpeed 20 `
+    -MapName SCMP_036 `
+    -RequireMassRatioGain 0.03 `
+    -MinMassRatioAbsolute 0.25 `
+    -MinAvgGameTime 700 `
+    -RetestTop 3 `
+    -RetestGames 20 `
+    -RetestMaps "SCMP_036" `
+    -StopOnPromotion
+```
+
+Recommended report-only exploration command:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\tools\run_overnight_autotune.ps1 `
+    -Campaigns 20 `
+    -Candidates 12 `
+    -GamesPerCandidate 20 `
+    -ParallelInstances 20 `
+    -TargetSpeed 20 `
+    -MapName SCMP_036 `
+    -RequireMassRatioGain 0.03 `
+    -MinMassRatioAbsolute 0.25 `
+    -MinAvgGameTime 700 `
+    -RetestTop 3 `
+    -RetestGames 20 `
+    -NoPromote
+```
+
+Use `-DisableAdaptiveMutation` if historical results are suspected to bias the search in a bad direction.
 
 ## Config Archive
 
@@ -462,4 +535,3 @@ Long-term success:
 - Overmind contests map economy instead of only stalling
 - champion configs generalize across multiple land maps
 - offline optimizer can run unattended for thousands of games and produce useful candidates
-

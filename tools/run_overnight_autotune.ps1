@@ -11,15 +11,19 @@ param(
     [double]$PromoteScoreMargin = 0.03,
     [double]$MutationRate = 0.55,
     [double]$RequireMassRatioGain = 0.03,
+    [double]$MinMassRatioAbsolute = 0,
     [double]$MaxMassRatioRegression = 0,
+    [int]$MinAvgGameTime = 0,
     [double]$MaxSurvivalRegression = 0.25,
     [int]$RetestTop = 3,
     [int]$RetestGames = 20,
+    [string]$RetestMaps = '',
     [string]$RunRoot = '',
     [string]$ChampionDir = '',
     [switch]$NoPromote,
     [switch]$StopOnPromotion,
     [switch]$RestoreOriginalOnExit,
+    [switch]$DisableAdaptiveMutation,
     [switch]$DryRun
 )
 
@@ -54,6 +58,37 @@ function Invoke-ReleaseSync {
     if ($LASTEXITCODE -ne 0) {
         throw 'release_checks.ps1 -SkipSyntax failed.'
     }
+}
+
+function Write-OvernightReport {
+    param(
+        [string]$Path,
+        $Summary
+    )
+
+    $lines = @()
+    $lines += '# Overnight Autotune Report'
+    $lines += ''
+    $lines += "- Session: $($Summary.Session)"
+    $lines += "- Map: $($Summary.MapName)"
+    $lines += "- Campaigns completed: $($Summary.CampaignsCompleted)"
+    $lines += "- Promotions: $($Summary.Promotions)"
+    $lines += "- Require mass-ratio gain: $($Summary.RequireMassRatioGain)"
+    $lines += "- Minimum absolute mass ratio: $($Summary.MinMassRatioAbsolute)"
+    $lines += "- Retest top: $($Summary.RetestTop)"
+    $lines += "- Retest games: $($Summary.RetestGames)"
+    $lines += "- Retest maps: $($Summary.RetestMaps -join ', ')"
+    $lines += ''
+    $lines += '## Campaigns'
+    $lines += ''
+    $lines += '| Session | Promoted | Best | Score | Avg Time | Mass Ratio | Failure | Baseline Mass Ratio | Blockers |'
+    $lines += '| --- | --- | --- | ---: | ---: | ---: | --- | ---: | --- |'
+    foreach ($row in $Summary.Results) {
+        $blockers = if ($row.PromotionBlockedReasons) { ($row.PromotionBlockedReasons -join '; ') } else { '' }
+        $lines += "| $($row.Session) | $($row.Promoted) | $($row.BestCandidate) | $($row.BestScore) | $($row.BestAvgGameTime) | $($row.BestAvgMassRatio) | $($row.BestPrimaryFailureClass) | $($row.BaselineAvgMassRatio) | $blockers |"
+    }
+    $lines += ''
+    Set-Content -LiteralPath $Path -Value ($lines -join [Environment]::NewLine) -Encoding UTF8
 }
 
 Ensure-Directory $RunRoot
@@ -106,14 +141,18 @@ for ($campaign = 1; $campaign -le $Campaigns; $campaign++) {
         '-PromoteScoreMargin', $PromoteScoreMargin,
         '-MutationRate', $MutationRate,
         '-RequireMassRatioGain', $RequireMassRatioGain,
+        '-MinMassRatioAbsolute', $MinMassRatioAbsolute,
         '-MaxMassRatioRegression', $MaxMassRatioRegression,
+        '-MinAvgGameTime', $MinAvgGameTime,
         '-MaxSurvivalRegression', $MaxSurvivalRegression,
         '-RetestTop', $RetestTop,
         '-RetestGames', $RetestGames,
+        '-RetestMaps', $RetestMaps,
         '-RunRoot', $campaignRunRoot,
         '-ChampionDir', $ChampionDir
     )
     if ($NoPromote) { $args += '-NoPromote' }
+    if ($DisableAdaptiveMutation) { $args += '-DisableAdaptiveMutation' }
     if ($DryRun) { $args += '-DryRun' }
 
     Write-Host ("Starting campaign {0}/{1}, seed={2}" -f $campaign, $Campaigns, $campaignSeed)
@@ -158,10 +197,15 @@ $overnightSummary = [pscustomobject]@{
     TargetSpeed = $TargetSpeed
     NoPromote = [bool]$NoPromote
     RequireMassRatioGain = $RequireMassRatioGain
+    MinMassRatioAbsolute = $MinMassRatioAbsolute
+    MinAvgGameTime = $MinAvgGameTime
     RetestTop = $RetestTop
     RetestGames = $RetestGames
+    RetestMaps = if ([string]::IsNullOrWhiteSpace($RetestMaps)) { @($MapName) } else { @($RetestMaps -split ',' | ForEach-Object { $_.Trim() } | Where-Object { $_ }) }
     Promotions = @($campaignSummaries | Where-Object { $_.Promoted }).Count
-    Results = $campaignSummaries | Select-Object Session, Promoted, BestCandidate, BestScore, BestAvgGameTime, BestAvgMassRatio, BaselineScore, BaselineAvgGameTime, BaselineAvgMassRatio, PromotionAllowed, PromotionBlockedReasons
+    Results = $campaignSummaries | Select-Object Session, Promoted, BestCandidate, BestScore, BestAvgGameTime, BestAvgMassRatio, BestPrimaryFailureClass, BaselineScore, BaselineAvgGameTime, BaselineAvgMassRatio, PromotionAllowed, PromotionBlockedReasons
 }
 $overnightSummary | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath (Join-Path $overnightDir 'overnight-summary.json') -Encoding UTF8
+Write-OvernightReport -Path (Join-Path $overnightDir 'overnight-report.md') -Summary $overnightSummary
 Write-Host "Overnight summary: $(Join-Path $overnightDir 'overnight-summary.json')"
+Write-Host "Overnight report: $(Join-Path $overnightDir 'overnight-report.md')"
