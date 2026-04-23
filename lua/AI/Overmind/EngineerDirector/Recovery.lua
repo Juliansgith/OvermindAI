@@ -53,6 +53,50 @@ local function CountReadyFactories(aiBrain, category)
     return ready
 end
 
+local function CountReadyStructures(aiBrain, category)
+    local units = aiBrain:GetListOfUnits(category, false, true) or {}
+    local ready = 0
+    for _, unit in units do
+        if unit and not unit.Dead and Common.GetFraction(unit) >= 0.95 and not unit:IsUnitState('BeingBuilt') and not unit:IsUnitState('Upgrading') then
+            ready = ready + 1
+        end
+    end
+    return ready
+end
+
+local function IsFirstTechTransition(runtime, aiBrain)
+    if not runtime or not aiBrain then
+        return false
+    end
+    if CountReadyStructures(aiBrain, Tech2PowerCategory) > 0 then
+        return false
+    end
+
+    local prod = runtime.ProductionDirector or {}
+    local macro = runtime.MacroController or {}
+    local phase = macro.Phase or prod.MacroObjective or 'none'
+    local t2LandReady = CountReadyFactories(aiBrain, categories.FACTORY * categories.LAND * categories.STRUCTURE * (categories.TECH2 + categories.TECH3))
+    return phase == 'land_factory_floor'
+        or phase == 'mass_consolidation'
+        or phase == 'first_land_hq'
+        or phase == 'first_t2_engineer'
+        or phase == 'first_t2_power'
+        or t2LandReady > 0
+end
+
+local function HasSevereHomeDefenseNeed(runtime, mainPos, bomberPanic)
+    local raid = (runtime and runtime.RaidDefense) or {}
+    local threatPos = raid.LastThreatMexPos or raid.ExposedMexThreatPos
+    local nearHome = mainPos and threatPos and Common.Distance2D(mainPos, threatPos) <= 130
+    local severeLand = raid.UnderLandHarass == true
+        and nearHome
+        and (raid.LastLandEnemyCount or 0) >= 6
+    local severeAir = bomberPanic
+        and nearHome
+        and math.max(raid.LastBomberEnemyCount or 0, raid.LastAirEnemyCount or 0) >= 3
+    return severeLand or severeAir
+end
+
 local function ScoreStructureTarget(aiBrain, runtime, structure, kind, pos, fraction, mainPos)
     local eco = runtime.EcoState or {}
     local recovery = runtime.Recovery or {}
@@ -66,6 +110,10 @@ local function ScoreStructureTarget(aiBrain, runtime, structure, kind, pos, frac
     local radarCritical = Policy.NeedsCriticalRadar(runtime)
     local starterPhase = ((runtime.ProductionDirector or {}).ConstraintState or {}).StarterPhase == true
     local bomberWatch, bomberPanic, exposedMexAirRaid = Threat.ComputeAirThreatFlags(runtime, GetGameTimeSeconds())
+    if (kind == 'AA' or kind == 'Defense') and IsFirstTechTransition(runtime, aiBrain) and not HasSevereHomeDefenseNeed(runtime, mainPos, bomberPanic) then
+        return -999999, localThreat
+    end
+
     local forceFinishPower = kind == 'Power'
         and fraction >= 0.8
         and (

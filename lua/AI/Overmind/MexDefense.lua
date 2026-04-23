@@ -29,6 +29,80 @@ local function Normalize2D(dx, dz)
     return dx / mag, dz / mag
 end
 
+local function GetFraction(unit)
+    if unit and unit.GetFractionComplete then
+        local ok, fraction = pcall(function()
+            return unit:GetFractionComplete()
+        end)
+        if ok and type(fraction) == 'number' then
+            return fraction
+        end
+    end
+    return 1
+end
+
+local function CountExisting(aiBrain, category)
+    if not aiBrain or not category then
+        return 0
+    end
+    local units = aiBrain:GetListOfUnits(category, false, true) or {}
+    local count = 0
+    for _, unit in units do
+        if unit and not unit.Dead then
+            count = count + 1
+        end
+    end
+    return count
+end
+
+local function CountReady(aiBrain, category)
+    if not aiBrain or not category then
+        return 0
+    end
+    local units = aiBrain:GetListOfUnits(category, false, true) or {}
+    local count = 0
+    for _, unit in units do
+        if unit and not unit.Dead and GetFraction(unit) >= 0.95 and not unit:IsUnitState('BeingBuilt') and not unit:IsUnitState('Upgrading') then
+            count = count + 1
+        end
+    end
+    return count
+end
+
+local function IsFirstTechTransition(runtime, aiBrain)
+    if not runtime or not aiBrain then
+        return false
+    end
+    local t2PowerReady = CountReady(aiBrain, categories.ENERGYPRODUCTION * categories.STRUCTURE * (categories.TECH2 + categories.TECH3))
+    if t2PowerReady > 0 then
+        return false
+    end
+
+    local prod = runtime.ProductionDirector or {}
+    local macro = runtime.MacroController or {}
+    local phase = macro.Phase or prod.MacroObjective or 'none'
+    local t2LandReady = CountReady(aiBrain, categories.FACTORY * categories.LAND * categories.STRUCTURE * (categories.TECH2 + categories.TECH3))
+    return phase == 'land_factory_floor'
+        or phase == 'mass_consolidation'
+        or phase == 'first_land_hq'
+        or phase == 'first_t2_engineer'
+        or phase == 'first_t2_power'
+        or t2LandReady > 0
+end
+
+local function HasSevereHomeDefenseNeed(runtime, aiBrain, mainPos, bomberPanic)
+    local raid = (runtime and runtime.RaidDefense) or {}
+    local threatPos = raid.LastThreatMexPos or raid.ExposedMexThreatPos
+    local nearHome = mainPos and threatPos and Distance2D(mainPos, threatPos) <= 130
+    local severeLand = raid.UnderLandHarass == true
+        and nearHome
+        and (raid.LastLandEnemyCount or 0) >= 6
+    local severeAir = bomberPanic
+        and nearHome
+        and math.max(raid.LastBomberEnemyCount or 0, raid.LastAirEnemyCount or 0) >= 3
+    return severeLand or severeAir
+end
+
 local function GetMainPos(aiBrain, runtime)
     if runtime and runtime.OwnMainPos then
         return runtime.OwnMainPos
@@ -82,22 +156,13 @@ local function IsLowTechDefenseCapped(runtime, aiBrain, bomberPanic)
     local macro = runtime.MacroController or {}
     local phase = macro.Phase or prod.MacroObjective or 'none'
     local mexReady = (((ecoCounts.Mex or {}).Ready) or 0)
-    local t2PowerReady = aiBrain:GetCurrentUnits(categories.ENERGYPRODUCTION * categories.STRUCTURE * (categories.TECH2 + categories.TECH3)) or 0
-    local t2MexReady = aiBrain:GetCurrentUnits(categories.MASSEXTRACTION * categories.STRUCTURE * (categories.TECH2 + categories.TECH3)) or 0
-    local t2LandReady = aiBrain:GetCurrentUnits(categories.FACTORY * categories.LAND * categories.STRUCTURE * (categories.TECH2 + categories.TECH3)) or 0
-    local aaTotal = aiBrain:GetCurrentUnits(T1AAStructureCategory) or 0
-    local pdTotal = aiBrain:GetCurrentUnits(T1PDStructureCategory) or 0
+    local t2PowerReady = CountReady(aiBrain, categories.ENERGYPRODUCTION * categories.STRUCTURE * (categories.TECH2 + categories.TECH3))
+    local t2MexReady = CountReady(aiBrain, categories.MASSEXTRACTION * categories.STRUCTURE * (categories.TECH2 + categories.TECH3))
+    local aaTotal = CountExisting(aiBrain, T1AAStructureCategory)
+    local pdTotal = CountExisting(aiBrain, T1PDStructureCategory)
     local cap = bomberPanic and 4 or 3
-    local firstTechTransition = t2PowerReady <= 0
-        and (
-            phase == 'mass_consolidation'
-            or phase == 'first_land_hq'
-            or phase == 'first_t2_engineer'
-            or phase == 'first_t2_power'
-            or t2LandReady > 0
-        )
-    if firstTechTransition then
-        cap = bomberPanic and 2 or 1
+    if IsFirstTechTransition(runtime, aiBrain) then
+        cap = 1
         return (aaTotal + pdTotal) >= cap
     end
     local techTransition = phase == 'first_t2_power'
@@ -355,29 +420,10 @@ function Module.Update(aiBrain, now)
         return
     end
 
-    local macro = runtime.MacroController or {}
-    local phase = macro.Phase or prod.MacroObjective or 'none'
-    local t2PowerReady = aiBrain:GetCurrentUnits(categories.ENERGYPRODUCTION * categories.STRUCTURE * (categories.TECH2 + categories.TECH3)) or 0
-    local t2LandReady = aiBrain:GetCurrentUnits(categories.FACTORY * categories.LAND * categories.STRUCTURE * (categories.TECH2 + categories.TECH3)) or 0
-    local firstTechTransition = t2PowerReady <= 0
-        and (
-            phase == 'mass_consolidation'
-            or phase == 'first_land_hq'
-            or phase == 'first_t2_engineer'
-            or phase == 'first_t2_power'
-            or t2LandReady > 0
-        )
+    local firstTechTransition = IsFirstTechTransition(runtime, aiBrain)
     if firstTechTransition then
         local mainPos = GetMainPos(aiBrain, runtime)
-        local threatPos = raid.LastThreatMexPos or raid.ExposedMexThreatPos
-        local nearHome = mainPos and threatPos and Distance2D(mainPos, threatPos) <= 130
-        local severeLand = raid.UnderLandHarass == true
-            and nearHome
-            and (raid.LastLandEnemyCount or 0) >= 5
-        local severeAir = bomberPanic
-            and nearHome
-            and math.max(raid.LastBomberEnemyCount or 0, raid.LastAirEnemyCount or 0) >= 2
-        if not severeLand and not severeAir then
+        if not HasSevereHomeDefenseNeed(runtime, aiBrain, mainPos, bomberPanic) then
             state.NextTry = now + 10
             return
         end
@@ -523,6 +569,10 @@ function Module.Update(aiBrain, now)
     local builder, busy = PickBuilder(aiBrain, buildPosBase, bp)
     if not builder then
         state.NextTry = now + 7
+        return
+    end
+    if firstTechTransition and busy then
+        state.NextTry = now + 10
         return
     end
 

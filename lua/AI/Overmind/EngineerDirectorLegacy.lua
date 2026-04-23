@@ -1061,6 +1061,40 @@ local function ShouldWorkPowerStructure(aiBrain, runtime, now, fraction)
     return (eco.EnergyStorageRatio or 0) < 0.28 or (eco.EnergyTrend or 0) < 2
 end
 
+local function IsFirstTechTransition(runtime, aiBrain)
+    if not runtime or not aiBrain then
+        return false
+    end
+    local _, t2PowerReady = CountExistingAndReady(aiBrain, Tech2PowerCategory)
+    if t2PowerReady > 0 then
+        return false
+    end
+
+    local prod = runtime.ProductionDirector or {}
+    local macro = runtime.MacroController or {}
+    local phase = macro.Phase or prod.MacroObjective or 'none'
+    local t2LandReady = CountReadyFactories(aiBrain, categories.FACTORY * categories.LAND * categories.STRUCTURE * (categories.TECH2 + categories.TECH3))
+    return phase == 'land_factory_floor'
+        or phase == 'mass_consolidation'
+        or phase == 'first_land_hq'
+        or phase == 'first_t2_engineer'
+        or phase == 'first_t2_power'
+        or t2LandReady > 0
+end
+
+local function HasSevereHomeDefenseNeed(runtime, mainPos, bomberPanic)
+    local raid = (runtime and runtime.RaidDefense) or {}
+    local threatPos = raid.LastThreatMexPos or raid.ExposedMexThreatPos
+    local nearHome = mainPos and threatPos and Distance2D(mainPos, threatPos) <= 130
+    local severeLand = raid.UnderLandHarass == true
+        and nearHome
+        and (raid.LastLandEnemyCount or 0) >= 6
+    local severeAir = bomberPanic
+        and nearHome
+        and math.max(raid.LastBomberEnemyCount or 0, raid.LastAirEnemyCount or 0) >= 3
+    return severeLand or severeAir
+end
+
 local function ScoreStructureTarget(aiBrain, runtime, structure, kind, pos, fraction, mainPos)
     local eco = runtime.EcoState or {}
     local recovery = runtime.Recovery or {}
@@ -1084,6 +1118,10 @@ local function ScoreStructureTarget(aiBrain, runtime, structure, kind, pos, frac
     local mexEmergency = engState.MexEmergencyActive == true
     local mexRebuild = engState.MexEmergencyRebuild == true
     local bomberWatch, bomberPanic, exposedMexAirRaid = ComputeAirThreatFlags(runtime, GetGameTimeSeconds())
+    if (kind == 'AA' or kind == 'Defense') and IsFirstTechTransition(runtime, aiBrain) and not HasSevereHomeDefenseNeed(runtime, mainPos, bomberPanic) then
+        return -999999, localThreat
+    end
+
     local forceFinishPower = kind == 'Power'
         and fraction >= 0.8
         and (

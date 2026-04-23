@@ -388,8 +388,10 @@ local function IsFirstTechTransitionState(aiBrain)
     local macro = runtime.MacroController or {}
     local macroPhase = macro.Phase or production.MacroObjective or 'none'
     local t2LandReady = GetCompletedUnitCount(aiBrain, categories.FACTORY * categories.LAND * categories.STRUCTURE * (categories.TECH2 + categories.TECH3))
+    local now = GetGameTimeSeconds()
 
-    return macroPhase == 'mass_consolidation'
+    return (macroPhase == 'land_factory_floor' and now >= 220)
+        or macroPhase == 'mass_consolidation'
         or macroPhase == 'first_land_hq'
         or macroPhase == 'first_t2_engineer'
         or macroPhase == 'first_t2_power'
