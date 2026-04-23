@@ -1,4 +1,4 @@
-return {
+Config = {
     Version = 2,
     CandidateId = 'candidate-4',
     ParentCandidateId = 'candidate-3',

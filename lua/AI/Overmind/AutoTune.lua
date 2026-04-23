@@ -104,7 +104,11 @@ function GetConfig(aiBrain)
     local source = false
     local ok, result = pcall(import, '/mods/OvermindAI/lua/AI/Overmind/AutoTuneConfig.lua')
     if ok and type(result) == 'table' then
-        source = result
+        if type(result.Config) == 'table' then
+            source = result.Config
+        else
+            source = result
+        end
     end
 
     local cfg = MergeConfig(source)

@@ -180,7 +180,7 @@ function Write-TuneConfig {
     ) + @((New-TuneSpecs).Keys)
 
     $lines = @()
-    $lines += 'return {'
+    $lines += 'Config = {'
     foreach ($key in $orderedKeys) {
         if ($Config.Contains($key)) {
             $lines += "    $key = $(Format-LuaValue -Value $Config[$key]),"
