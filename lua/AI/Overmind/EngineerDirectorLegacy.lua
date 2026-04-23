@@ -1400,6 +1400,104 @@ local function GetFactoryAnchor(aiBrain, mainPos)
     return best
 end
 
+local function PickLandFactoryBlueprint(builder)
+    if not builder or builder.Dead then
+        return false
+    end
+
+    local bps = EntityCategoryGetUnitList(categories.FACTORY * categories.LAND * categories.STRUCTURE * categories.TECH1)
+    if not bps or table.getn(bps) <= 0 then
+        return false
+    end
+
+    for _, bp in bps do
+        if bp and builder:CanBuild(bp) then
+            return bp
+        end
+    end
+
+    return false
+end
+
+local SecondLandFactoryOffsets = {
+    { 30, 18 }, { -30, 18 }, { 30, -18 }, { -30, -18 },
+    { 18, 30 }, { -18, 30 }, { 18, -30 }, { -18, -30 },
+    { 42, 0 }, { -42, 0 }, { 0, 42 }, { 0, -42 },
+    { 48, 24 }, { -48, 24 }, { 48, -24 }, { -48, -24 },
+    { 24, 48 }, { -24, 48 }, { 24, -48 }, { -24, -48 },
+}
+
+local function FindLandFactoryBuildPos(aiBrain, bp, anchorPos)
+    if not aiBrain or not bp or not anchorPos then
+        return false
+    end
+
+    for _, offset in SecondLandFactoryOffsets do
+        local x = (anchorPos[1] or 0) + offset[1]
+        local z = (anchorPos[3] or 0) + offset[2]
+        local y = 0
+        if GetTerrainHeight then
+            y = GetTerrainHeight(x, z) or 0
+        end
+        local pos = { x, y, z }
+        local alliedStructures = aiBrain:GetNumUnitsAroundPoint(categories.STRUCTURE, pos, 13, 'Ally') or 0
+        local alliedFactories = aiBrain:GetNumUnitsAroundPoint(FactoryCategory, pos, 16, 'Ally') or 0
+        local buildable = true
+        if aiBrain.CanBuildStructureAt then
+            buildable = aiBrain:CanBuildStructureAt(bp, pos) == true
+        end
+        if buildable and alliedStructures <= 0 and alliedFactories <= 0 and not HasEnemyCombatNear(aiBrain, pos, 42) then
+            return pos
+        end
+    end
+
+    return false
+end
+
+local function TryOpenSecondLandFactoryBuild(aiBrain, runtime, eng, mainPos, now)
+    if not eng or eng.Dead or not mainPos or not IssueBuildMobile then
+        return false
+    end
+    if now < 115 or now > 430 then
+        return false
+    end
+
+    local landTotal, landReady = GetCurrentLandFactoryCounts(aiBrain)
+    if landReady < 1 or landTotal >= 2 then
+        return false
+    end
+
+    local _, mexReady = GetCurrentMexCounts(aiBrain)
+    local _, powerReady = GetCurrentPowerCounts(aiBrain, runtime)
+    if mexReady < 4 or powerReady < 2 then
+        return false
+    end
+
+    local eco = runtime and runtime.EcoState or {}
+    if (eco.EnergyStorageRatio or 0) <= 0.006 and (eco.EnergyTrend or 0) <= -45 then
+        return false
+    end
+    if now < ((runtime.LastSecondLandFactoryDirectIssueTime or -999) + 16) then
+        return false
+    end
+
+    local bp = PickLandFactoryBlueprint(eng)
+    local anchor = bp and GetFactoryAnchor(aiBrain, mainPos) or false
+    local buildPos = bp and anchor and FindLandFactoryBuildPos(aiBrain, bp, anchor) or false
+    if not bp or not buildPos then
+        return false
+    end
+
+    if IssueClearCommands then
+        IssueClearCommands({ eng })
+    end
+    IssueBuildMobile({ eng }, buildPos, bp, {})
+    runtime.LastSecondLandFactoryDirectIssueTime = now
+    runtime.LastSecondLandFactoryDirectPos = buildPos
+    runtime.SecondLandFactoryDirectCount = (runtime.SecondLandFactoryDirectCount or 0) + 1
+    return true
+end
+
 local function FindPowerBuildPos(aiBrain, anchorPos)
     if not aiBrain or not anchorPos then
         return false
@@ -2601,11 +2699,17 @@ local function ProcessEngineer(aiBrain, runtime, eng, now, ctx)
     local claimedByStructureTask = ctx.structureTask.Active and entityId and ctx.structureTask.BuilderIds and ctx.structureTask.BuilderIds[entityId]
     local claimedByRadarOrder = entityId and ctx.radarReservedBuilderIds[entityId]
     local mexEmergency = ctx.mexRebuildUrgent or ctx.mexExpansionUrgent
+    local secondLandFactoryDebt = HasSecondLandFactoryDebt(aiBrain, now)
     local ignoreFactoryClaim = mexEmergency and not ctx.severeFactoryStarve
     local ignoreStructureClaim = mexEmergency
         and ctx.structureTask
         and (ctx.structureTask.Kind ~= 'Mex' and ctx.structureTask.Kind ~= 'Power')
-    if ((claimedByFactoryTask and not ignoreFactoryClaim) or (claimedByStructureTask and not ignoreStructureClaim) or claimedByRadarOrder) then
+    local ignoreEcoClaimForSecondFactory = secondLandFactoryDebt
+        and ctx.structureTask
+        and (ctx.structureTask.Kind == 'Mex' or ctx.structureTask.Kind == 'Power')
+    if ((claimedByFactoryTask and not ignoreFactoryClaim)
+        or (claimedByStructureTask and not ignoreStructureClaim and not ignoreEcoClaimForSecondFactory)
+        or claimedByRadarOrder) then
         return
     end
 
@@ -2624,7 +2728,14 @@ local function ProcessEngineer(aiBrain, runtime, eng, now, ctx)
     local acted = false
 
     if isIdle and not constructing then
-        if ctx.contestFieldMode
+        if secondLandFactoryDebt
+            and not ctx.factoryTask.Active
+            and localThreat < 2.0
+            and dist <= 340
+            and TryOpenSecondLandFactoryBuild(aiBrain, runtime, eng, ctx.mainPos, now) then
+            ctx.directSecondFactory = ctx.directSecondFactory + 1
+            acted = true
+        elseif ctx.contestFieldMode
             and ctx.fieldTaskWindow
             and ctx.reclaimField < ctx.fieldTaskQuota
             and ctx.needBase <= 0
@@ -3275,6 +3386,7 @@ function Update(aiBrain, now)
         bomberPanic = bomberPanic,
         constraints = constraints,
         contestFieldMode = (contestFieldMode or desiredReclaimQuota > 0) and true or false,
+        directSecondFactory = 0,
         dispatchedExpand = 0,
         enemyPos = enemyPos,
         factoryTargetObject = factoryTargetObject,
@@ -3401,7 +3513,7 @@ function Update(aiBrain, now)
         or 'none'
     OvermindEconomyLedger.PublishEngineerActivity(aiBrain, runtime, now, activity)
 
-    local shouldLog = (ctx.recoverCount + ctx.threatenedCount + ctx.forcedFactoryRecover + ctx.dispatchedExpand + ctx.reclaimEnemyMex + ctx.reclaimField) > 0
+    local shouldLog = (ctx.recoverCount + ctx.threatenedCount + ctx.forcedFactoryRecover + ctx.directSecondFactory + ctx.dispatchedExpand + ctx.reclaimEnemyMex + ctx.reclaimField) > 0
         or ctx.powerRecoveryCount > 0
         or ctx.surplusSpendCount > 0
         or factoryTask.Active
@@ -3417,12 +3529,13 @@ function Update(aiBrain, now)
             sz = structureTask.TargetPos[3] or 0
             structureNearby = aiBrain:GetNumUnitsAroundPoint(categories.ENGINEER * categories.MOBILE, structureTask.TargetPos, 18, 'Ally') or 0
         end
-        LOG(string.format('*OVERMIND ENGDIR A%d t=%.1f recover=%d threat=%d facRec=%d powerRec=%d surp=%d expand=%d field=%d baseNeed=%d facTask=%d:%s frac=%.2f stall=%.1f asn=%d/%d structTask=%d:%s:%s frac=%.2f stall=%.1f asn=%d/%d near=%d pos=%.1f,%.1f',
+        LOG(string.format('*OVERMIND ENGDIR A%d t=%.1f recover=%d threat=%d facRec=%d directFac=%d powerRec=%d surp=%d expand=%d field=%d baseNeed=%d facTask=%d:%s frac=%.2f stall=%.1f asn=%d/%d structTask=%d:%s:%s frac=%.2f stall=%.1f asn=%d/%d near=%d pos=%.1f,%.1f',
             aiBrain:GetArmyIndex(),
             now,
             ctx.recoverCount,
             ctx.threatenedCount,
             ctx.forcedFactoryRecover,
+            ctx.directSecondFactory,
             ctx.powerRecoveryCount,
             ctx.surplusSpendCount,
             ctx.dispatchedExpand,
