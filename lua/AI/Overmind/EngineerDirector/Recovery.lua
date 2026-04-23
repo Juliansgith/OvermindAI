@@ -650,7 +650,9 @@ local function TryOpenFirstT2PowerBuild(aiBrain, runtime, eng, mainPos, now)
 
     local macro = runtime and runtime.MacroController or {}
     local phase = macro.Phase or (((runtime and runtime.ProductionDirector) or {}).MacroObjective) or 'none'
-    if phase ~= 'first_t2_power' and macro.NeedFirstT2Power ~= true then
+    local t2LandReady = CountReadyFactories(aiBrain, categories.FACTORY * categories.LAND * categories.STRUCTURE * (categories.TECH2 + categories.TECH3))
+    local urgentFirstPower = t2LandReady > 0 and phase ~= 'surplus_scale'
+    if phase ~= 'first_t2_power' and macro.NeedFirstT2Power ~= true and not urgentFirstPower then
         return false
     end
     if (aiBrain:GetCurrentUnits(Tech2PowerCategory) or 0) > 0 then

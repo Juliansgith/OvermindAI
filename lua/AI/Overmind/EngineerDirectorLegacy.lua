@@ -1781,7 +1781,9 @@ local function TryOpenFirstT2PowerBuild(aiBrain, runtime, eng, mainPos, now)
 
     local macro = runtime and runtime.MacroController or {}
     local phase = macro.Phase or (((runtime and runtime.ProductionDirector) or {}).MacroObjective) or 'none'
-    if phase ~= 'first_t2_power' and macro.NeedFirstT2Power ~= true then
+    local t2LandReady = CountReadyFactories(aiBrain, categories.FACTORY * categories.LAND * categories.STRUCTURE * (categories.TECH2 + categories.TECH3))
+    local urgentFirstPower = t2LandReady > 0 and phase ~= 'surplus_scale'
+    if phase ~= 'first_t2_power' and macro.NeedFirstT2Power ~= true and not urgentFirstPower then
         return false
     end
     if (aiBrain:GetCurrentUnits(Tech2PowerCategory) or 0) > 0 then
@@ -2872,8 +2874,7 @@ local function ProcessEngineer(aiBrain, runtime, eng, now, ctx)
 
     local dist = Distance2D(pos, ctx.mainPos)
     local localThreat = aiBrain:GetThreatAtPosition(pos, 1, true, 'AntiSurface') or 0
-    if ctx.macroPhase == 'first_t2_power'
-        and IsReadyBuilder(eng)
+    if IsReadyBuilder(eng)
         and EntityCategoryContains(categories.ENGINEER * categories.MOBILE * (categories.TECH2 + categories.TECH3), eng)
         and TryOpenFirstT2PowerBuild(aiBrain, runtime, eng, ctx.mainPos, now) then
         if claimedByFactoryTask and ctx.factoryTask.BuilderIds and entityId then

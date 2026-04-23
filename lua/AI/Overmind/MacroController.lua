@@ -305,7 +305,7 @@ local function ApplyLatch(state, desiredPhase, desiredReason, facts, now)
         return current, 'latched_starter_mex_claim'
     end
 
-    if current == 'land_factory_floor' and facts.CriticalLandFactoryDebt then
+    if current == 'land_factory_floor' and facts.CriticalLandFactoryDebt and desiredPhase ~= 'first_t2_power' then
         return current, 'latched_land_factory_floor'
     end
 
