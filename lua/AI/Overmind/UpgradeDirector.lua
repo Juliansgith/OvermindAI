@@ -857,6 +857,36 @@ local function PickFactoryTarget(aiBrain, runtime, state, now)
             state.Enabled = true
             state.UpgradeBp = forcedBp
             state.Reason = 'forced_first_hq'
+        elseif forceFirstHQAfterEscape then
+            local emergencyTarget = false
+            local emergencyBp = false
+            local emergencyScore = 999999
+            local fallbackFactories = aiBrain:GetListOfUnits(categories.FACTORY * categories.LAND * categories.STRUCTURE, false, true) or {}
+            for _, fac in fallbackFactories do
+                if fac and not fac.Dead and IsReadyStructure(fac) and not fac:IsUnitState('Upgrading') and EntityCategoryContains(categories.TECH1, fac) then
+                    local upgradeBp = GetUpgradeBlueprintId(fac)
+                    local pos = fac.GetPosition and fac:GetPosition() or false
+                    if upgradeBp and pos and fac:CanBuild(upgradeBp) and GetCommandQueueLength(fac) <= 1 then
+                        local _, risk, threat, dist, _ = ScoreSafeUpgradeLocation(aiBrain, pos, mainPos, factoryClusterPos, 420)
+                        local fallbackValue = (risk * 7) + (threat * 5) + (dist * 0.02)
+                        if fallbackValue < emergencyScore then
+                            emergencyScore = fallbackValue
+                            emergencyTarget = fac
+                            emergencyBp = upgradeBp
+                        end
+                    end
+                end
+            end
+            if emergencyTarget then
+                state.TargetUnit = emergencyTarget
+                state.TargetId = GetEntityId(emergencyTarget)
+                state.Enabled = true
+                state.UpgradeBp = emergencyBp
+                state.Reason = 'unsafe_forced_first_hq'
+            else
+                state.UpgradeBp = false
+                state.Reason = 'no_factory_available'
+            end
         else
             state.UpgradeBp = false
             state.Reason = 'no_safe_factory'
