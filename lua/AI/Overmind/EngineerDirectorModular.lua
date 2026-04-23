@@ -18,7 +18,7 @@ local DefenseCategory = categories.STRUCTURE * categories.DEFENSE
 local BuilderCategory = categories.ENGINEER * categories.MOBILE + categories.COMMAND
 local LandCombatCategory = categories.MOBILE * categories.LAND - categories.ENGINEER - categories.SCOUT - categories.COMMAND
 
-local function CountEngineerActivity(engineers)
+local function CountEngineerActivity(engineers, isIdle, isConstructing)
     local activity = {
         TotalCount = 0,
         IdleCount = 0,
@@ -29,10 +29,10 @@ local function CountEngineerActivity(engineers)
     for _, eng in (engineers or {}) do
         if eng and not eng.Dead then
             activity.TotalCount = activity.TotalCount + 1
-            if Common.IsIdle(eng) then
+            if isIdle(eng) then
                 activity.IdleCount = activity.IdleCount + 1
             end
-            if Common.IsConstructing(eng) then
+            if isConstructing(eng) then
                 activity.ConstructingCount = activity.ConstructingCount + 1
             end
             if eng:IsUnitState('Reclaiming') then
@@ -85,6 +85,18 @@ local function FallbackGetFraction(unit)
     return 1
 end
 
+local function FallbackIsIdle(unit)
+    local q = unit and unit.GetCommandQueue and unit:GetCommandQueue() or false
+    return (not q) or table.getn(q) == 0
+end
+
+local function FallbackIsConstructing(unit)
+    if not unit or unit.Dead then
+        return false
+    end
+    return unit:IsUnitState('Building') or unit:IsUnitState('Upgrading')
+end
+
 local function ResolveMethod(moduleTable, methodName, moduleName)
     local fn = false
     if type(moduleTable) == 'table' then
@@ -105,6 +117,10 @@ local function ResolveMethod(moduleTable, methodName, moduleName)
             return FallbackGetEntityId
         elseif moduleName == 'Common' and methodName == 'GetFraction' then
             return FallbackGetFraction
+        elseif moduleName == 'Common' and methodName == 'IsIdle' then
+            return FallbackIsIdle
+        elseif moduleName == 'Common' and methodName == 'IsConstructing' then
+            return FallbackIsConstructing
         end
         error(string.format('EngineerDirectorModular missing %s[%s]', tostring(moduleName), tostring(methodName)))
     end
@@ -139,6 +155,8 @@ function Update(aiBrain, now)
     local GetMainPos = ResolveMethod(Common, 'GetMainPos', 'Common')
     local GetEntityId = ResolveMethod(Common, 'GetEntityId', 'Common')
     local GetFraction = ResolveMethod(Common, 'GetFraction', 'Common')
+    local IsIdle = ResolveMethod(Common, 'IsIdle', 'Common')
+    local IsConstructing = ResolveMethod(Common, 'IsConstructing', 'Common')
     local CleanupExpansionReservations = OptionalMethod(Expansion, 'CleanupExpansionReservations', function() end)
     local NeedsCriticalRadar = OptionalMethod(Policy, 'NeedsCriticalRadar', function() return false end)
     local GetRadarReservedBuilderIds = OptionalMethod(Policy, 'GetRadarReservedBuilderIds', function() return {} end)
@@ -693,7 +711,7 @@ function Update(aiBrain, now)
     runtime.LastEngineerPowerRecovery = ctx.powerRecoveryCount
     runtime.LastEngineerSurplusSpend = ctx.surplusSpendCount
 
-    local activity = CountEngineerActivity(engineers)
+    local activity = CountEngineerActivity(engineers, IsIdle, IsConstructing)
     activity.BaseEngineers = baseEngineers
     activity.NeedBase = math.max(0, baseFloor - baseEngineers)
     activity.RecoverCount = ctx.recoverCount
