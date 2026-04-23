@@ -2717,6 +2717,22 @@ local function ProcessEngineer(aiBrain, runtime, eng, now, ctx)
     local ignoreEcoClaimForSecondFactory = secondLandFactoryDebt
         and ctx.structureTask
         and (ctx.structureTask.Kind == 'Mex' or ctx.structureTask.Kind == 'Power')
+    local canPreemptStructureForReclaim = claimedByStructureTask
+        and not claimedByFactoryTask
+        and not claimedByRadarOrder
+        and ctx.contestFieldMode
+        and ctx.fieldTaskWindow
+        and ctx.reclaimField < ctx.fieldTaskQuota
+        and (ctx.structureReclaimPreempts or 0) < 1
+        and ctx.needBase <= 0
+        and not ctx.mexRebuildUrgent
+        and not (ctx.structureTask.Kind == 'Power' and ctx.constraints.PowerBufferLow == true)
+    if canPreemptStructureForReclaim
+        and TryReclaimFieldZone(aiBrain, runtime, eng, ctx.reclaimFieldPos, now) then
+        ctx.reclaimField = ctx.reclaimField + 1
+        ctx.structureReclaimPreempts = (ctx.structureReclaimPreempts or 0) + 1
+        return
+    end
     if ((claimedByFactoryTask and not ignoreFactoryClaim)
         or (claimedByStructureTask and not ignoreStructureClaim and not ignoreEcoClaimForSecondFactory)
         or claimedByRadarOrder) then
@@ -3409,6 +3425,7 @@ function Update(aiBrain, now)
         recoverCount = 0,
         safeExpandDistance = safeExpandDistance,
         severeFactoryStarve = severeFactoryStarve,
+        structureReclaimPreempts = 0,
         structureTargetObject = structureTargetObject,
         structureTask = structureTask,
         surplusSpendCount = 0,

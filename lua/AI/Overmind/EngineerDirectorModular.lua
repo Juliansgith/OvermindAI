@@ -515,6 +515,7 @@ function Update(aiBrain, now)
         recoverCount = 0,
         safeExpandDistance = safeExpandDistance,
         severeFactoryStarve = severeFactoryStarve,
+        structureReclaimPreempts = 0,
         structureTargetObject = structureTargetObject,
         structureTask = structureTask,
         surplusSpendCount = 0,

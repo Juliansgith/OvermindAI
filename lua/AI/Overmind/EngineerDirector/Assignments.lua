@@ -624,6 +624,22 @@ local function ProcessEngineer(aiBrain, runtime, eng, now, ctx)
     local claimedByFactoryTask = ctx.factoryTask.Active and entityId and ctx.factoryTask.BuilderIds and ctx.factoryTask.BuilderIds[entityId]
     local claimedByStructureTask = ctx.structureTask.Active and entityId and ctx.structureTask.BuilderIds and ctx.structureTask.BuilderIds[entityId]
     local claimedByRadarOrder = entityId and ctx.radarReservedBuilderIds[entityId]
+    local canPreemptStructureForReclaim = claimedByStructureTask
+        and not claimedByFactoryTask
+        and not claimedByRadarOrder
+        and ctx.contestFieldMode
+        and ctx.fieldTaskWindow
+        and ctx.reclaimField < ctx.fieldTaskQuota
+        and (ctx.structureReclaimPreempts or 0) < 1
+        and ctx.needBase <= 0
+        and not ctx.mexRebuildUrgent
+        and not (ctx.structureTask.Kind == 'Power' and ctx.constraints.PowerBufferLow == true)
+    if canPreemptStructureForReclaim
+        and Reclaim.TryReclaimFieldZone(aiBrain, runtime, eng, ctx.reclaimFieldPos, now) then
+        ctx.reclaimField = ctx.reclaimField + 1
+        ctx.structureReclaimPreempts = (ctx.structureReclaimPreempts or 0) + 1
+        return
+    end
     if claimedByFactoryTask or claimedByStructureTask or claimedByRadarOrder then
         return
     end
