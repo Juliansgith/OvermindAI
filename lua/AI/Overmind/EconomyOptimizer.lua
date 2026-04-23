@@ -335,9 +335,9 @@ function UpdatePolicy(aiBrain, now)
     policy.RadarDesiredCap = 1
     policy.MaxAirBomberShare = 0.32
     policy.PrimaryFactorySoftCap = 3
-    policy.AcuOpeningMaxDistance = math.max(tune.ACUOpeningMaxDistance or 20, 22)
-    policy.AcuMidMaxDistance = math.max(tune.ACUMidMaxDistance or 36, 34)
-    policy.AcuLateMaxDistance = math.max(tune.ACULateMaxDistance or 60, 46)
+    policy.AcuOpeningMaxDistance = math.min(tune.ACUOpeningMaxDistance or 20, 16)
+    policy.AcuMidMaxDistance = math.min(tune.ACUMidMaxDistance or 36, 24)
+    policy.AcuLateMaxDistance = math.min(tune.ACULateMaxDistance or 60, 38)
 
     policy.ContestMapMode = contestMapMode and true or false
     policy.PrioritizeProduction = prioritizeProduction and true or false
@@ -449,8 +449,8 @@ function UpdatePolicy(aiBrain, now)
         policy.FarExpandMinControl = 0.24
         policy.FarExpandMinRelativePower = 0.95
         policy.FarExpandMinArmy = 20
-        policy.AcuOpeningMaxDistance = math.max(tune.ACUOpeningMaxDistance or 20, 22)
-        policy.AcuMidMaxDistance = math.max(tune.ACUMidMaxDistance or 36, 32)
+        policy.AcuOpeningMaxDistance = math.min(tune.ACUOpeningMaxDistance or 20, 16)
+        policy.AcuMidMaxDistance = math.min(tune.ACUMidMaxDistance or 36, 24)
     elseif now < 720 then
         policy.EngineerReserveMin = 4
         policy.SafeExpandDistance = 660
@@ -463,8 +463,8 @@ function UpdatePolicy(aiBrain, now)
         policy.FarExpandMinControl = 0.28
         policy.FarExpandMinRelativePower = 0.94
         policy.FarExpandMinArmy = 24
-        policy.AcuOpeningMaxDistance = math.max((tune.ACUOpeningMaxDistance or 20) + 4, 26)
-        policy.AcuMidMaxDistance = math.max((tune.ACUMidMaxDistance or 36) + 6, 38)
+        policy.AcuOpeningMaxDistance = math.min((tune.ACUOpeningMaxDistance or 20) + 2, 18)
+        policy.AcuMidMaxDistance = math.min((tune.ACUMidMaxDistance or 36) + 4, 28)
     end
 
     if phase == 'bootstrap' then

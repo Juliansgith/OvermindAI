@@ -260,9 +260,9 @@ function EnforceCommanderSafety(aiBrain, now)
 
     local policy = runtime.EcoPolicy or {}
     local openingLockTime = math.max(320, policy.OpeningLockTime or 420)
-    local openingMaxDistance = math.min(policy.AcuOpeningMaxDistance or 24, 32)
-    local midMaxDistance = math.min(policy.AcuMidMaxDistance or 38, 52)
-    local lateMaxDistance = math.min(policy.AcuLateMaxDistance or 62, 72)
+    local openingMaxDistance = math.min(policy.AcuOpeningMaxDistance or 20, 14)
+    local midMaxDistance = math.min(policy.AcuMidMaxDistance or 36, 24)
+    local lateMaxDistance = math.min(policy.AcuLateMaxDistance or 62, 42)
 
     local openingLock = now < openingLockTime and (factoryCount < 3 or combatCount < 20)
     local underThreat = localThreat > math.max(3, homeThreat + 1.5)
@@ -306,7 +306,7 @@ function EnforceCommanderSafety(aiBrain, now)
     end
 
     local explicitPush = runtime.ACURole == 'push' and escortCount >= 12 and localThreat < (homeThreat + 1.6)
-    local earlyHardLeash = now < 380 and distance > math.max(22, openingMaxDistance + 2) and escortCount < 8 and not explicitPush
+    local earlyHardLeash = now < 380 and distance > 16 and escortCount < 8 and not explicitPush
     local strictLeashActive = now < (runtime.ACUStrictLeashUntil or -999)
     local clusterState = runtime.EnemyClusterTracker or {}
     local approachCluster = clusterState.ApproachCluster or {}
@@ -387,7 +387,7 @@ function EnforceCommanderSafety(aiBrain, now)
     local catastrophicDistance = math.max(maxDistance + (heavilyEscortedForward and 14 or 8), heavilyEscortedForward and 34 or 24)
     local hardOverextendDistance = distance > catastrophicDistance
         or (distance > 16 and now < 1200 and escortCount <= 3 and enemyRaiders > 0)
-        or (distance > math.max(22, openingMaxDistance + 2) and now < 720 and escortCount <= 2)
+        or (distance > 14 and now < 720 and escortCount <= 2)
 
     local shouldRecall = distance > maxDistance and (openingLock or underThreat or lowHealth or underEscorted or hardAnchor or raidRecall or enemyContactUnsafe)
     if earlyHardLeash then
