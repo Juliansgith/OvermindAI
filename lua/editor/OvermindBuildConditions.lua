@@ -327,6 +327,30 @@ local function IsFirstHQPriorityState(aiBrain, minReadyLand)
         or macroPhase == 'first_t2_power'
 end
 
+local function IsLowTechDefenseCapped(aiBrain, bomberPanic)
+    if not aiBrain then
+        return false
+    end
+
+    local runtime = aiBrain.OvermindRuntime or {}
+    local production = runtime.ProductionDirector or {}
+    local current = production.Current or {}
+    local ecoCounts = current.Eco or {}
+    local macro = runtime.MacroController or {}
+    local macroPhase = macro.Phase or production.MacroObjective or 'none'
+    local mexReady = (((ecoCounts.Mex or {}).Ready) or GetCompletedUnitCount(aiBrain, categories.MASSEXTRACTION * categories.STRUCTURE))
+    local t2PowerReady = GetCompletedUnitCount(aiBrain, categories.ENERGYPRODUCTION * categories.STRUCTURE * (categories.TECH2 + categories.TECH3))
+    local t2MexReady = GetCompletedUnitCount(aiBrain, categories.MASSEXTRACTION * categories.STRUCTURE * (categories.TECH2 + categories.TECH3))
+    local defenseCount = GetExistingUnitCount(aiBrain, categories.STRUCTURE * categories.DEFENSE * categories.TECH1)
+    local cap = bomberPanic and 4 or 3
+    local techTransition = macroPhase == 'first_t2_power'
+        or macroPhase == 'first_t2_engineer'
+        or (t2PowerReady <= 0 and t2MexReady <= 0)
+    return techTransition
+        and mexReady <= 8
+        and defenseCount >= cap
+end
+
 local function GetExtractorUpgradePlan(aiBrain)
     local upgradeDirector = GetUpgradeDirector(aiBrain)
     local directedExtractor = upgradeDirector and upgradeDirector.Extractor or false
@@ -1037,6 +1061,18 @@ local function IsFactoryGrowthHardBlocked(aiBrain, capacity, domain)
     local seaFactories = GetExistingUnitCount(aiBrain, categories.FACTORY * categories.NAVAL * categories.STRUCTURE)
     local totalFactories = landFactories + airFactories + seaFactories
     local unfinishedFactories = GetUnfinishedUnitCount(aiBrain, categories.FACTORY * categories.STRUCTURE)
+    if IsFirstHQPriorityState(aiBrain, 3) and totalFactories >= 3 then
+        return true
+    end
+
+    local readyMex = GetCompletedUnitCount(aiBrain, categories.MASSEXTRACTION * categories.STRUCTURE)
+    local readyT2Mex = GetCompletedUnitCount(aiBrain, categories.MASSEXTRACTION * categories.STRUCTURE * (categories.TECH2 + categories.TECH3))
+    local supportedFactoryCap = math.max(3, math.floor((readyMex or 0) * 0.75) + ((readyT2Mex > 0) and 1 or 0))
+    supportedFactoryCap = math.min(8, supportedFactoryCap)
+    if totalFactories >= supportedFactoryCap and not MassOverflowRisk(aiBrain, 0.92, 0.28) then
+        return true
+    end
+
     local unfinishedCap = recovery.ForceFactoryRecovery and 1 or 0
     if unfinishedFactories > unfinishedCap then
         return true
@@ -2554,6 +2590,9 @@ function ShouldForceDefenseRecovery(aiBrain)
     if IsFirstHQPriorityState(aiBrain, 3) and not IsUnderLandHarass(aiBrain, 4) and not IsUnderAirHarass(aiBrain, 4) and not IsBomberPanic(aiBrain) then
         return false
     end
+    if IsLowTechDefenseCapped(aiBrain, IsBomberPanic(aiBrain)) then
+        return false
+    end
     if IsStructureBuildClaimed(aiBrain, 'defense', now) or HasUnfinishedDefenseBuild(aiBrain, 'defense') then
         return false
     end
@@ -3534,6 +3573,9 @@ function ShouldBuildT1StructureRole(aiBrain, role)
         return false
     end
     if (structureKey == 'pd' or structureKey == 'aa') then
+        if IsLowTechDefenseCapped(aiBrain, bomberPanic) then
+            return false
+        end
         if IsFirstHQPriorityState(aiBrain, 3) then
             local landHarass = IsUnderLandHarass(aiBrain, 3)
             local airHarass = IsUnderAirHarass(aiBrain, 3)

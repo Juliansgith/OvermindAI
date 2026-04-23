@@ -71,6 +71,30 @@ local function IsFirstHQPriority(runtime, aiBrain)
         or phase == 'first_t2_power'
 end
 
+local function IsLowTechDefenseCapped(runtime, aiBrain, bomberPanic)
+    if not runtime or not aiBrain then
+        return false
+    end
+
+    local prod = runtime.ProductionDirector or {}
+    local current = prod.Current or {}
+    local ecoCounts = current.Eco or {}
+    local macro = runtime.MacroController or {}
+    local phase = macro.Phase or prod.MacroObjective or 'none'
+    local mexReady = (((ecoCounts.Mex or {}).Ready) or 0)
+    local t2PowerReady = aiBrain:GetCurrentUnits(categories.ENERGYPRODUCTION * categories.STRUCTURE * (categories.TECH2 + categories.TECH3)) or 0
+    local t2MexReady = aiBrain:GetCurrentUnits(categories.MASSEXTRACTION * categories.STRUCTURE * (categories.TECH2 + categories.TECH3)) or 0
+    local aaTotal = aiBrain:GetCurrentUnits(T1AAStructureCategory) or 0
+    local pdTotal = aiBrain:GetCurrentUnits(T1PDStructureCategory) or 0
+    local cap = bomberPanic and 4 or 3
+    local techTransition = phase == 'first_t2_power'
+        or phase == 'first_t2_engineer'
+        or (t2PowerReady <= 0 and t2MexReady <= 0)
+    return techTransition
+        and mexReady <= 8
+        and (aaTotal + pdTotal) >= cap
+end
+
 local function PickBlueprint(builder, needAA)
     if not builder then
         return false
@@ -309,6 +333,11 @@ function Module.Update(aiBrain, now)
 
     local eco = runtime.EcoState or {}
     if (eco.MassStorageRatio or 0) <= 0.01 and (eco.EnergyStorageRatio or 0) <= 0.01 and (eco.MassTrend or 0) < -0.55 then
+        state.NextTry = now + 10
+        return
+    end
+
+    if IsLowTechDefenseCapped(runtime, aiBrain, bomberPanic) then
         state.NextTry = now + 10
         return
     end
