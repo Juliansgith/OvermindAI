@@ -1043,6 +1043,8 @@ local function ApproveFactoryBuildRequest(aiBrain, domain)
     end
 
     local capacity = GetAuthoritativeCapacityPlan(aiBrain)
+    local hasLandHQ = GetCompletedUnitCount(aiBrain, categories.FACTORY * categories.LAND * categories.STRUCTURE * (categories.TECH2 + categories.TECH3)) > 0
+    local recovery = GetRecovery(aiBrain) or {}
     if capacity and not HasCriticalFactoryTask(aiBrain, domain) then
         local landFactories = GetExistingUnitCount(aiBrain, categories.FACTORY * categories.LAND * categories.STRUCTURE)
         local airFactories = GetExistingUnitCount(aiBrain, categories.FACTORY * categories.AIR * categories.STRUCTURE)
@@ -1050,14 +1052,19 @@ local function ApproveFactoryBuildRequest(aiBrain, domain)
         if IsFactoryCapacityOvershoot(capacity, domain, landFactories, airFactories, seaFactories) then
             return false
         end
+        local totalFactories = landFactories + airFactories + seaFactories
+        local preHQCap = recovery.ForceFactoryRecovery and 5 or 4
+        if not hasLandHQ and totalFactories >= preHQCap then
+            return false
+        end
     end
 
     local gate = runtime.FactoryBuildGate or {}
     runtime.FactoryBuildGate = gate
     local totalFactories = GetExistingUnitCount(aiBrain, categories.FACTORY * categories.STRUCTURE)
-    local strictCap = 5
+    local strictCap = hasLandHQ and 5 or 4
     if now >= 720 then
-        strictCap = 7
+        strictCap = hasLandHQ and 7 or 5
     end
     if now >= 1320 then
         strictCap = 8
@@ -1082,8 +1089,15 @@ local function ApproveFactoryBuildRequest(aiBrain, domain)
     elseif now < 1200 then
         cooldown = 14
     end
+    if now < 420 then
+        cooldown = 34
+    elseif now < 720 then
+        cooldown = 28
+    elseif now < 1200 then
+        cooldown = 22
+    end
     if HasRecoveryFlag(aiBrain, 'ForceFactoryRecovery') or HasCriticalFactoryTask(aiBrain, domain) then
-        cooldown = math.min(cooldown, 8)
+        cooldown = math.min(cooldown, now < 420 and 24 or 14)
     end
 
     gate.LockUntil = now + cooldown

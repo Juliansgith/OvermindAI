@@ -368,15 +368,20 @@ function UpdatePolicy(aiBrain, now)
     if focusOnT1Spam or contestMapMode or prioritizeProduction then
         policy.MexUpgradeConcurrency = math.min(policy.MexUpgradeConcurrency, frontSecureUpgradeWindow and 2 or 1)
     end
-    local reclaimQuotaAllowed = now >= 300
+    local reclaimCrisisOverride = reclaimFieldScore >= 150
+        and (macroCounts.Engineers or 0) >= 7
+        and (eco.MassTrend or 0) >= -0.45
+        and (eco.EnergyTrend or 0) >= -24
+        and (planner.ReclaimFirst == true or planner.OuterRetentionActive == true or reclaimPressureMode)
+    local reclaimQuotaAllowed = now >= 240
         and phase ~= 'bootstrap'
         and (macroCounts.FactoryTotal or 0) >= 2
-        and not acuCrisisActive
+        and (not acuCrisisActive or reclaimCrisisOverride)
         and pressure.SurvivalCrisis ~= true
     local reclaimQuotaMexReady = (macroCounts.Mex or 0) >= 6
-        or ((macroCounts.Mex or 0) >= 5 and reclaimFieldScore >= 140)
+        or ((macroCounts.Mex or 0) >= 5 and reclaimFieldScore >= 110)
         or ((macroCounts.Mex or 0) >= 5 and reclaimPressureMode)
-        or reclaimFieldScore >= 220
+        or reclaimFieldScore >= 180
     local lowMexExpansionNeed = now < 1500 and (macroCounts.Mex or 0) < 11 and phase ~= 'bootstrap'
     local reclaimWorkerReady = (macroCounts.Engineers or 0) >= 8
     local reclaimConversionDebt = (velocity.ReclaimStagnationTime or 0) >= 45
@@ -390,6 +395,13 @@ function UpdatePolicy(aiBrain, now)
         policy.EngineerReclaimQuota = 1
     end
     if reclaimQuotaAllowed and reclaimQuotaMexReady and reclaimWorkerReady and reclaimFieldScore >= 90 and reclaimConversionDebt then
+        policy.EngineerReclaimQuota = math.max(policy.EngineerReclaimQuota, 1)
+    end
+    if reclaimQuotaAllowed
+        and reclaimQuotaMexReady
+        and reclaimFieldScore >= 120
+        and (planner.ReclaimFirst == true or planner.OuterRetentionActive == true or reclaimPressureMode)
+        and (macroCounts.Engineers or 0) >= 7 then
         policy.EngineerReclaimQuota = math.max(policy.EngineerReclaimQuota, 1)
     end
     if reclaimQuotaAllowed and reclaimQuotaMexReady and reclaimFieldAvailable then
