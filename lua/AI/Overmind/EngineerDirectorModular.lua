@@ -598,6 +598,72 @@ function Update(aiBrain, now)
         ctx.dispatchedExpand = DispatchExpansionEngineer(aiBrain, runtime, now, engineers, mainPos, enemyPos, math.max(420, safeExpandDistance), threatCap)
     end
 
+    local factoryCounts = current.Factories or {}
+    local readyFactories = factoryCounts.Ready
+        or (((factoryCounts.Land or {}).Ready) or 0)
+            + (((factoryCounts.Air or {}).Ready) or 0)
+            + (((factoryCounts.Navy or {}).Ready) or 0)
+    local totalEngineers = table.getn(engineers or {})
+    local timeEngineerFloor = 6
+    if now >= 300 then
+        timeEngineerFloor = 9
+    end
+    if now >= 600 then
+        timeEngineerFloor = 12
+    end
+    if now >= 960 then
+        timeEngineerFloor = 16
+    end
+    local scaledEngineerFloor = math.max(
+        constraints.StarterEngineerFloor or 6,
+        timeEngineerFloor,
+        math.floor((readyFactories or 1) * ((policy.EngineerFactoryRatio or 1.0) + 2.1)))
+    if (policy.EngineerReclaimQuota or 0) > 0 or policy.ReclaimPressureMode == true then
+        scaledEngineerFloor = scaledEngineerFloor + 2
+    end
+    if engState.MexEmergencyActive == true then
+        scaledEngineerFloor = scaledEngineerFloor + 2
+    end
+
+    local demand = runtime.EngineerDemand or {}
+    runtime.EngineerDemand = demand
+    demand.LastUpdate = now
+    demand.PendingFactoryOrders = 0
+    demand.InitialMexBuildersWanted = (now < 420 and mexReady < math.max(4, constraints.StarterMexFloor or 4))
+        and math.max(1, math.min(3, math.max(4, constraints.StarterMexFloor or 4) - mexReady))
+        or 0
+    demand.FactoryFinishWanted = factoryTask.Active and math.max(0, (factoryTask.RequiredBuilders or 0) - (factoryTask.AssignedBuilders or 0)) or 0
+    demand.StructureFinishWanted = structureTask.Active and math.max(0, (structureTask.RequiredBuilders or 0) - (structureTask.AssignedBuilders or 0)) or 0
+    demand.BaseWanted = math.max(0, baseFloor - baseEngineers)
+    demand.ReclaimWanted = math.max(0, fieldTaskQuota - (ctx.reclaimField or 0))
+    demand.ExpansionWanted = math.max(0, (policy.EngineerExpansionQuota or 1) - (ctx.dispatchedExpand or 0))
+    if not canDispatchExpand and not engState.MexEmergencyActive then
+        demand.ExpansionWanted = math.min(demand.ExpansionWanted, 1)
+    end
+    demand.PowerWanted = (hqPowerRecoveryWanted or macro.NeedPowerRecovery == true or constraints.PowerBufferLow == true)
+        and math.max(1, (structureTask.Active and structureTask.Kind == 'Power') and demand.StructureFinishWanted or 1)
+        or 0
+    demand.SpareWanted = math.max(0, scaledEngineerFloor - totalEngineers)
+    demand.TotalWanted = math.max(
+        demand.SpareWanted,
+        demand.InitialMexBuildersWanted
+            + demand.FactoryFinishWanted
+            + demand.StructureFinishWanted
+            + demand.BaseWanted
+            + demand.ReclaimWanted
+            + demand.ExpansionWanted
+            + demand.PowerWanted)
+    demand.CurrentEngineers = totalEngineers
+    demand.TargetEngineers = scaledEngineerFloor
+    demand.Reason = demand.InitialMexBuildersWanted > 0 and 'opening_mex'
+        or demand.FactoryFinishWanted > 0 and 'factory_finish'
+        or demand.StructureFinishWanted > 0 and (structureTask.Kind or 'structure_finish')
+        or demand.ReclaimWanted > 0 and 'reclaim'
+        or demand.ExpansionWanted > 0 and 'expansion'
+        or demand.PowerWanted > 0 and 'power'
+        or demand.SpareWanted > 0 and 'floor'
+        or 'satisfied'
+
     runtime.LastEngineerRecovered = ctx.recoverCount
     runtime.LastEngineerThreatRecalls = ctx.threatenedCount
     runtime.LastEngineerFactoryRecalls = ctx.forcedFactoryRecover

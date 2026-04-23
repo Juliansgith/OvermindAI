@@ -1473,6 +1473,8 @@ local function DecideCapacityPlan(runtime, current, constraints, rolePlan)
     local eco = runtime.EcoState or {}
     local upgradeDirector = runtime.UpgradeDirector or {}
     local factoryUpgrade = upgradeDirector.Factory or {}
+    local velocity = runtime.EcoVelocity or {}
+    local ledgerAgg = ((runtime.EconomyLedger or {}).Aggregate) or {}
     local macroObjective = state.MacroObjective or 'land_factory_floor'
     local now = GetGameTimeSeconds()
     local totalUnfinished = current.Factories.Pending or 0
@@ -1496,6 +1498,10 @@ local function DecideCapacityPlan(runtime, current, constraints, rolePlan)
     local unfinishedFactoryCount = math.max(0, totalFactories - readyFactories)
     local massTrend = eco.MassTrend or 0
     local massStorageRatio = eco.MassStorageRatio or 0
+    local factoryBusyRatio = policy.FactoryBusyRatio or ledgerAgg.FactoryBusyRatio or velocity.FactoryThroughput or 0
+    local spendSaturation = policy.SpendSaturation or ledgerAgg.SpendSaturation or velocity.SpendSaturation or 0
+    local reclaimRateShort = policy.ReclaimRateShort or velocity.ReclaimRateShort or 0
+    local reclaimStagnation = policy.ReclaimStagnationTime or velocity.ReclaimStagnationTime or 0
     local powerBufferLow = constraints.PowerBufferLow == true
     local factoryTaskDebt = factoryTask.Active
         and ((factoryTask.AssignedBuilders or 0) < math.max(1, factoryTask.RequiredBuilders or 0))
@@ -1649,6 +1655,17 @@ local function DecideCapacityPlan(runtime, current, constraints, rolePlan)
             or (massTrend <= -0.3)
             or (massTrend <= -0.1 and massStorageRatio <= 0.08)
         )
+        and not constraints.EcoCrash
+    local reclaimFundedTempo = spendSaturation >= 0.64
+        and factoryBusyRatio >= 0.68
+        and massTrend >= -0.16
+        and (eco.EnergyTrend or 0) >= -10
+        and (
+            reclaimRateShort >= 0.18
+            or (policy.EngineerReclaimQuota or 0) > 0
+            or reclaimStagnation >= 45
+        )
+        and not deepMassStall
         and not constraints.EcoCrash
     local preHQAirClamp = needsFirstLandHQ
         and current.Factories.Land.Ready >= 4
@@ -1913,6 +1930,15 @@ local function DecideCapacityPlan(runtime, current, constraints, rolePlan)
         and not constraints.CriticalFactory
         and not constraints.CriticalStructure then
         landTarget = math.max(landTarget, math.min(landCap, 5))
+    end
+    if reclaimFundedTempo
+        and secondLandLatched
+        and current.Factories.Land.Ready >= 2
+        and totalUnfinished <= 0
+        and not constraints.CriticalFactory
+        and not constraints.CriticalStructure
+        and not powerBufferLow then
+        landTarget = math.max(landTarget, math.min(landCap, current.Factories.Land.Total + 1))
     end
     if (secondLandEcoReady or secondLandTempoReady) and not emergencyAirFactory then
         landTarget = math.max(landTarget, 2)
@@ -2271,6 +2297,10 @@ local function DecideCapacityPlan(runtime, current, constraints, rolePlan)
     if constraints.SurplusSpendWindow and now >= 1800 then
         phaseFactoryHardCap = phaseFactoryHardCap + 1
     end
+    if reclaimFundedTempo and now >= 480 then
+        phaseFactoryHardCap = phaseFactoryHardCap + 1
+        ecoFactoryCap = ecoFactoryCap + 1
+    end
     if constraints.StrongSurplusWindow and now >= 2400 then
         phaseFactoryHardCap = phaseFactoryHardCap + 1
     end
@@ -2371,6 +2401,9 @@ local function DecideCapacityPlan(runtime, current, constraints, rolePlan)
         SeaUnitTarget = seaRoleUnits,
         DesiredTotal = landTarget + airTarget + seaTarget,
         QueueDiscipline = constraints.QueueStarved and 'tight' or ((constraints.EcoWeak or constraints.UnitCapPressure) and 'careful' or 'normal'),
+        FactoryBusyRatio = Round(factoryBusyRatio, 2),
+        SpendSaturation = Round(spendSaturation, 2),
+        ReclaimRateShort = Round(reclaimRateShort, 2),
     }
 end
 

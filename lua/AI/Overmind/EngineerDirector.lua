@@ -1,6 +1,6 @@
 local LegacyPath = '/mods/OvermindAI/lua/AI/Overmind/EngineerDirectorLegacy.lua'
 local ModularPath = '/mods/OvermindAI/lua/AI/Overmind/EngineerDirectorModular.lua'
-local PreferLegacy = true
+local PreferLegacy = false
 
 local ActiveModule = false
 local ActiveMode = false

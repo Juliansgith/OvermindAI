@@ -206,6 +206,16 @@ local DeclaredStateInitializers = {
             LastExpansionReservationCleanup = -999,
         }
     end,
+    EngineerDemand = function()
+        return {
+            LastUpdate = -999,
+            PendingFactoryOrders = 0,
+            TotalWanted = 0,
+            CurrentEngineers = 0,
+            TargetEngineers = 0,
+            Reason = 'init',
+        }
+    end,
     RaidDefense = function()
         return {}
     end,
@@ -333,6 +343,7 @@ function Update(aiBrain, now)
     EnsureStateSlice(runtime, 'Recovery')
     EnsureStateSlice(runtime, 'ACUState')
     EnsureStateSlice(runtime, 'EngineerState')
+    EnsureStateSlice(runtime, 'EngineerDemand')
     EnsureStateSlice(runtime, 'RaidDefense')
     EnsureStateSlice(runtime, 'RadarState')
     EnsureStateSlice(runtime, 'BomberHarass')

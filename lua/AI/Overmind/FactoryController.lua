@@ -270,6 +270,14 @@ local function CountLandScreenUnits(rolePlan)
         + (((rolePlan.LandIndirect or {}).CurrentUnits) or 0)
 end
 
+local function GetOutstandingEngineerDemand(runtime, now)
+    local demand = runtime and runtime.EngineerDemand or {}
+    if not demand.LastUpdate or now - (demand.LastUpdate or -999) > 18 then
+        return 0, demand
+    end
+    return math.max(0, (demand.TotalWanted or 0) - (demand.PendingFactoryOrders or 0)), demand
+end
+
 local function SelectEarlyLandScreenRole(kind, plan, rolePlan)
     if kind ~= 'land' then
         return false, 0
@@ -431,6 +439,24 @@ local function PickPlannedRole(factory, runtime, eco)
     local forcedRole, forcedUtility = SelectEarlyLandScreenRole(kind, plan, rolePlan)
     if forcedRole and rolePlan[forcedRole] then
         return forcedRole, forcedUtility, rolePlan[forcedRole]
+    end
+
+    local now = plan.Time or GetGameTimeSeconds()
+    local engineerDemand, demand = GetOutstandingEngineerDemand(runtime, now)
+    if kind == 'land' and engineerDemand > 0 and rolePlan.Engineer then
+        local emerg = plan.EmergencyOverrides or {}
+        local constraints = plan.ConstraintState or {}
+        local severeLandCrisis = emerg.LandPanic
+            or emerg.FrontCollapse
+            or ((constraints.BasePressure or 0) >= 0.36)
+        local immediateEcoDemand = (demand.InitialMexBuildersWanted or 0) > 0
+            or (demand.FactoryFinishWanted or 0) > 0
+            or (demand.StructureFinishWanted or 0) > 0
+            or (demand.BaseWanted or 0) > 0
+            or (demand.PowerWanted or 0) > 0
+        if immediateEcoDemand or not severeLandCrisis or CountLandScreenUnits(rolePlan) >= (now < 420 and 4 or 7) then
+            return 'Engineer', 1040 + (engineerDemand * 18), rolePlan.Engineer
+        end
     end
 
     for _, roleName in roleNames do
@@ -726,6 +752,9 @@ local function TryIssuePlannedBuild(aiBrain, factory, runtime, now, state, queue
 
     if IssueBuildFactory then
         IssueBuildFactory({ factory }, bp, 1)
+        if roleName == 'Engineer' and runtime.EngineerDemand then
+            runtime.EngineerDemand.PendingFactoryOrders = (runtime.EngineerDemand.PendingFactoryOrders or 0) + 1
+        end
         state.LastIssuedTime = now
         state.LastRole = roleName
         state.LastUtility = utility

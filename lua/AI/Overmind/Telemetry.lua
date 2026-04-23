@@ -91,6 +91,7 @@ function Capture(aiBrain, now)
     local currentFactories = current.Factories or {}
     local factoryTask = current.FactoryTask or {}
     local engState = runtime.EngineerState or {}
+    local engDemand = runtime.EngineerDemand or {}
     local structureTask = engState.UnfinishedStructureTask or {}
     local approachCluster = clusters.ApproachCluster or {}
     local capacity = prod.CapacityPlan or {}
@@ -144,6 +145,15 @@ function Capture(aiBrain, now)
         IdleFactories = CountIdleFactories(aiBrain),
         EngineerCount = engineerCount,
         BaseEngineers = baseEngineers,
+        EngineerDemand = engDemand.TotalWanted or 0,
+        EngineerDemandTarget = engDemand.TargetEngineers or 0,
+        EngineerDemandReason = engDemand.Reason or 'none',
+        EngineerOpeningMexDemand = engDemand.InitialMexBuildersWanted or 0,
+        EngineerFactoryDemand = engDemand.FactoryFinishWanted or 0,
+        EngineerStructureDemand = engDemand.StructureFinishWanted or 0,
+        EngineerExpansionDemand = engDemand.ExpansionWanted or 0,
+        EngineerReclaimDemand = engDemand.ReclaimWanted or 0,
+        EngineerPowerDemand = engDemand.PowerWanted or 0,
         DefenseCount = defenseCount,
         ACUDistance = acuDist,
         ACUEscort = acuEscort,
@@ -167,6 +177,7 @@ function Capture(aiBrain, now)
         ApproachFailurePressure = policy.ApproachFailurePressure or pressure.ApproachFailurePressure or 0,
         MexUpgradeConcurrency = policy.MexUpgradeConcurrency or 0,
         EngineerReclaimQuota = policy.EngineerReclaimQuota or 0,
+        ExpansionEscortNeeded = ((engState.ExpansionEscortNeededUntil or -999) > now) and 1 or 0,
         LedgerUpgradeReason = ledgerAgg.UpgradeBlockedReason or 'none',
         LedgerReclaimReason = ledgerAgg.ReclaimBlockedReason or 'none',
         ProdMode = prod.Mode or 'none',
@@ -244,6 +255,35 @@ function Capture(aiBrain, now)
     end
 
     runtime.LastTelemetry = sample
+
+    if now - (tele.LastEconomyScorecardLogTime or -999) >= 120 then
+        tele.LastEconomyScorecardLogTime = now
+        local mem = aiBrain.OvermindMemory or {}
+        LOG(string.format('*OVERMIND ECONSCORE A%d t=%.0f mex=%d fac=%d/%d/%d idle=%d eng=%d/%d demand=%d:%s buckets=%d/%d/%d/%d/%d/%d reclaim=%.0f/%.2f map=%.2f pause=%d q=%s escort=%d',
+            aiBrain:GetArmyIndex(),
+            now,
+            (((current.Eco or {}).Mex or {}).Ready) or 0,
+            sample.LandFacHave or 0,
+            sample.AirFacHave or 0,
+            sample.SeaFacHave or 0,
+            sample.IdleFactories or 0,
+            sample.EngineerCount or 0,
+            sample.EngineerDemandTarget or 0,
+            sample.EngineerDemand or 0,
+            sample.EngineerDemandReason or 'none',
+            sample.EngineerOpeningMexDemand or 0,
+            sample.EngineerFactoryDemand or 0,
+            sample.EngineerStructureDemand or 0,
+            sample.EngineerExpansionDemand or 0,
+            sample.EngineerReclaimDemand or 0,
+            sample.EngineerPowerDemand or 0,
+            mem.ReclaimMassLifetime or 0,
+            sample.ReclaimStagnation or 0,
+            sample.MapControl or 0,
+            sample.FactoryGrowthPaused or 0,
+            sample.QueueDiscipline or 'none',
+            sample.ExpansionEscortNeeded or 0))
+    end
 
     local checkpoints = { 240, 480, 720 }
     for _, checkpoint in checkpoints do

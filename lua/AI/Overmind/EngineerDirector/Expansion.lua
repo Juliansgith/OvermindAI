@@ -118,6 +118,38 @@ local function FindNearestZoneNode(runtime, pos, maxDistance)
     return best
 end
 
+local function ExpansionPathKey(runtime, pos, mainPos)
+    if not pos then
+        return false
+    end
+
+    local node = FindNearestZoneNode(runtime, pos, 72)
+    if node and node.Key then
+        return tostring(node.Key)
+    end
+
+    if mainPos then
+        local dx = (pos[1] or 0) - (mainPos[1] or 0)
+        local dz = (pos[3] or 0) - (mainPos[3] or 0)
+        local ax = math.abs(dx)
+        local az = math.abs(dz)
+        if ax > (az * 1.35) then
+            return dx >= 0 and 'lane:east' or 'lane:west'
+        elseif az > (ax * 1.35) then
+            return dz >= 0 and 'lane:south' or 'lane:north'
+        elseif dx >= 0 and dz >= 0 then
+            return 'lane:southeast'
+        elseif dx >= 0 then
+            return 'lane:northeast'
+        elseif dz >= 0 then
+            return 'lane:southwest'
+        end
+        return 'lane:northwest'
+    end
+
+    return ExpansionReservationKey(pos)
+end
+
 local function GetContestExpansionBias(runtime, pos, mainPos, enemyPos)
     if not runtime or not pos or not mainPos then
         return 0
@@ -210,7 +242,7 @@ local function CleanupExpansionReservations(runtime, now)
     end
 end
 
-local function ReserveExpansionTarget(runtime, now, pos, engineerId)
+local function ReserveExpansionTarget(runtime, now, pos, engineerId, mainPos)
     local engState = runtime and runtime.EngineerState or false
     if not engState or not pos then
         return
@@ -219,10 +251,12 @@ local function ReserveExpansionTarget(runtime, now, pos, engineerId)
     engState.ExpansionReservations[ExpansionReservationKey(pos)] = {
         ExpiresAt = now + 28,
         EngineerId = engineerId,
+        PathKey = ExpansionPathKey(runtime, pos, mainPos),
+        Pos = { pos[1], pos[2] or 0, pos[3] },
     }
 end
 
-local function IsReservedExpansionTarget(runtime, now, pos, engineerId)
+local function IsReservedExpansionTarget(runtime, now, pos, engineerId, mainPos, allowSharedPath)
     local engState = runtime and runtime.EngineerState or false
     local reservations = engState and engState.ExpansionReservations or false
     if not reservations then
@@ -231,6 +265,20 @@ local function IsReservedExpansionTarget(runtime, now, pos, engineerId)
     local key = ExpansionReservationKey(pos)
     local data = key and reservations[key] or false
     if not data then
+        if allowSharedPath then
+            return false
+        end
+        local pathKey = ExpansionPathKey(runtime, pos, mainPos)
+        if not pathKey then
+            return false
+        end
+        for reservationKey, reservation in pairs(reservations) do
+            if (reservation.ExpiresAt or -1) <= now then
+                reservations[reservationKey] = nil
+            elseif reservation.PathKey == pathKey and (reservation.EngineerId or -1) ~= (engineerId or -2) then
+                return true
+            end
+        end
         return false
     end
     if (data.ExpiresAt or -1) <= now then
@@ -347,6 +395,7 @@ local function FindExpansionTarget(aiBrain, runtime, mainPos, enemyPos, maxDista
     now = now or 0
     local sourcePos = engineerPos or mainPos
     local engineerId = engineerPos and engineerPos.EngineerId or false
+    local allowSharedPath = (((runtime or {}).EngineerState or {}).MexEmergencyActive == true)
     if runtime and runtime.ZoneGraph and runtime.ZoneGraph.BestExpansionNodeKey then
         local node = runtime.ZoneGraph.ByKey and runtime.ZoneGraph.ByKey[runtime.ZoneGraph.BestExpansionNodeKey]
         if node and node.Pos
@@ -356,7 +405,7 @@ local function FindExpansionTarget(aiBrain, runtime, mainPos, enemyPos, maxDista
             and (node.Threat or 0) <= (threatCap + 0.45)
             and (node.RouteRisk or 0) <= 5
             and not HasFriendlyMexAtPos(aiBrain, node.Pos, 8)
-            and not IsReservedExpansionTarget(runtime, now, node.Pos, engineerId)
+            and not IsReservedExpansionTarget(runtime, now, node.Pos, engineerId, mainPos, allowSharedPath)
             and IsSafeExpansionTarget(aiBrain, runtime, node.Pos, mainPos, enemyPos, maxDistance, threatCap + 0.15) then
             return node.Pos
         end
@@ -373,7 +422,7 @@ local function FindExpansionTarget(aiBrain, runtime, mainPos, enemyPos, maxDista
         local pos = marker and marker.Position
         if pos
             and not HasFriendlyMexAtPos(aiBrain, pos, 8)
-            and not IsReservedExpansionTarget(runtime, now, pos, engineerId)
+            and not IsReservedExpansionTarget(runtime, now, pos, engineerId, mainPos, allowSharedPath)
             and IsSafeExpansionTarget(aiBrain, runtime, pos, mainPos, enemyPos, maxDistance, threatCap) then
             local distMain = Common.Distance2D(pos, mainPos)
             local distSource = Common.Distance2D(pos, sourcePos)
@@ -417,7 +466,7 @@ local function FindFollowupExpansionTarget(aiBrain, runtime, mainPos, enemyPos, 
         local pos = marker and marker.Position
         if pos
             and not HasFriendlyMexAtPos(aiBrain, pos, 8)
-            and not IsReservedExpansionTarget(runtime, now, pos, engineerId)
+            and not IsReservedExpansionTarget(runtime, now, pos, engineerId, mainPos, false)
             and IsSafeExpansionTarget(aiBrain, runtime, pos, mainPos, enemyPos, maxDistance, threatCap) then
             local distAnchor = Common.Distance2D(pos, anchorPos)
             if distAnchor >= 28 and distAnchor <= 130 then
@@ -493,15 +542,19 @@ local function DispatchExpansionEngineer(aiBrain, runtime, now, engineers, mainP
                     break
                 end
                 local targetSupported = HasExpansionEscortSupport(aiBrain, runtime, mainPos, target)
-                if NeedsExpansionEscort(aiBrain, runtime, mainPos, target, now, mexReady) and not targetSupported then
+                local targetNeedsEscort = NeedsExpansionEscort(aiBrain, runtime, mainPos, target, now, mexReady)
+                if targetNeedsEscort and not targetSupported then
                     runtime.LastExpansionEscortBlockedTime = now
                     runtime.LastExpansionEscortBlockedPos = target
+                    engState.ExpansionEscortNeeded = true
+                    engState.ExpansionEscortNeededUntil = now + 36
+                    engState.ExpansionEscortTargetPos = target
                     break
                 end
                 local bp = PickMexBlueprint(eng)
                 if bp and IssueBuildMobile then
                     local engineerId = Common.GetEntityId(eng)
-                    ReserveExpansionTarget(runtime, now, target, engineerId)
+                    ReserveExpansionTarget(runtime, now, target, engineerId, mainPos)
                     IssueBuildMobile({ eng }, target, bp, {})
                     local landReady = ((((runtime.ProductionDirector or {}).Current or {}).Factories or {}).Land or {}).Ready or 0
                     if targetSupported or ((now < 300 or landReady <= 1) and Common.Distance2D(mainPos, target) <= 165) then
@@ -516,9 +569,12 @@ local function DispatchExpansionEngineer(aiBrain, runtime, now, engineers, mainP
                             now,
                             engineerId)
                         if followup then
-                            ReserveExpansionTarget(runtime, now, followup, engineerId)
+                            ReserveExpansionTarget(runtime, now, followup, engineerId, mainPos)
                             IssueBuildMobile({ eng }, followup, bp, {})
                         end
+                    end
+                    if targetSupported or not targetNeedsEscort then
+                        engState.ExpansionEscortNeeded = false
                     end
                     runtime.LastExpansionDispatchTime = now
                     runtime.LastExpansionTargetPos = target
@@ -539,6 +595,7 @@ M.PickMexBlueprint = PickMexBlueprint
 M.IsSafeExpansionTarget = IsSafeExpansionTarget
 M.ExpansionReservationKey = ExpansionReservationKey
 M.FindNearestZoneNode = FindNearestZoneNode
+M.ExpansionPathKey = ExpansionPathKey
 M.GetContestExpansionBias = GetContestExpansionBias
 M.CleanupExpansionReservations = CleanupExpansionReservations
 M.ReserveExpansionTarget = ReserveExpansionTarget

@@ -454,12 +454,19 @@ function Module.Update(aiBrain, now)
     local airGuardNeed = Clamp(2 + (airThreatZones * 2) + (raid.UnderAirHarass and 2 or 0) + (severeBomberRaid and 2 or 0), 2, 12)
     local outerContestNeed = 0
     local previousOuterCount = (previousTasks.outer_contest and (previousTasks.outer_contest.CurrentUnits or 0)) or 0
+    local expansionEscortBlocked = (engineerState.ExpansionEscortNeededUntil or -999) > now
+    if expansionEscortBlocked and engineerState.ExpansionEscortTargetPos then
+        outerContestPos = engineerState.ExpansionEscortTargetPos
+        outerContestValue = math.max(outerContestValue, 180)
+    end
     local expansionEscortWanted = outerContestPos
         and not acuCrisisActive
-        and not approachTowardHome
+        and (expansionEscortBlocked or not approachTowardHome)
         and landCombatTotal >= 4
         and (
-            engineerState.MexEmergencyActive == true
+            expansionEscortBlocked
+            or engineerState.ExpansionEscortNeeded == true
+            or engineerState.MexEmergencyActive == true
             or reclaimFirst
             or (now < 1200 and mexReady < 9 and mapControl < 0.42)
         )

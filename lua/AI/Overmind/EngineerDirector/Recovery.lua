@@ -847,7 +847,7 @@ local function TryOpenSurplusExpansionBuild(aiBrain, runtime, eng, mainPos, enem
         return false
     end
 
-    Expansion.ReserveExpansionTarget(runtime, now, target, engineerId)
+    Expansion.ReserveExpansionTarget(runtime, now, target, engineerId, mainPos)
     IssueBuildMobile({ eng }, target, bp, {})
 
     local followupBudget = (macroPhase == 'starter_mex_claim') and 3 or (((rebuildUrgent or mexExpansionUrgent) or mexReady <= 5) and 2 or 0)
@@ -869,7 +869,7 @@ local function TryOpenSurplusExpansionBuild(aiBrain, runtime, eng, mainPos, enem
             if not followup then
                 break
             end
-            Expansion.ReserveExpansionTarget(runtime, now, followup, engineerId)
+            Expansion.ReserveExpansionTarget(runtime, now, followup, engineerId, mainPos)
             IssueBuildMobile({ eng }, followup, bp, {})
             anchorPos = followup
         end

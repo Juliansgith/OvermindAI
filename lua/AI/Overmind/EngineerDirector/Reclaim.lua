@@ -8,6 +8,70 @@ local LandCombatCategory = categories.MOBILE * categories.LAND - categories.ENGI
 
 local M = {}
 
+local function ReclaimSegmentKey(pos)
+    if not pos then
+        return false
+    end
+    return string.format('%d:%d', math.floor((pos[1] or 0) / 64), math.floor((pos[3] or 0) / 64))
+end
+
+local function GetReclaimSegment(runtime, targetPos, now)
+    if not runtime or not targetPos then
+        return false
+    end
+    local engState = runtime.EngineerState or {}
+    runtime.EngineerState = engState
+    engState.ReclaimSegments = engState.ReclaimSegments or {}
+
+    if now >= ((engState.LastReclaimSegmentCleanup or -999) + 12) then
+        engState.LastReclaimSegmentCleanup = now
+        for key, segment in pairs(engState.ReclaimSegments) do
+            local stale = now - (segment.LastSeenTime or now)
+            local assignedExpired = (segment.AssignedUntil or -999) <= now
+            if stale > 420 and assignedExpired then
+                engState.ReclaimSegments[key] = nil
+            elseif assignedExpired then
+                segment.AssignedCount = 0
+            end
+        end
+    end
+
+    local key = ReclaimSegmentKey(targetPos)
+    if not key then
+        return false
+    end
+    local segment = engState.ReclaimSegments[key] or {
+        Key = key,
+        Pos = { targetPos[1], targetPos[2] or 0, targetPos[3] },
+        AssignedCount = 0,
+        AssignedUntil = -999,
+        LastEnemySightingTime = -999,
+        LastEngineerLossTime = -999,
+        LastSeenTime = now,
+    }
+    segment.LastSeenTime = now
+    engState.ReclaimSegments[key] = segment
+    return segment
+end
+
+local function HasRecentSegmentDanger(segment, now, quotaForced, supported)
+    if not segment then
+        return false
+    end
+
+    local lossAge = now - (segment.LastEngineerLossTime or -999)
+    if lossAge >= 0 and lossAge < 300 then
+        return not (quotaForced and supported >= 2 and lossAge >= 120)
+    end
+
+    local sightAge = now - (segment.LastEnemySightingTime or -999)
+    if sightAge >= 0 and sightAge < 120 then
+        return not (quotaForced and supported >= 2 and sightAge >= 45)
+    end
+
+    return false
+end
+
 local function TryReclaimEnemyMex(aiBrain, runtime, eng, now)
     if not eng or eng.Dead then
         return false
@@ -119,7 +183,9 @@ local function TryReclaimFieldZone(aiBrain, runtime, eng, targetPos, now)
     end
 
     local planner = runtime and runtime.StrategicPlanner or {}
-    if not (planner.ReclaimFirst == true or planner.OuterRetentionActive == true) then
+    local policy = runtime and runtime.EcoPolicy or {}
+    local quotaForced = (policy.EngineerReclaimQuota or 0) > 0
+    if not (planner.ReclaimFirst == true or planner.OuterRetentionActive == true or quotaForced) then
         return false
     end
 
@@ -139,13 +205,43 @@ local function TryReclaimFieldZone(aiBrain, runtime, eng, targetPos, now)
     local taskStrength = outerTask.CurrentStrength or 0
     local supported = math.max(allySupport, taskSupport, math.floor(taskStrength / 7))
     local outerBacked = taskSupport > 0 or taskStrength >= 8 or planner.OuterRetentionActive == true
-    local reclaimTargets, reclaimMass = GetReclaimFieldTargets(targetPos, planner.ReclaimFirst and 46 or 40, planner.ReclaimFirst and 1.5 or 2.5)
+    local segment = GetReclaimSegment(runtime, targetPos, now)
+    local engineerLossRisk = OvermindMemory.GetEngineerLossRisk(aiBrain, targetPos, 44)
+    if segment then
+        segment.LastMassEstimate = 0
+        segment.LastSupport = supported
+        if enemySupport > 0 or localThreat > 0.35 or Threat.HasEnemyCombatNear(aiBrain, targetPos, planner.ReclaimFirst and 20 or 24) then
+            segment.LastEnemySightingTime = now
+        end
+        if engineerLossRisk >= 1.2 then
+            segment.LastEngineerLossTime = math.max(segment.LastEngineerLossTime or -999, ((aiBrain.OvermindMemory or {}).LastEngineerLossTime or now))
+        end
+    end
+    if HasRecentSegmentDanger(segment, now, quotaForced, supported) then
+        return false
+    end
+
+    local reclaimRadius = planner.ReclaimFirst and 46 or 40
+    local minTargetMass = planner.ReclaimFirst and 1.5 or 2.5
+    if quotaForced then
+        reclaimRadius = math.max(reclaimRadius, 48)
+        minTargetMass = math.min(minTargetMass, 1.0)
+    end
+    local reclaimTargets, reclaimMass = GetReclaimFieldTargets(targetPos, reclaimRadius, minTargetMass)
     local supportWeightedThreat = math.max(0, localThreat - (supported * 0.18))
     local threatCap = planner.ReclaimFirst and (outerBacked and 2.75 or 2.35) or (outerBacked and 2.15 or 1.85)
     local routeRiskCap = planner.ReclaimFirst and (outerBacked and 5.2 or 4.5) or (outerBacked and 4.4 or 3.8)
     local minSupport = planner.ReclaimFirst and (outerBacked and 1 or 2) or (outerBacked and 2 or 3)
+    if quotaForced then
+        threatCap = threatCap + 0.35
+        routeRiskCap = routeRiskCap + 0.55
+        minSupport = math.max(0, minSupport - 1)
+    end
+    if segment then
+        segment.LastMassEstimate = reclaimMass
+    end
 
-    if table.getn(reclaimTargets) <= 0 or reclaimMass < (planner.ReclaimFirst and 42 or 58) then
+    if table.getn(reclaimTargets) <= 0 or reclaimMass < (quotaForced and 30 or (planner.ReclaimFirst and 42 or 58)) then
         return false
     end
     if distMain > (((runtime.EcoPolicy or {}).SafeExpandDistance or 680) + 100) then
@@ -191,6 +287,11 @@ local function TryReclaimFieldZone(aiBrain, runtime, eng, targetPos, now)
             end
         end
         if issued > 0 then
+            if segment then
+                segment.AssignedCount = (segment.AssignedCount or 0) + 1
+                segment.AssignedUntil = math.max(segment.AssignedUntil or -999, now + 24)
+                segment.LastAssignedTime = now
+            end
             return true
         end
     end
@@ -202,5 +303,6 @@ end
 M.TryReclaimEnemyMex = TryReclaimEnemyMex
 M.GetReclaimFieldTargets = GetReclaimFieldTargets
 M.TryReclaimFieldZone = TryReclaimFieldZone
+M.ReclaimSegmentKey = ReclaimSegmentKey
 return M
 

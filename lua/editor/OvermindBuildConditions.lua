@@ -209,10 +209,18 @@ function NeedOpeningMexFloor(aiBrain, minReady, maxTime)
     local deadline = maxTime or 360
     local readyMex = GetCompletedUnitCount(aiBrain, categories.MASSEXTRACTION * categories.STRUCTURE)
     if readyMex >= target then
+        if aiBrain.OvermindRuntime then
+            aiBrain.OvermindRuntime.OpeningMexDebt = 0
+        end
         return false
     end
 
-    return now <= deadline or readyMex < math.max(2, target - 1)
+    if aiBrain.OvermindRuntime then
+        aiBrain.OvermindRuntime.OpeningMexDebt = target - readyMex
+        aiBrain.OvermindRuntime.OpeningMexDeadline = deadline
+    end
+
+    return now <= deadline or readyMex < target
 end
 
 local function GetUnitCount(aiBrain, category)
@@ -834,7 +842,8 @@ local function IsFactoryBuildClaimed(aiBrain, domain, now)
         return false
     end
     local claims = runtime.FactoryBuildClaims or {}
-    return (claims[NormalizeFactoryDomain(domain)] or -999) > t
+    return (claims.any or -999) > t
+        or (claims[NormalizeFactoryDomain(domain)] or -999) > t
 end
 
 local function ClaimFactoryBuild(aiBrain, domain, seconds, now)
@@ -845,7 +854,22 @@ local function ClaimFactoryBuild(aiBrain, domain, seconds, now)
     end
     runtime.FactoryBuildClaims = runtime.FactoryBuildClaims or {}
     local key = NormalizeFactoryDomain(domain)
-    runtime.FactoryBuildClaims[key] = math.max(runtime.FactoryBuildClaims[key] or -999, t + (seconds or 12))
+    local untilTime = t + (seconds or 12)
+    runtime.FactoryBuildClaims[key] = math.max(runtime.FactoryBuildClaims[key] or -999, untilTime)
+    runtime.FactoryBuildClaims.any = math.max(runtime.FactoryBuildClaims.any or -999, untilTime)
+end
+
+local function CountFactoryBuildReservation(runtime, now)
+    if not runtime then
+        return 0
+    end
+    local t = now or GetGameTimeSeconds()
+    local gate = runtime.FactoryBuildGate or {}
+    local claims = runtime.FactoryBuildClaims or {}
+    if (gate.LockUntil or -999) > t or (claims.any or -999) > t then
+        return 1
+    end
+    return 0
 end
 
 local function ShouldBypassGenericFirstRadar(aiBrain)
@@ -1265,6 +1289,14 @@ local function ApproveFactoryBuildRequest(aiBrain, domain)
             return false
         end
         local totalFactories = landFactories + airFactories + seaFactories
+        local reservedFactories = CountFactoryBuildReservation(runtime, now)
+        local desiredTotal = capacity.DesiredTotal
+        if desiredTotal == nil and (capacity.LandTarget ~= nil or capacity.AirTarget ~= nil or capacity.SeaTarget ~= nil) then
+            desiredTotal = (capacity.LandTarget or landFactories) + (capacity.AirTarget or airFactories) + (capacity.SeaTarget or seaFactories)
+        end
+        if desiredTotal ~= nil and (totalFactories + reservedFactories) >= desiredTotal then
+            return false
+        end
         if firstHQPriority and totalFactories >= 3 then
             return false
         end
@@ -1327,6 +1359,8 @@ local function ApproveFactoryBuildRequest(aiBrain, domain)
     gate.LockUntil = now + cooldown
     gate.LastIssueTime = now
     gate.LastDomain = domain or 'any'
+    gate.Owner = 'capacity'
+    gate.ReservedFactoryCount = totalFactories + 1
     ClaimFactoryBuild(aiBrain, domain, cooldown + 4, now)
 
     return true
@@ -1844,8 +1878,8 @@ function ShouldBuildPower(aiBrain, maxEnergyRatio, maxEnergyTrend, maxMassRatioF
         if now < 260
             and mexReady < 4
             and pgenReady >= math.max(2, bootstrapPowerFloor)
-            and (econ.EnergyTrend or 0) >= -24
-            and (econ.EnergyStorageRatio or 0) >= 0.025 then
+            and (econ.EnergyTrend or 0) >= -34
+            and (econ.EnergyStorageRatio or 0) >= 0.012 then
             return false
         end
     end
