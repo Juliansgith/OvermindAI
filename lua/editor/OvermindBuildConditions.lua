@@ -620,6 +620,62 @@ local function ClaimRadarBuild(aiBrain, seconds, now)
     runtime.RadarBuildClaimUntil = math.max(runtime.RadarBuildClaimUntil or -999, t + (seconds or 8))
 end
 
+local function NormalizeStructureRole(role)
+    local normalized = string.lower(role or '')
+    if normalized == 'ground' or normalized == 'pd' then
+        return 'pd'
+    end
+    if normalized == 'antiair' or normalized == 'aa' then
+        return 'aa'
+    end
+    if normalized == 'defense' or normalized == 'structure' then
+        return 'defense'
+    end
+    return normalized
+end
+
+local function IsStructureBuildClaimed(aiBrain, role, now)
+    local runtime = aiBrain and aiBrain.OvermindRuntime
+    local t = now or GetGameTimeSeconds()
+    if not runtime then
+        return false
+    end
+    local claims = runtime.StructureBuildClaims or {}
+    local key = NormalizeStructureRole(role)
+    return (claims[key] or -999) > t or ((key == 'pd' or key == 'aa') and (claims.defense or -999) > t)
+end
+
+local function ClaimStructureBuild(aiBrain, role, seconds, now)
+    local runtime = aiBrain and aiBrain.OvermindRuntime
+    local t = now or GetGameTimeSeconds()
+    if not runtime then
+        return
+    end
+    runtime.StructureBuildClaims = runtime.StructureBuildClaims or {}
+    local key = NormalizeStructureRole(role)
+    local untilTime = t + (seconds or 24)
+    runtime.StructureBuildClaims[key] = math.max(runtime.StructureBuildClaims[key] or -999, untilTime)
+    if key == 'pd' or key == 'aa' or key == 'defense' then
+        runtime.StructureBuildClaims.defense = math.max(runtime.StructureBuildClaims.defense or -999, untilTime)
+    end
+end
+
+local function HasUnfinishedDefenseBuild(aiBrain, role)
+    local key = NormalizeStructureRole(role)
+    local category = categories.STRUCTURE * categories.DEFENSE * categories.TECH1
+    if key == 'pd' then
+        category = category * categories.DIRECTFIRE - categories.ANTIAIR
+    elseif key == 'aa' then
+        category = category * categories.ANTIAIR
+    end
+    return GetUnfinishedUnitCount(aiBrain, category) > 0
+end
+
+local function IsStructureMassBlocked(aiBrain)
+    local econ = GetEcon(aiBrain)
+    return (econ.MassTrend or 0) <= -0.18 and (econ.MassStorageRatio or 0) <= 0.24
+end
+
 local function NormalizeFactoryDomain(domain)
     local normalized = string.lower(domain or '')
     if normalized == 'sea' or normalized == 'naval' then
@@ -2424,7 +2480,18 @@ function ShouldForceDefenseRecovery(aiBrain)
     if not IsOvermindBrain(aiBrain) then
         return false
     end
-    return HasRecoveryFlag(aiBrain, 'ForceDefenseRecovery')
+    local now = GetGameTimeSeconds()
+    if IsStructureBuildClaimed(aiBrain, 'defense', now) or HasUnfinishedDefenseBuild(aiBrain, 'defense') then
+        return false
+    end
+    if IsStructureMassBlocked(aiBrain) and not IsUnderLandHarass(aiBrain, 2) and not IsUnderAirHarass(aiBrain, 2) then
+        return false
+    end
+    local need = HasRecoveryFlag(aiBrain, 'ForceDefenseRecovery')
+    if need then
+        ClaimStructureBuild(aiBrain, 'defense', 30, now)
+    end
+    return need
 end
 
 function ShouldForceBaseEngineerRecovery(aiBrain)
@@ -3385,12 +3452,21 @@ function ShouldBuildT1StructureRole(aiBrain, role)
         return false
     end
     local key = string.lower(role or '')
+    local structureKey = NormalizeStructureRole(key)
     local now = GetGameTimeSeconds()
     local bomberPanic = IsBomberPanic(aiBrain)
     local director = GetProductionDirector(aiBrain)
     local econBootstrap = IsEconomyBootstrapState(aiBrain)
     if econBootstrap and not IsUnderLandHarass(aiBrain, 1) and not IsUnderAirHarass(aiBrain, 1) and not bomberPanic then
         return false
+    end
+    if (structureKey == 'pd' or structureKey == 'aa') then
+        if IsStructureBuildClaimed(aiBrain, structureKey, now) or HasUnfinishedDefenseBuild(aiBrain, structureKey) or HasUnfinishedDefenseBuild(aiBrain, 'defense') then
+            return false
+        end
+        if IsStructureMassBlocked(aiBrain) and not bomberPanic and not IsUnderLandHarass(aiBrain, 2) and not IsUnderAirHarass(aiBrain, 2) then
+            return false
+        end
     end
     local structurePlan = director and director.StructurePlan or false
     local current = director and director.Current or false
@@ -3414,7 +3490,11 @@ function ShouldBuildT1StructureRole(aiBrain, role)
             end
             return need
         elseif key == 'pd' or key == 'ground' then
-            return (structures.PD or 0) < (structurePlan.PD or 0)
+            local need = (structures.PD or 0) < (structurePlan.PD or 0)
+            if need then
+                ClaimStructureBuild(aiBrain, 'pd', 30, now)
+            end
+            return need
         elseif key == 'aa' then
             local target = structurePlan.BaseAA or 0
             if IsBomberWatch(aiBrain) then
@@ -3423,7 +3503,11 @@ function ShouldBuildT1StructureRole(aiBrain, role)
             if bomberPanic then
                 target = math.max(target, (now < 520) and 2 or 3)
             end
-            return (structures.BaseAA or 0) < target
+            local need = (structures.BaseAA or 0) < target
+            if need then
+                ClaimStructureBuild(aiBrain, 'aa', 30, now)
+            end
+            return need
         elseif key == 'sonar' then
             return director.NavalActive and (structures.Sonar or 0) < (structurePlan.Sonar or 0)
         elseif key == 'navaldef' or key == 'torp' then
@@ -3453,7 +3537,11 @@ function ShouldBuildT1StructureRole(aiBrain, role)
         return need
     elseif key == 'pd' or key == 'ground' then
         local target = (now < 620) and 1 or 2
-        return pd < target
+        local need = pd < target
+        if need then
+            ClaimStructureBuild(aiBrain, 'pd', 30, now)
+        end
+        return need
     elseif key == 'aa' then
         local target = (now < 420) and 1 or 2
         if IsBomberWatch(aiBrain) then
@@ -3462,7 +3550,11 @@ function ShouldBuildT1StructureRole(aiBrain, role)
         if bomberPanic then
             target = math.max(target, (now < 520) and 2 or 3)
         end
-        return aa < target
+        local need = aa < target
+        if need then
+            ClaimStructureBuild(aiBrain, 'aa', 30, now)
+        end
+        return need
     end
     return false
 end
