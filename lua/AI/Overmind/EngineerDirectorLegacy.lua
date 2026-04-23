@@ -931,6 +931,92 @@ local function CountReadyFactories(aiBrain, category)
     return ready
 end
 
+local function CountExistingAndReady(aiBrain, category)
+    local units = aiBrain:GetListOfUnits(category, false, true) or {}
+    local total = 0
+    local ready = 0
+    for _, unit in units do
+        if unit and not unit.Dead then
+            total = total + 1
+            if GetFraction(unit) >= 0.95 and not unit:IsUnitState('BeingBuilt') and not unit:IsUnitState('Upgrading') then
+                ready = ready + 1
+            end
+        end
+    end
+    return total, ready
+end
+
+local function GetCurrentPowerCounts(aiBrain, runtime)
+    local current = (((runtime or {}).ProductionDirector or {}).Current or {})
+    local power = ((current.Eco or {}).Power or {})
+    local total = power.Total or 0
+    local ready = power.Ready or 0
+    if total <= 0 and aiBrain then
+        total, ready = CountExistingAndReady(aiBrain, EnergyCategory)
+    end
+    return total, ready
+end
+
+local function HasSecondLandFactoryDebt(runtime, now)
+    local director = (runtime and runtime.ProductionDirector) or {}
+    local current = director.Current or {}
+    local factories = current.Factories or {}
+    local land = factories.Land or {}
+    local capacity = director.CapacityPlan or {}
+    return now < 480
+        and (land.Ready or 0) >= 1
+        and (land.Total or 0) < 2
+        and ((capacity.LandTarget or 0) >= 2 or capacity.AddLandFactory == true)
+end
+
+local function ShouldWorkPowerStructure(aiBrain, runtime, now, fraction)
+    local director = (runtime and runtime.ProductionDirector) or {}
+    local constraints = director.ConstraintState or {}
+    local current = director.Current or {}
+    local eco = (runtime and runtime.EcoState) or {}
+    local mexReady = ((((current.Eco or {}).Mex or {}).Ready) or 0)
+    local factoryReady = (((current.Factories or {}).Ready) or 0)
+    local powerTotal, powerReady = GetCurrentPowerCounts(aiBrain, runtime)
+    local pendingPower = math.max(0, powerTotal - powerReady)
+    local severeEnergyCrisis = (eco.EnergyStorageRatio or 0) <= 0.055 or (eco.EnergyTrend or 0) <= -34
+
+    if NeedsBootstrapPower(aiBrain, runtime) or severeEnergyCrisis then
+        return true
+    end
+
+    if HasSecondLandFactoryDebt(runtime, now) and powerReady >= 2 then
+        return false
+    end
+
+    local cap = 4
+    if now < 180 then
+        cap = math.max(2, math.min(3, mexReady + 1))
+    elseif now < 360 then
+        cap = math.max(3, math.min(4, mexReady))
+    elseif now < 600 then
+        cap = math.max(4, math.min(6, mexReady + 1))
+    else
+        cap = math.max(5, math.min(8, mexReady + 2))
+    end
+    if factoryReady >= 4 then
+        cap = cap + 1
+    end
+
+    if powerTotal >= cap and (eco.EnergyStorageRatio or 0) >= 0.03 and (eco.EnergyTrend or 0) >= -20 then
+        return false
+    end
+
+    if pendingPower >= 1 and (fraction or 0) < 0.78 and (eco.EnergyStorageRatio or 0) >= 0.04 and (eco.EnergyTrend or 0) >= -22 then
+        return false
+    end
+
+    if constraints.PowerBufferLow == true then
+        return (eco.EnergyStorageRatio or 0) < 0.12 or (eco.EnergyTrend or 0) < -14 or powerReady < math.max(2, math.min(4, mexReady))
+    end
+
+    return (eco.EnergyStorageRatio or 0) < 0.28 or (eco.EnergyTrend or 0) < 2
+end
+
 local function ScoreStructureTarget(aiBrain, runtime, structure, kind, pos, fraction, mainPos)
     local eco = runtime.EcoState or {}
     local recovery = runtime.Recovery or {}
@@ -939,6 +1025,10 @@ local function ScoreStructureTarget(aiBrain, runtime, structure, kind, pos, frac
     local engState = runtime.EngineerState or {}
     local distMain = Distance2D(pos, mainPos)
     local localThreat = aiBrain:GetThreatAtPosition(pos, 1, true, 'AntiSurface') or 0
+    if kind == 'Power' and not ShouldWorkPowerStructure(aiBrain, runtime, GetGameTimeSeconds(), fraction) then
+        return -999999, localThreat
+    end
+
     local engineerLossRisk = OvermindMemory.GetEngineerLossRisk(aiBrain, pos, 42)
     local expansionRisk = OvermindMemory.GetExpansionRisk(aiBrain, pos, 56)
     local bootstrapPowerNeed = NeedsBootstrapPower(aiBrain, runtime)
@@ -1319,7 +1409,10 @@ local function GetPriorityPowerRecoveryTarget(aiBrain, runtime, mainPos, structu
     end
 
     if structureTask and structureTask.Active and structureTask.Kind == 'Power' and structureTargetObject and not structureTargetObject.Dead then
-        return structureTargetObject
+        if ShouldWorkPowerStructure(aiBrain, runtime, GetGameTimeSeconds(), GetFraction(structureTargetObject)) then
+            return structureTargetObject
+        end
+        return false
     end
 
     local best = false
@@ -1336,7 +1429,9 @@ local function GetPriorityPowerRecoveryTarget(aiBrain, runtime, mainPos, structu
                     local maxHealth = unit.GetMaxHealth and unit:GetMaxHealth() or 0
                     local score = -999999
                     if fraction < 0.995 then
-                        score = 320 + (fraction * 140) - dist
+                        if ShouldWorkPowerStructure(aiBrain, runtime, GetGameTimeSeconds(), fraction) then
+                            score = 320 + (fraction * 140) - dist
+                        end
                     elseif maxHealth > 0 and health > 0 and health < (maxHealth * 0.92) then
                         score = 220 + ((1 - (health / maxHealth)) * 180) - dist
                     end
@@ -1438,6 +1533,10 @@ end
 
 local function TryOpenPowerRecoveryBuild(aiBrain, runtime, eng, mainPos, now)
     if not eng or eng.Dead or not mainPos or not IssueBuildMobile then
+        return false
+    end
+
+    if not ShouldWorkPowerStructure(aiBrain, runtime, now, 0) then
         return false
     end
 
