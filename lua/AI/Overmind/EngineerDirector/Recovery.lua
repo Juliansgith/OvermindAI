@@ -97,6 +97,18 @@ local function HasSevereHomeDefenseNeed(runtime, mainPos, bomberPanic)
     return severeLand or severeAir
 end
 
+local function IsUnfinishedFirstT2PowerTarget(aiBrain, structure)
+    if not aiBrain or not structure or structure.Dead then
+        return false
+    end
+    if not EntityCategoryContains(Tech2PowerCategory, structure) then
+        return false
+    end
+    return CountReadyStructures(aiBrain, Tech2PowerCategory) <= 0
+        and Common.GetFraction(structure) < 0.995
+        and not structure:IsUnitState('Upgrading')
+end
+
 local function ScoreStructureTarget(aiBrain, runtime, structure, kind, pos, fraction, mainPos)
     local eco = runtime.EcoState or {}
     local recovery = runtime.Recovery or {}
@@ -104,6 +116,7 @@ local function ScoreStructureTarget(aiBrain, runtime, structure, kind, pos, frac
     local constraints = ((runtime.ProductionDirector or {}).ConstraintState or {})
     local distMain = Common.Distance2D(pos, mainPos)
     local localThreat = aiBrain:GetThreatAtPosition(pos, 1, true, 'AntiSurface') or 0
+    local firstT2PowerTarget = IsUnfinishedFirstT2PowerTarget(aiBrain, structure)
     local engineerLossRisk = OvermindMemory.GetEngineerLossRisk(aiBrain, pos, 42)
     local expansionRisk = OvermindMemory.GetExpansionRisk(aiBrain, pos, 56)
     local bootstrapPowerNeed = Policy.NeedsBootstrapPower(aiBrain, runtime)
@@ -185,6 +198,9 @@ local function ScoreStructureTarget(aiBrain, runtime, structure, kind, pos, frac
     end
     if forceFinishPower then
         score = score + 220 + (fraction * 40)
+    end
+    if firstT2PowerTarget then
+        score = score + 1400 + (fraction * 260)
     end
     if kind == 'Radar' and ((runtime.IntelModel and runtime.IntelModel.StaleZones) or 0) >= 3 then
         score = score + 12
@@ -515,7 +531,11 @@ local function GetPriorityPowerRecoveryTarget(aiBrain, runtime, mainPos, structu
                     local maxHealth = unit.GetMaxHealth and unit:GetMaxHealth() or 0
                     local score = -999999
                     if fraction < 0.995 then
-                        score = 320 + (fraction * 140) - dist
+                        if IsUnfinishedFirstT2PowerTarget(aiBrain, unit) then
+                            score = 1200 + (fraction * 260) - (dist * 0.15)
+                        else
+                            score = 320 + (fraction * 140) - dist
+                        end
                     elseif maxHealth > 0 and health > 0 and health < (maxHealth * 0.92) then
                         score = 220 + ((1 - (health / maxHealth)) * 180) - dist
                     end

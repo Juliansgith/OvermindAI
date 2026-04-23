@@ -1095,6 +1095,19 @@ local function HasSevereHomeDefenseNeed(runtime, mainPos, bomberPanic)
     return severeLand or severeAir
 end
 
+local function IsUnfinishedFirstT2PowerTarget(aiBrain, structure)
+    if not aiBrain or not structure or structure.Dead then
+        return false
+    end
+    if not EntityCategoryContains(Tech2PowerCategory, structure) then
+        return false
+    end
+    local _, t2PowerReady = CountExistingAndReady(aiBrain, Tech2PowerCategory)
+    return t2PowerReady <= 0
+        and GetFraction(structure) < 0.995
+        and not structure:IsUnitState('Upgrading')
+end
+
 local function ScoreStructureTarget(aiBrain, runtime, structure, kind, pos, fraction, mainPos)
     local eco = runtime.EcoState or {}
     local recovery = runtime.Recovery or {}
@@ -1103,7 +1116,8 @@ local function ScoreStructureTarget(aiBrain, runtime, structure, kind, pos, frac
     local engState = runtime.EngineerState or {}
     local distMain = Distance2D(pos, mainPos)
     local localThreat = aiBrain:GetThreatAtPosition(pos, 1, true, 'AntiSurface') or 0
-    if kind == 'Power' and not ShouldWorkPowerStructure(aiBrain, runtime, GetGameTimeSeconds(), fraction) then
+    local firstT2PowerTarget = IsUnfinishedFirstT2PowerTarget(aiBrain, structure)
+    if kind == 'Power' and not firstT2PowerTarget and not ShouldWorkPowerStructure(aiBrain, runtime, GetGameTimeSeconds(), fraction) then
         return -999999, localThreat
     end
     if kind == 'Mex' and ShouldDeferEcoForSecondFactory(aiBrain, runtime, GetGameTimeSeconds(), 'Mex') then
@@ -1204,6 +1218,9 @@ local function ScoreStructureTarget(aiBrain, runtime, structure, kind, pos, frac
     end
     if forceFinishPower then
         score = score + 220 + (fraction * 40)
+    end
+    if firstT2PowerTarget then
+        score = score + 1400 + (fraction * 260)
     end
     if kind == 'Radar' and ((runtime.IntelModel and runtime.IntelModel.StaleZones) or 0) >= 3 then
         score = score + 12
@@ -1620,6 +1637,9 @@ local function GetPriorityPowerRecoveryTarget(aiBrain, runtime, mainPos, structu
     end
 
     if structureTask and structureTask.Active and structureTask.Kind == 'Power' and structureTargetObject and not structureTargetObject.Dead then
+        if IsUnfinishedFirstT2PowerTarget(aiBrain, structureTargetObject) then
+            return structureTargetObject
+        end
         if ShouldWorkPowerStructure(aiBrain, runtime, GetGameTimeSeconds(), GetFraction(structureTargetObject)) then
             return structureTargetObject
         end
@@ -1640,7 +1660,9 @@ local function GetPriorityPowerRecoveryTarget(aiBrain, runtime, mainPos, structu
                     local maxHealth = unit.GetMaxHealth and unit:GetMaxHealth() or 0
                     local score = -999999
                     if fraction < 0.995 then
-                        if ShouldWorkPowerStructure(aiBrain, runtime, GetGameTimeSeconds(), fraction) then
+                        if IsUnfinishedFirstT2PowerTarget(aiBrain, unit) then
+                            score = 1200 + (fraction * 260) - (dist * 0.15)
+                        elseif ShouldWorkPowerStructure(aiBrain, runtime, GetGameTimeSeconds(), fraction) then
                             score = 320 + (fraction * 140) - dist
                         end
                     elseif maxHealth > 0 and health > 0 and health < (maxHealth * 0.92) then
