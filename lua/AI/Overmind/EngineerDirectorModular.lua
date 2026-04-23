@@ -18,6 +18,35 @@ local DefenseCategory = categories.STRUCTURE * categories.DEFENSE
 local BuilderCategory = categories.ENGINEER * categories.MOBILE + categories.COMMAND
 local LandCombatCategory = categories.MOBILE * categories.LAND - categories.ENGINEER - categories.SCOUT - categories.COMMAND
 
+local function SafeDistance2D(a, b)
+    if Common and Common.Distance2D then
+        return Common.Distance2D(a, b)
+    end
+    local ax = (a and a[1]) or 0
+    local az = (a and a[3]) or 0
+    local bx = (b and b[1]) or 0
+    local bz = (b and b[3]) or 0
+    local dx = ax - bx
+    local dz = az - bz
+    return math.sqrt((dx * dx) + (dz * dz))
+end
+
+local function SafeGetFraction(unit)
+    if Common and Common.GetFraction then
+        return Common.GetFraction(unit)
+    end
+    if not unit or unit.Dead or not unit.GetFractionComplete then
+        return 1
+    end
+    local ok, fraction = pcall(function()
+        return unit:GetFractionComplete()
+    end)
+    if ok and type(fraction) == 'number' then
+        return fraction
+    end
+    return 1
+end
+
 local function GetACURepairNeed(aiBrain, runtime, mainPos, now)
     if not aiBrain or not mainPos then
         return 0
@@ -39,7 +68,7 @@ local function GetACURepairNeed(aiBrain, runtime, mainPos, now)
     if not crisisActive and not recentDamage and ratio >= 0.92 then
         return 0
     end
-    if Common.Distance2D(acuPos, mainPos) > 240 then
+    if SafeDistance2D(acuPos, mainPos) > 240 then
         return 0
     end
 
@@ -199,9 +228,7 @@ local function FindBestUnfinishedStructureForLane(aiBrain, runtime, mainPos, lan
 
     for _, structure in structures do
         if structure and not structure.Dead and not structure:IsUnitState('Upgrading') then
-            local fraction = (Common.GetFraction and Common.GetFraction(structure))
-                or (structure.GetFractionComplete and structure:GetFractionComplete())
-                or 1
+            local fraction = SafeGetFraction(structure)
             if fraction < 0.995 then
                 local pos = structure.GetPosition and structure:GetPosition() or false
                 if pos then
@@ -209,7 +236,7 @@ local function FindBestUnfinishedStructureForLane(aiBrain, runtime, mainPos, lan
                     local useLane = (lane == 'eco' and IsEcoStructureKind(kind))
                         or (lane == 'defense' and IsDefenseStructureKind(kind))
                     if useLane then
-                        local distMain = Common.Distance2D(pos, mainPos)
+                        local distMain = SafeDistance2D(pos, mainPos)
                         local maxDist = IsEcoStructureKind(kind) and math.max(300, safeExpandDistance * 0.95) or 240
                         if distMain <= maxDist then
                             local score, threat = scoreStructureTarget(aiBrain, runtime, structure, kind, pos, fraction, mainPos)
