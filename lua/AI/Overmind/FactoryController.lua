@@ -291,6 +291,18 @@ local function SelectEarlyLandScreenRole(kind, plan, rolePlan)
     end
 
     local now = plan.Time or GetGameTimeSeconds()
+    local desiredEngineers = engineer.DesiredUnits or 0
+    local engineerFloor = math.max(6, math.min(18, desiredEngineers))
+    local severeLandCrisis = emerg.LandPanic
+        or emerg.FrontCollapse
+        or ((constraints.BasePressure or 0) >= 0.35)
+    if now < 720
+        and not severeLandCrisis
+        and engineerUnits < engineerFloor
+        and (engineer.UnitGap or 0) > 0 then
+        return 'Engineer', 990
+    end
+
     local landScreenUnits = CountLandScreenUnits(rolePlan)
     local scoutUnits = ((rolePlan.LandScout or {}).CurrentUnits) or 0
     local screenFloor = 0
