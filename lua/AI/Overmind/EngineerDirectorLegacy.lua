@@ -8,6 +8,7 @@ local FactoryCategory = categories.FACTORY * categories.STRUCTURE
 local StructureCategory = categories.STRUCTURE - categories.FACTORY
 local MexCategory = categories.STRUCTURE * categories.MASSEXTRACTION
 local EnergyCategory = categories.STRUCTURE * categories.ENERGYPRODUCTION
+local Tech2PowerCategory = categories.STRUCTURE * categories.ENERGYPRODUCTION * (categories.TECH2 + categories.TECH3)
 local RadarCategory = categories.STRUCTURE * categories.RADAR
 local AADefenseCategory = categories.STRUCTURE * categories.DEFENSE * categories.ANTIAIR
 local DefenseCategory = categories.STRUCTURE * categories.DEFENSE
@@ -1366,12 +1367,13 @@ local function ComputeFactoryTaskRequirements(domain, fraction, stallTime, ready
     return Clamp(required, 1, 4)
 end
 
-local function PickPowerBlueprint(builder)
+local function PickPowerBlueprint(builder, targetTech)
     if not builder or builder.Dead then
         return false
     end
 
-    local bps = EntityCategoryGetUnitList(categories.STRUCTURE * categories.ENERGYPRODUCTION * categories.TECH1)
+    local techCategory = (targetTech == 'tech2' or targetTech == 2) and categories.TECH2 or categories.TECH1
+    local bps = EntityCategoryGetUnitList(categories.STRUCTURE * categories.ENERGYPRODUCTION * techCategory)
     if not bps or table.getn(bps) <= 0 then
         return false
     end
@@ -1389,6 +1391,9 @@ local PowerBuildOffsets = {
     { 18, 0 }, { -18, 0 }, { 0, 18 }, { 0, -18 },
     { 28, 12 }, { -28, 12 }, { 12, -28 }, { -12, -28 },
     { 36, 0 }, { -36, 0 }, { 0, 36 }, { 0, -36 },
+    { 48, 0 }, { -48, 0 }, { 0, 48 }, { 0, -48 },
+    { 54, 24 }, { -54, 24 }, { 24, -54 }, { -24, -54 },
+    { 66, 0 }, { -66, 0 }, { 0, 66 }, { 0, -66 },
 }
 
 local function GetFactoryAnchor(aiBrain, mainPos)
@@ -1508,16 +1513,26 @@ local function TryOpenSecondLandFactoryBuild(aiBrain, runtime, eng, mainPos, now
     return true
 end
 
-local function FindPowerBuildPos(aiBrain, anchorPos)
+local function FindPowerBuildPos(aiBrain, anchorPos, bp, spacingRadius, ignoreThreat)
     if not aiBrain or not anchorPos then
         return false
     end
 
+    local radius = spacingRadius or 8
     for _, offset in PowerBuildOffsets do
-        local pos = { (anchorPos[1] or 0) + offset[1], 0, (anchorPos[3] or 0) + offset[2] }
-        local powerNearby = aiBrain:GetNumUnitsAroundPoint(EnergyCategory, pos, 8, 'Ally') or 0
-        local factoryNearby = aiBrain:GetNumUnitsAroundPoint(categories.FACTORY * categories.STRUCTURE, pos, 6, 'Ally') or 0
-        if powerNearby <= 0 and factoryNearby <= 0 and not HasEnemyCombatNear(aiBrain, pos, 34) then
+        local x = (anchorPos[1] or 0) + offset[1]
+        local z = (anchorPos[3] or 0) + offset[2]
+        local y = 0
+        if GetTerrainHeight then
+            y = GetTerrainHeight(x, z) or 0
+        end
+        local pos = { x, y, z }
+        local structureNearby = aiBrain:GetNumUnitsAroundPoint(categories.STRUCTURE, pos, radius, 'Ally') or 0
+        local buildable = true
+        if bp and aiBrain.CanBuildStructureAt then
+            buildable = aiBrain:CanBuildStructureAt(bp, pos) == true
+        end
+        if buildable and structureNearby <= 0 and (ignoreThreat or not HasEnemyCombatNear(aiBrain, pos, 34)) then
             return pos
         end
     end
@@ -1525,8 +1540,22 @@ local function FindPowerBuildPos(aiBrain, anchorPos)
     return false
 end
 
-local function CountNearbyUnfinishedPower(aiBrain, mainPos, radius)
-    local units = aiBrain:GetListOfUnits(EnergyCategory, false, true) or {}
+local function LogFirstT2PowerFailure(aiBrain, runtime, now, reason)
+    if not runtime then
+        return
+    end
+    if now < ((runtime.LastFirstT2PowerDebugLogTime or -999) + 12) then
+        return
+    end
+    runtime.LastFirstT2PowerDebugLogTime = now
+    LOG(string.format('*OVERMIND ENGDIR T2POWER A%d t=%.1f issued=0 reason=%s',
+        aiBrain:GetArmyIndex(),
+        now,
+        reason or 'unknown'))
+end
+
+local function CountNearbyUnfinishedPower(aiBrain, mainPos, radius, category)
+    local units = aiBrain:GetListOfUnits(category or EnergyCategory, false, true) or {}
     local count = 0
     for _, unit in units do
         if unit and not unit.Dead then
@@ -1685,7 +1714,7 @@ local function TryOpenPowerRecoveryBuild(aiBrain, runtime, eng, mainPos, now)
 
     local bp = PickPowerBlueprint(eng)
     local anchor = bp and GetFactoryAnchor(aiBrain, mainPos) or false
-    local buildPos = bp and anchor and FindPowerBuildPos(aiBrain, anchor) or false
+    local buildPos = bp and anchor and FindPowerBuildPos(aiBrain, anchor, bp, 8) or false
     if not bp or not buildPos then
         return false
     end
@@ -1693,6 +1722,59 @@ local function TryOpenPowerRecoveryBuild(aiBrain, runtime, eng, mainPos, now)
     IssueBuildMobile({ eng }, buildPos, bp, {})
     runtime.LastPowerRecoveryIssueTime = now
     runtime.LastPowerRecoveryPos = buildPos
+    return true
+end
+
+local function TryOpenFirstT2PowerBuild(aiBrain, runtime, eng, mainPos, now)
+    if not eng or eng.Dead or not mainPos or not IssueBuildMobile then
+        return false
+    end
+
+    local macro = runtime and runtime.MacroController or {}
+    local phase = macro.Phase or (((runtime and runtime.ProductionDirector) or {}).MacroObjective) or 'none'
+    if phase ~= 'first_t2_power' and macro.NeedFirstT2Power ~= true then
+        return false
+    end
+    if (aiBrain:GetCurrentUnits(Tech2PowerCategory) or 0) > 0 then
+        LogFirstT2PowerFailure(aiBrain, runtime, now, 'existing_t2_power')
+        return false
+    end
+    if CountNearbyUnfinishedPower(aiBrain, mainPos, 320, Tech2PowerCategory) >= 1 then
+        LogFirstT2PowerFailure(aiBrain, runtime, now, 'unfinished_t2_power')
+        return false
+    end
+    if now < ((runtime.LastFirstT2PowerIssueTime or -999) + 10) then
+        LogFirstT2PowerFailure(aiBrain, runtime, now, 'cooldown')
+        return false
+    end
+
+    local bp = PickPowerBlueprint(eng, 'tech2')
+    local anchor = bp and GetFactoryAnchor(aiBrain, mainPos) or false
+    local buildPos = bp and anchor and FindPowerBuildPos(aiBrain, anchor, bp, 10, true) or false
+    if not bp then
+        LogFirstT2PowerFailure(aiBrain, runtime, now, 'no_blueprint')
+        return false
+    end
+    if not anchor then
+        LogFirstT2PowerFailure(aiBrain, runtime, now, 'no_anchor')
+        return false
+    end
+    if not buildPos then
+        LogFirstT2PowerFailure(aiBrain, runtime, now, 'no_build_pos')
+        return false
+    end
+
+    if IssueClearCommands then
+        IssueClearCommands({ eng })
+    end
+    IssueBuildMobile({ eng }, buildPos, bp, {})
+    runtime.LastFirstT2PowerIssueTime = now
+    runtime.LastFirstT2PowerPos = buildPos
+    LOG(string.format('*OVERMIND ENGDIR T2POWER A%d t=%.1f issued=1 pos=%.1f,%.1f',
+        aiBrain:GetArmyIndex(),
+        now,
+        buildPos[1] or 0,
+        buildPos[3] or 0))
     return true
 end
 
@@ -2733,11 +2815,6 @@ local function ProcessEngineer(aiBrain, runtime, eng, now, ctx)
         ctx.structureReclaimPreempts = (ctx.structureReclaimPreempts or 0) + 1
         return
     end
-    if ((claimedByFactoryTask and not ignoreFactoryClaim)
-        or (claimedByStructureTask and not ignoreStructureClaim and not ignoreEcoClaimForSecondFactory)
-        or claimedByRadarOrder) then
-        return
-    end
 
     local pos = eng:GetPosition()
     if not pos then
@@ -2746,6 +2823,27 @@ local function ProcessEngineer(aiBrain, runtime, eng, now, ctx)
 
     local dist = Distance2D(pos, ctx.mainPos)
     local localThreat = aiBrain:GetThreatAtPosition(pos, 1, true, 'AntiSurface') or 0
+    if ctx.macroPhase == 'first_t2_power'
+        and EntityCategoryContains(categories.ENGINEER * categories.MOBILE * (categories.TECH2 + categories.TECH3), eng)
+        and TryOpenFirstT2PowerBuild(aiBrain, runtime, eng, ctx.mainPos, now) then
+        if claimedByFactoryTask and ctx.factoryTask.BuilderIds and entityId then
+            ctx.factoryTask.BuilderIds[entityId] = nil
+            ctx.factoryTask.AssignedBuilders = math.max(0, (ctx.factoryTask.AssignedBuilders or 1) - 1)
+        end
+        if claimedByStructureTask and ctx.structureTask.BuilderIds and entityId then
+            ctx.structureTask.BuilderIds[entityId] = nil
+            ctx.structureTask.AssignedBuilders = math.max(0, (ctx.structureTask.AssignedBuilders or 1) - 1)
+        end
+        ctx.powerRecoveryCount = ctx.powerRecoveryCount + 1
+        return
+    end
+
+    if ((claimedByFactoryTask and not ignoreFactoryClaim)
+        or (claimedByStructureTask and not ignoreStructureClaim and not ignoreEcoClaimForSecondFactory)
+        or claimedByRadarOrder) then
+        return
+    end
+
     local escort = aiBrain:GetNumUnitsAroundPoint(categories.MOBILE * (categories.LAND + categories.AIR) - categories.ENGINEER - categories.SCOUT - categories.COMMAND, pos, 26, 'Ally') or 0
     local isIdle = IsIdle(eng)
     local constructing = IsConstructing(eng)
@@ -3160,6 +3258,21 @@ function Update(aiBrain, now)
         factoryTask.TargetPos = targetPos
         factoryTask.TargetFraction = fraction
 
+        local factoryReservedBuilderIds = radarReservedBuilderIds
+        if macroPhase == 'first_t2_power' then
+            factoryReservedBuilderIds = {}
+            for id, value in pairs(radarReservedBuilderIds) do
+                factoryReservedBuilderIds[id] = value
+            end
+            local techEngineers = aiBrain:GetListOfUnits(categories.ENGINEER * categories.MOBILE * (categories.TECH2 + categories.TECH3), false, true) or {}
+            for _, unit in techEngineers do
+                local id = GetEntityId(unit)
+                if id then
+                    factoryReservedBuilderIds[id] = true
+                end
+            end
+        end
+
         local assignedBuilders, claimedBuilders, usedCommander, debug = AssignBuildersToUnfinishedFactory(
             aiBrain,
             runtime,
@@ -3169,7 +3282,7 @@ function Update(aiBrain, now)
             domain,
             readyFactories,
             factoryTask.StallTime or 0,
-            radarReservedBuilderIds)
+            factoryReservedBuilderIds)
         factoryTask.AssignedBuilders = assignedBuilders
         factoryTask.BuilderIds = claimedBuilders
         factoryTask.UsedCommander = usedCommander and true or false
