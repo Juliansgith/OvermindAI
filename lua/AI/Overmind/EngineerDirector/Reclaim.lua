@@ -299,10 +299,64 @@ local function TryReclaimFieldZone(aiBrain, runtime, eng, targetPos, now)
     return false
 end
 
+local function TryReclaimNearby(aiBrain, runtime, eng, now, radius, minMass, options)
+    if not eng or eng.Dead then
+        return false
+    end
+
+    local pos = eng.GetPosition and eng:GetPosition() or false
+    if not pos then
+        return false
+    end
+
+    options = options or {}
+    local escort = aiBrain:GetNumUnitsAroundPoint(LandCombatCategory, pos, 28, 'Ally') or 0
+    local localThreat = aiBrain:GetThreatAtPosition(pos, 1, true, 'AntiSurface') or 0
+    local maxThreat = options.MaxThreat or (escort >= 2 and 2.4 or 1.4)
+    if localThreat > maxThreat then
+        return false
+    end
+    if Threat.HasEnemyCombatNear(aiBrain, pos, options.EnemyRadius or 26) and escort < (options.MinEscort or 2) then
+        return false
+    end
+
+    local reclaimTargets, reclaimMass = GetReclaimFieldTargets(pos, radius or 42, minMass or 1)
+    if table.getn(reclaimTargets) <= 0 or reclaimMass < (options.MinTotalMass or 8) then
+        return false
+    end
+
+    table.sort(reclaimTargets, function(a, b)
+        local apos = a.CachePosition or (a.GetPosition and a:GetPosition()) or pos
+        local bpos = b.CachePosition or (b.GetPosition and b:GetPosition()) or pos
+        return Common.Distance2D(apos, pos) < Common.Distance2D(bpos, pos)
+    end)
+
+    if IssueClearCommands then
+        IssueClearCommands({ eng })
+    end
+    if IssueReclaim then
+        local issued = 0
+        local maxTargets = options.MaxTargets or 18
+        for _, reclaim in reclaimTargets do
+            if reclaim and (reclaim.MaxMassReclaim or 0) > 0 then
+                IssueReclaim({ eng }, reclaim)
+                issued = issued + 1
+                if issued >= maxTargets then
+                    break
+                end
+            end
+        end
+        return issued > 0
+    end
+
+    return false
+end
+
 
 M.TryReclaimEnemyMex = TryReclaimEnemyMex
 M.GetReclaimFieldTargets = GetReclaimFieldTargets
 M.TryReclaimFieldZone = TryReclaimFieldZone
+M.TryReclaimNearby = TryReclaimNearby
 M.ReclaimSegmentKey = ReclaimSegmentKey
 return M
 

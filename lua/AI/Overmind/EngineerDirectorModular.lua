@@ -503,6 +503,9 @@ function Update(aiBrain, now)
     local desiredReclaimQuota = policy.EngineerReclaimQuota or 0
     local firstReclaimBaseReady = baseEngineers >= math.max(2, baseFloor - 1)
     local fieldBaseReady = baseEngineers >= math.max(3, baseFloor)
+    local reclaimStarveOverride = desiredReclaimQuota > 0
+        and reclaimFieldScore >= 140
+        and table.getn(engineers or {}) >= 7
     engState.ReclaimFieldStickyUntil = engState.ReclaimFieldStickyUntil or -999
     engState.ReclaimFieldStickyQuota = engState.ReclaimFieldStickyQuota or 0
     local fieldStickyActive = now < (engState.ReclaimFieldStickyUntil or -999)
@@ -511,17 +514,21 @@ function Update(aiBrain, now)
         and reclaimFieldPos
         and (fieldBaseReady or (desiredReclaimQuota > 0 and firstReclaimBaseReady))
         and not ecoCrash
-        and not severeFactoryStarve
+        and (not severeFactoryStarve or reclaimStarveOverride)
         and (factoryTaskStable or desiredReclaimQuota > 0)
         and (structureTaskStable or desiredReclaimQuota > 0) then
         if ((planner.ReclaimFirst == true or planner.OuterRetentionActive == true or outerContestUnits > 0) or desiredReclaimQuota > 0)
             and reclaimFieldScore >= 90 then
             fieldTaskQuota = math.max(1, desiredReclaimQuota)
         end
-        if reclaimFieldScore >= 180
-            and outerContestUnits >= 1
-            and baseEngineers >= (baseFloor + 2) then
+        if reclaimFieldScore >= 150
+            and baseEngineers >= (baseFloor + 1) then
             fieldTaskQuota = math.max(fieldTaskQuota, 2)
+        end
+        if reclaimFieldScore >= 260
+            and desiredReclaimQuota >= 2
+            and baseEngineers >= (baseFloor + 2) then
+            fieldTaskQuota = math.max(fieldTaskQuota, 3)
         end
     end
     if fieldTaskQuota > 0 then
@@ -533,7 +540,7 @@ function Update(aiBrain, now)
         and reclaimFieldPos
         and (fieldBaseReady or (desiredReclaimQuota > 0 and firstReclaimBaseReady))
         and not ecoCrash
-        and not severeFactoryStarve
+        and (not severeFactoryStarve or reclaimStarveOverride)
         and (factoryTaskStable or desiredReclaimQuota > 0)
         and (structureTaskStable or desiredReclaimQuota > 0) then
         fieldTaskQuota = math.max(1, engState.ReclaimFieldStickyQuota or 1)
@@ -573,6 +580,7 @@ function Update(aiBrain, now)
         threatenedCount = 0,
         transitionLock = transitionLock,
         fieldTaskQuota = fieldTaskQuota,
+        mexReady = mexReady,
         mexRebuildUrgent = mexRebuildUrgent,
     }
     local factoryTaskCovered = (not factoryTask.Active)
@@ -592,7 +600,7 @@ function Update(aiBrain, now)
             and (structureTask.StallTime or 0) < 12
         )
     ctx.fieldTaskWindow = (contestFieldMode or desiredReclaimQuota > 0)
-        and not severeFactoryStarve
+        and (not severeFactoryStarve or reclaimStarveOverride)
         and not ecoCrash
         and (factoryTaskStable or desiredReclaimQuota > 0)
         and (structureTaskStable or desiredReclaimQuota > 0)

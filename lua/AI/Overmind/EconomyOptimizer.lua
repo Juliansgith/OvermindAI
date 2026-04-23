@@ -335,9 +335,9 @@ function UpdatePolicy(aiBrain, now)
     policy.RadarDesiredCap = 1
     policy.MaxAirBomberShare = 0.32
     policy.PrimaryFactorySoftCap = 3
-    policy.AcuOpeningMaxDistance = math.min(tune.ACUOpeningMaxDistance or 20, 16)
-    policy.AcuMidMaxDistance = math.min(tune.ACUMidMaxDistance or 36, 24)
-    policy.AcuLateMaxDistance = math.min(tune.ACULateMaxDistance or 60, 38)
+    policy.AcuOpeningMaxDistance = math.max(tune.ACUOpeningMaxDistance or 20, 22)
+    policy.AcuMidMaxDistance = math.max(tune.ACUMidMaxDistance or 36, 34)
+    policy.AcuLateMaxDistance = math.max(tune.ACULateMaxDistance or 60, 46)
 
     policy.ContestMapMode = contestMapMode and true or false
     policy.PrioritizeProduction = prioritizeProduction and true or false
@@ -373,12 +373,13 @@ function UpdatePolicy(aiBrain, now)
         and (eco.MassTrend or 0) >= -0.45
         and (eco.EnergyTrend or 0) >= -24
         and (planner.ReclaimFirst == true or planner.OuterRetentionActive == true or reclaimPressureMode)
-    local reclaimQuotaAllowed = now >= 240
+    local reclaimQuotaAllowed = now >= 180
         and phase ~= 'bootstrap'
-        and (macroCounts.FactoryTotal or 0) >= 2
+        and (macroCounts.FactoryTotal or 0) >= 1
         and (not acuCrisisActive or reclaimCrisisOverride)
         and pressure.SurvivalCrisis ~= true
     local reclaimQuotaMexReady = (macroCounts.Mex or 0) >= 6
+        or ((macroCounts.Mex or 0) >= 4 and reclaimFieldScore >= 90)
         or ((macroCounts.Mex or 0) >= 5 and reclaimFieldScore >= 110)
         or ((macroCounts.Mex or 0) >= 5 and reclaimPressureMode)
         or reclaimFieldScore >= 180
@@ -393,6 +394,15 @@ function UpdatePolicy(aiBrain, now)
             or reclaimFieldScore >= 160
             or ((planner.ReclaimFirst == true or planner.OuterRetentionActive == true) and reclaimFieldScore >= 90)) then
         policy.EngineerReclaimQuota = 1
+    end
+    if reclaimQuotaAllowed and reclaimQuotaMexReady and reclaimFieldScore >= 90 and (macroCounts.Engineers or 0) >= 6 then
+        policy.EngineerReclaimQuota = math.max(policy.EngineerReclaimQuota, 1)
+    end
+    if reclaimQuotaAllowed and reclaimQuotaMexReady and reclaimFieldScore >= 150 and (macroCounts.Engineers or 0) >= 7 then
+        policy.EngineerReclaimQuota = math.max(policy.EngineerReclaimQuota, 2)
+    end
+    if reclaimQuotaAllowed and reclaimQuotaMexReady and reclaimFieldScore >= 260 and reclaimWorkerReady then
+        policy.EngineerReclaimQuota = math.max(policy.EngineerReclaimQuota, 3)
     end
     if reclaimQuotaAllowed and reclaimQuotaMexReady and reclaimWorkerReady and reclaimFieldScore >= 90 and reclaimConversionDebt then
         policy.EngineerReclaimQuota = math.max(policy.EngineerReclaimQuota, 1)
@@ -439,8 +449,8 @@ function UpdatePolicy(aiBrain, now)
         policy.FarExpandMinControl = 0.24
         policy.FarExpandMinRelativePower = 0.95
         policy.FarExpandMinArmy = 20
-        policy.AcuOpeningMaxDistance = math.min(tune.ACUOpeningMaxDistance or 20, 16)
-        policy.AcuMidMaxDistance = math.min(tune.ACUMidMaxDistance or 36, 24)
+        policy.AcuOpeningMaxDistance = math.max(tune.ACUOpeningMaxDistance or 20, 22)
+        policy.AcuMidMaxDistance = math.max(tune.ACUMidMaxDistance or 36, 32)
     elseif now < 720 then
         policy.EngineerReserveMin = 4
         policy.SafeExpandDistance = 660
@@ -453,8 +463,8 @@ function UpdatePolicy(aiBrain, now)
         policy.FarExpandMinControl = 0.28
         policy.FarExpandMinRelativePower = 0.94
         policy.FarExpandMinArmy = 24
-        policy.AcuOpeningMaxDistance = math.min((tune.ACUOpeningMaxDistance or 20) + 2, 18)
-        policy.AcuMidMaxDistance = math.min((tune.ACUMidMaxDistance or 36) + 4, 28)
+        policy.AcuOpeningMaxDistance = math.max((tune.ACUOpeningMaxDistance or 20) + 4, 26)
+        policy.AcuMidMaxDistance = math.max((tune.ACUMidMaxDistance or 36) + 6, 38)
     end
 
     if phase == 'bootstrap' then
@@ -750,7 +760,7 @@ function UpdatePolicy(aiBrain, now)
     policy.UpgradeMassIncome = Clamp(policy.UpgradeMassIncome, 2.5, 12)
     policy.UpgradeEnergyIncome = Clamp(policy.UpgradeEnergyIncome, 15, 220)
     policy.MexUpgradeConcurrency = Clamp(policy.MexUpgradeConcurrency or 0, 0, 4)
-    policy.EngineerReclaimQuota = Clamp(policy.EngineerReclaimQuota or 0, 0, 3)
+    policy.EngineerReclaimQuota = Clamp(policy.EngineerReclaimQuota or 0, 0, 4)
     policy.EngineerExpansionQuota = Clamp(policy.EngineerExpansionQuota or 1, 0, 4)
     policy.EngineerBaseQuota = Clamp(policy.EngineerBaseQuota or 2, 1, 8)
     policy.EcoGrowthPressure = Clamp(policy.EcoGrowthPressure or 0, 0, 1.5)

@@ -677,6 +677,17 @@ local function ProcessEngineer(aiBrain, runtime, eng, now, ctx)
             and Reclaim.TryReclaimFieldZone(aiBrain, runtime, eng, ctx.reclaimFieldPos, now) then
             ctx.reclaimField = ctx.reclaimField + 1
             acted = true
+        elseif (ctx.mexReady or 0) >= 4
+            and ctx.needBase <= 0
+            and localThreat < 1.6
+            and Reclaim.TryReclaimNearby(aiBrain, runtime, eng, now, now < 420 and 48 or 56, 1.0, {
+                MaxThreat = now < 420 and 1.45 or 1.85,
+                EnemyRadius = now < 420 and 24 or 28,
+                MinTotalMass = now < 420 and 6 or 10,
+                MaxTargets = now < 420 and 16 or 24,
+            }) then
+            ctx.reclaimField = ctx.reclaimField + 1
+            acted = true
         elseif ctx.structureTask.Active
             and (ctx.structureTask.Kind == 'Power' or ctx.structureTask.Kind == 'Mex')
             and (ctx.macroPhase ~= 'starter_mex_claim' or ctx.structureTask.Kind == 'Power')
@@ -887,6 +898,20 @@ local function ProcessEngineer(aiBrain, runtime, eng, now, ctx)
             ctx.surplusSpendCount = ctx.surplusSpendCount + 1
             acted = true
         end
+    end
+
+    if isIdle
+        and not constructing
+        and (not acted)
+        and localThreat < 1.9
+        and Reclaim.TryReclaimNearby(aiBrain, runtime, eng, now, ctx.contestFieldMode and 58 or 44, 1.0, {
+            MaxThreat = ctx.contestFieldMode and 2.1 or 1.55,
+            EnemyRadius = ctx.contestFieldMode and 30 or 24,
+            MinTotalMass = ctx.contestFieldMode and 10 or 8,
+            MaxTargets = ctx.contestFieldMode and 24 or 16,
+        }) then
+        ctx.reclaimField = ctx.reclaimField + 1
+        acted = true
     end
 
     if isIdle

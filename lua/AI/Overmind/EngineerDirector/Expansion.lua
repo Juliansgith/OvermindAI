@@ -341,11 +341,14 @@ local function NeedsExpansionEscort(aiBrain, runtime, mainPos, targetPos, now, m
     local targetThreat = aiBrain:GetThreatAtPosition(targetPos, 1, true, 'AntiSurface') or 0
     local mapControl = ((runtime and runtime.ZoneModel) and runtime.ZoneModel.MapControl) or 0.5
     local mexEmergency = ((runtime and runtime.EngineerState) and runtime.EngineerState.MexEmergencyActive == true) or false
+    local engineerLossRisk = OvermindMemory.GetEngineerLossRisk(aiBrain, targetPos, 52)
     return mexEmergency
         or (mexReady or 0) < 8
+        or ((now or 0) >= 240 and distMain > 130 and mapControl < 0.42)
         or mapControl < 0.34
         or routeRisk > 1.45
         or targetThreat > 0.25
+        or engineerLossRisk >= 0.75
 end
 
 local function NeedsBootstrapPower(aiBrain, runtime)
