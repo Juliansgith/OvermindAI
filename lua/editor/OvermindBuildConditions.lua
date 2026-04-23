@@ -199,6 +199,22 @@ function HasBootstrapPowerFloor(aiBrain)
     return not NeedsBootstrapPowerState(aiBrain)
 end
 
+function NeedOpeningMexFloor(aiBrain, minReady, maxTime)
+    if not IsOvermindBrain(aiBrain) then
+        return false
+    end
+
+    local now = GetGameTimeSeconds()
+    local target = minReady or 4
+    local deadline = maxTime or 360
+    local readyMex = GetCompletedUnitCount(aiBrain, categories.MASSEXTRACTION * categories.STRUCTURE)
+    if readyMex >= target then
+        return false
+    end
+
+    return now <= deadline or readyMex < math.max(2, target - 1)
+end
+
 local function GetUnitCount(aiBrain, category)
     if not aiBrain or not category then
         return 0
@@ -1427,6 +1443,7 @@ function ShouldBuildPower(aiBrain, maxEnergyRatio, maxEnergyTrend, maxMassRatioF
     local trend = maxEnergyTrend or (policy and policy.EnergyNeedTrend) or -3
     local massRatio = maxMassRatioForExtraPower or 0.6
     local mexCount = GetUnitCount(aiBrain, categories.MASSEXTRACTION * categories.STRUCTURE)
+    local mexReady = GetCompletedUnitCount(aiBrain, categories.MASSEXTRACTION * categories.STRUCTURE)
     local pgenCount = GetUnitCount(aiBrain, categories.ENERGYPRODUCTION * categories.STRUCTURE)
     local pgenReady = GetCompletedUnitCount(aiBrain, categories.ENERGYPRODUCTION * categories.STRUCTURE)
     local pendingPgens = math.max(0, pgenCount - pgenReady)
@@ -1457,6 +1474,13 @@ function ShouldBuildPower(aiBrain, maxEnergyRatio, maxEnergyTrend, maxMassRatioF
         end
         if pgenCount < bootstrapPowerFloor and ((econ.EnergyIncome or 0) < 70 or (econ.EnergyTrend or 0) < 6) then
             return true
+        end
+        if now < 260
+            and mexReady < 4
+            and pgenReady >= math.max(2, bootstrapPowerFloor)
+            and (econ.EnergyTrend or 0) >= -24
+            and (econ.EnergyStorageRatio or 0) >= 0.025 then
+            return false
         end
     end
 

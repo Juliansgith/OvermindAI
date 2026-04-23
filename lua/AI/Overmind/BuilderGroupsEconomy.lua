@@ -450,12 +450,13 @@ BuilderGroup {
         BuilderName = 'Overmind ACU Early Mex Close',
         PlatoonAddBehaviors = { 'CommanderBehavior' },
         PlatoonTemplate = 'CommanderBuilder',
-        Priority = 1156,
+        Priority = 1164,
         InstanceCount = 1,
         BuilderConditions = {
             { OMBC, 'IsOvermindBrain', {} },
             { OMBC, 'ShouldUseACUBuilders', {} },
             { OMBC, 'IsEconomyBootstrap', {} },
+            { OMBC, 'NeedOpeningMexFloor', { 4, 360 } },
             { OMBC, 'HasNoUnfinishedFactoriesAtLocation', { 'LocationType', 180, 0 } },
             { MIBC, 'GreaterThanGameTime', { 42 } },
             { MIBC, 'LessThanGameTime', { 320 } },
@@ -477,7 +478,7 @@ BuilderGroup {
         BuilderName = 'Overmind ACU Early Power Sustain',
         PlatoonAddBehaviors = { 'CommanderBehavior' },
         PlatoonTemplate = 'CommanderBuilder',
-        Priority = 1158,
+        Priority = 1144,
         InstanceCount = 1,
         BuilderConditions = {
             { OMBC, 'IsOvermindBrain', {} },
@@ -1190,9 +1191,33 @@ BuilderGroup {
     BuilderGroupName = 'OvermindEngineerMassBuildersHighPri',
     BuildersType = 'EngineerBuilder',
     Builder {
+        BuilderName = 'Overmind Opening Mex Floor Engineer',
+        PlatoonTemplate = 'EngineerBuilder',
+        Priority = 1161,
+        InstanceCount = 2,
+        BuilderConditions = {
+            { OMBC, 'IsOvermindBrain', {} },
+            { OMBC, 'NeedOpeningMexFloor', { 4, 360 } },
+            { UCBC, 'FactoryGreaterAtLocation', { 'LocationType', 0, 'LAND' } },
+            { OMBC, 'HasBaseEngineerCoverage', { 'LocationType', 2, 85 } },
+            { OMBC, 'HasSafeEnergy', { 0.001, -28 } },
+            { UCBC, 'EngineerLessAtLocation', { 'LocationType', 4, 'ENGINEER TECH2, ENGINEER TECH3' } },
+            { OMBC, 'CanSafelyExpand', { 'LocationType', 280, 0.85, 95, 7 } },
+            { MABC, 'CanBuildOnMassLessThanDistance', { 'LocationType', 280, -500, 0.95, 0, 'AntiSurface', 1 } },
+        },
+        BuilderType = 'Any',
+        BuilderData = {
+            NeedGuard = false,
+            DesiresAssist = false,
+            Construction = {
+                BuildStructures = { 'T1Resource' },
+            },
+        },
+    },
+    Builder {
         BuilderName = 'Overmind Bootstrap Resource Engineer Close',
         PlatoonTemplate = 'EngineerBuilder',
-        Priority = 1142,
+        Priority = 1156,
         InstanceCount = 1,
         BuilderConditions = {
             { OMBC, 'IsOvermindBrain', {} },
@@ -1373,8 +1398,8 @@ BuilderGroup {
     Builder {
         BuilderName = 'Overmind Bootstrap T1 Power',
         PlatoonTemplate = 'EngineerBuilder',
-        Priority = 1150,
-        InstanceCount = 3,
+        Priority = 1138,
+        InstanceCount = 1,
         BuilderConditions = {
             { OMBC, 'IsOvermindBrain', {} },
             { OMBC, 'IsEconomyBootstrap', {} },

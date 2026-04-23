@@ -1512,10 +1512,9 @@ local function DecideCapacityPlan(runtime, current, constraints, rolePlan)
     local secondLandTempoReady = current.Factories.Land.Total <= 1
         and current.Factories.Land.Ready >= 1
         and current.Factories.Air.Total <= 0
-        and now >= 105
+        and now >= 120
         and powerReady >= math.max(2, (constraints.StarterPowerFloor or 2) - 1)
         and engineerUnits >= 4
-        and (mexReady >= 1 or planner.ReclaimFirst == true or policy.ReclaimPressureMode == true or policy.ContestMapMode == true)
         and not constraints.EcoCrash
         and not constraints.CriticalFactory
         and not constraints.UnitCapPressure
@@ -2028,7 +2027,6 @@ local function DecideCapacityPlan(runtime, current, constraints, rolePlan)
         and current.Factories.Land.Total <= 1
         and totalUnfinished <= 0
         and not constraints.EcoCrash
-        and not constraints.QueueStarved
         and not constraints.CriticalFactory then
         landTarget = math.max(landTarget, 2)
         pauseGrowth = false
@@ -2080,6 +2078,14 @@ local function DecideCapacityPlan(runtime, current, constraints, rolePlan)
     end
     if liveCombatWindow and current.Factories.Air.Total > 0 and not powerBufferLow then
         airTarget = math.max(airTarget, 1)
+    end
+    if secondLandTempoReady
+        and current.Factories.Land.Total <= 1
+        and totalUnfinished <= 0
+        and not constraints.EcoCrash
+        and not constraints.CriticalFactory then
+        landTarget = math.max(landTarget, 2)
+        pauseGrowth = false
     end
 
     if not emergencyAirFactory and not threatenedAirUnlock and not counterAirFactory and current.Factories.Land.Ready < 2 then
