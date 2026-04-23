@@ -9,14 +9,35 @@ param(
     [int]$MaxRealSeconds = 1200,
     [double]$PromoteScoreMargin = 0.03,
     [double]$MutationRate = 0.55,
+    [double]$RequireMassRatioGain = 0,
+    [double]$MaxMassRatioRegression = 0,
+    [double]$MaxSurvivalRegression = 0.25,
+    [int]$RetestTop = 0,
+    [int]$RetestGames = 0,
     [string]$RunRoot = '',
+    [string]$ChampionDir = '',
     [switch]$SkipBaseline,
+    [switch]$NoPromote,
     [switch]$DryRun,
     [switch]$KeepLosingCandidateConfig
 )
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+$Script:RestoreConfigPath = ''
+
+trap {
+    if (-not $DryRun -and -not [string]::IsNullOrWhiteSpace($Script:RestoreConfigPath) -and (Test-Path -LiteralPath $Script:RestoreConfigPath)) {
+        try {
+            Copy-Item -LiteralPath $Script:RestoreConfigPath -Destination $ConfigPath -Force
+            Invoke-ReleaseSync
+            Write-Warning "Autotune aborted; restored baseline config from $Script:RestoreConfigPath"
+        } catch {
+            Write-Warning "Autotune aborted and baseline restore failed: $_"
+        }
+    }
+    break
+}
 
 $RepoRoot = Split-Path -Parent $PSScriptRoot
 $ConfigPath = Join-Path $RepoRoot 'lua\AI\Overmind\AutoTuneConfig.lua'
@@ -35,6 +56,15 @@ if ($GamesPerCandidate -lt 1) { throw 'GamesPerCandidate must be at least 1.' }
 if ($ParallelInstances -lt 1) { throw 'ParallelInstances must be at least 1.' }
 if ($TargetSpeed -lt 1) { throw 'TargetSpeed must be at least 1.' }
 if ($MutationRate -lt 0 -or $MutationRate -gt 1) { throw 'MutationRate must be between 0 and 1.' }
+if ($RequireMassRatioGain -lt 0) { throw 'RequireMassRatioGain must be zero or higher.' }
+if ($MaxMassRatioRegression -lt 0) { throw 'MaxMassRatioRegression must be zero or higher.' }
+if ($MaxSurvivalRegression -lt 0 -or $MaxSurvivalRegression -gt 1) { throw 'MaxSurvivalRegression must be between 0 and 1.' }
+if ($RetestTop -lt 0) { throw 'RetestTop must be zero or higher.' }
+if ($RetestGames -lt 0) { throw 'RetestGames must be zero or higher.' }
+
+if ([string]::IsNullOrWhiteSpace($ChampionDir)) {
+    $ChampionDir = Join-Path $RepoRoot 'autotune\champions'
+}
 
 function Ensure-Directory {
     param([string]$Path)
@@ -190,6 +220,23 @@ function Write-TuneConfig {
     Set-Content -LiteralPath $Path -Value ($lines -join [Environment]::NewLine) -Encoding ASCII
 }
 
+function Copy-TuneConfig {
+    param([hashtable]$Config)
+    $clone = [ordered]@{}
+    foreach ($key in $Config.Keys) {
+        $clone[$key] = $Config[$key]
+    }
+    return $clone
+}
+
+function Get-SafeName {
+    param([string]$Value)
+    if ([string]::IsNullOrWhiteSpace($Value)) {
+        return 'unknown'
+    }
+    return ($Value -replace '[^A-Za-z0-9_.-]', '-')
+}
+
 function Round-To-Step {
     param([double]$Value, [double]$Step)
     if ($Step -le 0) { return $Value }
@@ -276,6 +323,19 @@ function Invoke-AutorunBatch {
         $batch += 1
         $instances = [math]::Min($ParallelInstances, $remaining)
         $seed = $SeedBase + $launched
+        if ($DryRun) {
+            $runTag = Get-Date -Format 'yyyyMMdd-HHmmss'
+            Write-Host "[$CandidateId] launching batch $batch instances=$instances seed=$seed"
+            for ($index = 1; $index -le $instances; $index++) {
+                $drySeed = $seed + $index - 1
+                $dryLog = Join-Path $logDir ("autorun-{0}-i{1}.log" -f $runTag, $index)
+                Write-Host ("DRYRUN [{0}/{1}] seed={2} config=/lua/generated/autogen-{3}-i{0}.lua log={4}" -f $index, $instances, $drySeed, $runTag, $dryLog)
+            }
+            $launched += $instances
+            $remaining -= $instances
+            continue
+        }
+
         $args = @(
             '-ExecutionPolicy', 'Bypass',
             '-File', $StartScript,
@@ -292,10 +352,6 @@ function Invoke-AutorunBatch {
         if ($MaxRealSeconds -gt 0) {
             $args += @('-MaxRealSeconds', $MaxRealSeconds)
         }
-        if ($DryRun) {
-            $args += '-DryRun'
-        }
-
         Write-Host "[$CandidateId] launching batch $batch instances=$instances seed=$seed"
         $output = & powershell @args
         $output | ForEach-Object { Write-Host $_ }
@@ -527,14 +583,16 @@ function Run-Candidate {
         [string]$CandidateId,
         [hashtable]$Config,
         [string]$SessionDir,
-        [int]$SeedBase
+        [int]$SeedBase,
+        [int]$GamesOverride = 0
     )
 
     $candidateDir = Join-Path $SessionDir $CandidateId
     Ensure-Directory $candidateDir
+    $runGames = if ($GamesOverride -gt 0) { $GamesOverride } else { $GamesPerCandidate }
     $Config.CandidateId = $CandidateId
     $Config.GeneratedAt = (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')
-    $Config.Games = $GamesPerCandidate
+    $Config.Games = $runGames
     $Config.MapName = $MapName
 
     $candidateConfigPath = Join-Path $candidateDir 'AutoTuneConfig.lua'
@@ -547,11 +605,88 @@ function Run-Candidate {
         Write-Host "[DRYRUN] generated candidate config: $candidateConfigPath"
     }
 
-    $logDir = Invoke-AutorunBatch -CandidateId $CandidateId -CandidateDir $candidateDir -Games $GamesPerCandidate -SeedBase $SeedBase
+    $logDir = Invoke-AutorunBatch -CandidateId $CandidateId -CandidateDir $candidateDir -Games $runGames -SeedBase $SeedBase
     [void](Invoke-Analysis -CandidateDir $candidateDir -LogDir $logDir)
     $result = Score-Candidate -CandidateId $CandidateId -CandidateDir $candidateDir -Config $Config
     Write-Host ("[$CandidateId] score={0} games={1} winRate={2} avgTime={3} massRatio={4} clean={5}" -f $result.Score, $result.Games, $result.WinRate, $result.AvgGameTime, $result.AvgMassRatio, $result.RuntimeClean)
     return $result
+}
+
+function Get-PromotionDecision {
+    param(
+        $Candidate,
+        $Baseline,
+        [double]$Margin
+    )
+
+    $reasons = @()
+    if ($Candidate.CandidateId -eq $Baseline.CandidateId -or $Candidate.CandidateId -eq 'baseline' -or $Candidate.CandidateId -eq 'retest-baseline') {
+        $reasons += 'candidate is baseline'
+    }
+    if (-not $Candidate.RuntimeClean) {
+        $reasons += 'candidate runtime was not clean'
+    }
+    if ($Margin -lt $PromoteScoreMargin) {
+        $reasons += ("score margin {0:P2} below required {1:P2}" -f $Margin, $PromoteScoreMargin)
+    }
+
+    $requiredMassRatio = [double]$Baseline.AvgMassRatio - $MaxMassRatioRegression
+    if ($RequireMassRatioGain -gt 0) {
+        $requiredMassRatio = [double]$Baseline.AvgMassRatio + $RequireMassRatioGain
+    }
+    if ([double]$Candidate.AvgMassRatio -lt $requiredMassRatio) {
+        $reasons += ("mass ratio {0} below required {1}" -f $Candidate.AvgMassRatio, [math]::Round($requiredMassRatio, 4))
+    }
+
+    $minimumGameTime = [double]$Baseline.AvgGameTime * (1.0 - $MaxSurvivalRegression)
+    if ([double]$Candidate.AvgGameTime -lt $minimumGameTime) {
+        $reasons += ("avg game time {0} below required {1}" -f $Candidate.AvgGameTime, [math]::Round($minimumGameTime, 2))
+    }
+
+    return [pscustomobject]@{
+        Allowed = ($reasons.Count -eq 0)
+        Reasons = $reasons
+        RequiredMassRatio = [math]::Round($requiredMassRatio, 4)
+        MinimumGameTime = [math]::Round($minimumGameTime, 2)
+    }
+}
+
+function Save-Champion {
+    param(
+        $Winner,
+        $Baseline,
+        [double]$Margin,
+        [string]$SessionDir
+    )
+
+    if ($DryRun) {
+        Write-Host '[DRYRUN] would archive promoted champion'
+        return
+    }
+
+    Ensure-Directory $ChampionDir
+    $safeId = Get-SafeName -Value ([string]$Winner.CandidateId)
+    $championPath = Join-Path $ChampionDir ("{0}-{1}.lua" -f $sessionTag, $safeId)
+    $currentPath = Join-Path $ChampionDir 'current.lua'
+    Write-TuneConfig -Config $Winner.Config -Path $championPath
+    Write-TuneConfig -Config $Winner.Config -Path $currentPath
+
+    $manifest = [pscustomobject]@{
+        Session = $sessionTag
+        SessionDir = $SessionDir
+        CandidateId = $Winner.CandidateId
+        BaselineCandidateId = $Baseline.CandidateId
+        Score = $Winner.Score
+        BaselineScore = $Baseline.Score
+        Margin = [math]::Round($Margin, 5)
+        AvgGameTime = $Winner.AvgGameTime
+        BaselineAvgGameTime = $Baseline.AvgGameTime
+        AvgMassRatio = $Winner.AvgMassRatio
+        BaselineAvgMassRatio = $Baseline.AvgMassRatio
+        ConfigPath = $championPath
+        CreatedAt = (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')
+    }
+    $manifest | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $ChampionDir ("{0}-{1}.json" -f $sessionTag, $safeId)) -Encoding UTF8
 }
 
 Ensure-Directory $RunRoot
@@ -571,6 +706,7 @@ if (Test-Path -LiteralPath $ConfigPath) {
 } else {
     Write-TuneConfig -Config $baselineConfig -Path $baselineRawPath
 }
+$Script:RestoreConfigPath = $baselineRawPath
 $baselinePath = Join-Path $sessionDir 'baseline-AutoTuneConfig.lua'
 Write-TuneConfig -Config $baselineConfig -Path $baselinePath
 
@@ -612,26 +748,75 @@ for ($i = 1; $i -le $Candidates; $i++) {
 }
 
 $baseline = @($results | Where-Object { $_.CandidateId -eq 'baseline' } | Select-Object -First 1)[0]
-$margin = if ([math]::Abs($baseline.Score) -gt 1) { ($best.Score - $baseline.Score) / [math]::Abs($baseline.Score) } else { $best.Score - $baseline.Score }
+$promotionBaseline = $baseline
+$promotionBest = $best
+$retestResults = @()
+
+if ($RetestTop -gt 0 -and -not $DryRun) {
+    $retestGamesActual = if ($RetestGames -gt 0) { $RetestGames } else { $GamesPerCandidate }
+    $topCandidates = @($results |
+        Where-Object { $_.CandidateId -ne 'baseline' -and $_.RuntimeClean } |
+        Sort-Object -Property Score -Descending |
+        Select-Object -First $RetestTop)
+
+    if ($topCandidates.Count -gt 0) {
+        Write-Host ("Retesting top {0} candidate(s), games={1}" -f $topCandidates.Count, $retestGamesActual)
+        $retestSeed = $BaseSeed + 900000000
+        $baselineRetestConfig = Copy-TuneConfig -Config $baselineConfig
+        $promotionBaseline = Run-Candidate -CandidateId 'retest-baseline' -Config $baselineRetestConfig -SessionDir $sessionDir -SeedBase $retestSeed -GamesOverride $retestGamesActual
+        $retestResults += $promotionBaseline
+
+        $candidateIndex = 0
+        foreach ($candidate in $topCandidates) {
+            $candidateIndex += 1
+            $candidateConfig = Copy-TuneConfig -Config $candidate.Config
+            $candidateConfig.ParentCandidateId = [string]$candidate.CandidateId
+            $retestResult = Run-Candidate -CandidateId ("retest-{0}" -f (Get-SafeName -Value ([string]$candidate.CandidateId))) -Config $candidateConfig -SessionDir $sessionDir -SeedBase ($retestSeed + ($candidateIndex * 100000)) -GamesOverride $retestGamesActual
+            $retestResults += $retestResult
+        }
+
+        $results += $retestResults
+        $promotionBest = @($retestResults |
+            Where-Object { $_.CandidateId -ne 'retest-baseline' -and $_.RuntimeClean } |
+            Sort-Object -Property Score -Descending |
+            Select-Object -First 1)[0]
+        if (-not $promotionBest) {
+            $promotionBest = $promotionBaseline
+        }
+    }
+}
+
+$margin = if ([math]::Abs($promotionBaseline.Score) -gt 1) { ($promotionBest.Score - $promotionBaseline.Score) / [math]::Abs($promotionBaseline.Score) } else { $promotionBest.Score - $promotionBaseline.Score }
+$promotionDecision = Get-PromotionDecision -Candidate $promotionBest -Baseline $promotionBaseline -Margin $margin
 $promoted = $false
-if ($best.CandidateId -ne 'baseline' -and $best.RuntimeClean -and $margin -ge $PromoteScoreMargin) {
-    $promoteConfig = $best.Config
-    $promoteConfig.Score = $best.Score
-    $promoteConfig.Games = $best.Games
+if (-not $NoPromote -and $promotionDecision.Allowed) {
+    $promoteConfig = $promotionBest.Config
+    $promoteConfig.Score = $promotionBest.Score
+    $promoteConfig.Games = $promotionBest.Games
     $promoteConfig.GeneratedAt = (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')
     if (-not $DryRun) {
         Write-TuneConfig -Config $promoteConfig -Path $ConfigPath
         Invoke-ReleaseSync
+        Save-Champion -Winner $promotionBest -Baseline $promotionBaseline -Margin $margin -SessionDir $sessionDir
     }
     $promoted = $true
-    Write-Host ("PROMOTED {0}: score {1} vs baseline {2}, margin {3:P2}" -f $best.CandidateId, $best.Score, $baseline.Score, $margin)
+    Write-Host ("PROMOTED {0}: score {1} vs baseline {2}, margin {3:P2}" -f $promotionBest.CandidateId, $promotionBest.Score, $promotionBaseline.Score, $margin)
 } else {
     if (-not $DryRun -and -not $KeepLosingCandidateConfig) {
         Copy-Item -LiteralPath $baselineRawPath -Destination $ConfigPath -Force
         Invoke-ReleaseSync
     }
-    Write-Host ("NO PROMOTION: best={0} score={1}, baseline={2}, margin={3:P2}, required={4:P2}" -f $best.CandidateId, $best.Score, $baseline.Score, $margin, $PromoteScoreMargin)
+    if ($NoPromote) {
+        Write-Host 'NO PROMOTION: NoPromote was set.'
+    } else {
+        Write-Host ("NO PROMOTION: best={0} score={1}, baseline={2}, margin={3:P2}, required={4:P2}" -f $promotionBest.CandidateId, $promotionBest.Score, $promotionBaseline.Score, $margin, $PromoteScoreMargin)
+        if ($promotionDecision.Reasons.Count -gt 0) {
+            Write-Host ("  gates: {0}" -f ($promotionDecision.Reasons -join '; '))
+        }
+    }
 }
+
+$Script:RestoreConfigPath = ''
 
 $summary = [pscustomobject]@{
     Session = $sessionTag
@@ -642,10 +827,23 @@ $summary = [pscustomobject]@{
     ParallelInstances = $ParallelInstances
     TargetSpeed = $TargetSpeed
     Promoted = $promoted
-    BaselineScore = $baseline.Score
-    BestCandidate = $best.CandidateId
-    BestScore = $best.Score
+    NoPromote = [bool]$NoPromote
+    PromoteScoreMargin = $PromoteScoreMargin
+    RequireMassRatioGain = $RequireMassRatioGain
+    MaxMassRatioRegression = $MaxMassRatioRegression
+    MaxSurvivalRegression = $MaxSurvivalRegression
+    RetestTop = $RetestTop
+    RetestGames = $RetestGames
+    BaselineScore = $promotionBaseline.Score
+    BaselineAvgGameTime = $promotionBaseline.AvgGameTime
+    BaselineAvgMassRatio = $promotionBaseline.AvgMassRatio
+    BestCandidate = $promotionBest.CandidateId
+    BestScore = $promotionBest.Score
+    BestAvgGameTime = $promotionBest.AvgGameTime
+    BestAvgMassRatio = $promotionBest.AvgMassRatio
     Margin = [math]::Round($margin, 5)
+    PromotionAllowed = [bool]$promotionDecision.Allowed
+    PromotionBlockedReasons = $promotionDecision.Reasons
     Results = $results | Select-Object CandidateId, Score, Games, WinRate, AvgGameTime, AvgMassRatio, RuntimeClean
 }
 $summary | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $sessionDir 'session-summary.json') -Encoding UTF8

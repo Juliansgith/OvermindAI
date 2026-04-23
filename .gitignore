@@ -42,3 +42,4 @@ venv/
 
 # Generated economy autotune campaigns
 autotune/runs/
+autotune/champions/
