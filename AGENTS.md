@@ -29,6 +29,15 @@
    - `git add -A`
    - `git commit -m "vNN: short-description"`
 
+## Git Hook Sync
+- Install the post-commit mirror sync hook once per clone:
+  - `powershell -ExecutionPolicy Bypass -File .\tools\install_post_commit_hook.ps1`
+- What it does:
+  - after every local commit, runs `tools\release_checks.ps1 -SkipSyntax`
+  - mirrors canonical repo to both live mod copies (`Documents` and `ProgramData\FAForever`)
+- If you need to reinstall or overwrite:
+  - `powershell -ExecutionPolicy Bypass -File .\tools\install_post_commit_hook.ps1 -Force`
+
 ## Test Run Rules
 - Primary objective is win rate versus M27.
 - Always run exactly 1 validation game first after each version bump.
@@ -38,6 +47,40 @@
 - Keep autorun in FAF, `windowed`, and with explicit sim speed on every launch.
 - For long campaigns (up to 100 games), archive analysis outputs per batch and do not rely on replay retention alone.
 - Use log-based analysis as source of truth when replay count limits are reached.
+
+## Autorun Commands
+- Default run (FAF, windowed, default `25x` sim speed, 2 instances):
+  - `powershell -ExecutionPolicy Bypass -File C:\Program Files (x86)\Steam\steamapps\common\Supreme Commander Forged Alliance\autorun\bin\start_autorun_parallel.ps1`
+- Single validation run:
+  - `powershell -ExecutionPolicy Bypass -File C:\Program Files (x86)\Steam\steamapps\common\Supreme Commander Forged Alliance\autorun\bin\start_autorun_parallel.ps1 -Instances 1`
+- Preferred parallel batch (5 at once):
+  - `powershell -ExecutionPolicy Bypass -File C:\Program Files (x86)\Steam\steamapps\common\Supreme Commander Forged Alliance\autorun\bin\start_autorun_parallel.ps1 -Instances 5`
+- Full 10-game run as `2 x 5`:
+  - run the same `-Instances 5` command twice with different `-BaseSeed` values.
+- Override map:
+  - add `-MapName SCMP_004`
+- Override speed:
+  - add `-TargetSpeed 25` (or another speed).
+- Fixed seeds (reproducible):
+  - add `-BaseSeed 123456`
+- Time limits:
+  - add `-MaxGameSeconds 3600 -MaxRealSeconds 900`
+- Exit delay after Game Over:
+  - add `-ExitDelaySeconds 4`
+- Keep fullscreen prefs untouched:
+  - add `-SkipForceWindowed`
+- Show in-game log window:
+  - add `-ShowLog`
+- Dry run (print launch commands only):
+  - add `-DryRun`
+- Override executable/init/template/log paths:
+  - `-ExePath ... -InitFile ... -TemplateConfigPath ... -GeneratedLuaDir ... -LogDir ...`
+
+## Log Analysis Commands
+- Analyze latest logs:
+  - `powershell -ExecutionPolicy Bypass -File C:\Program Files (x86)\Steam\steamapps\common\Supreme Commander Forged Alliance\autorun\bin\analyze_autorun_logs.ps1 -Latest 10`
+- Analyze specific run tag:
+  - `powershell -ExecutionPolicy Bypass -File C:\Program Files (x86)\Steam\steamapps\common\Supreme Commander Forged Alliance\autorun\bin\analyze_autorun_logs.ps1 -LogsPath "C:\Program Files (x86)\Steam\steamapps\common\Supreme Commander Forged Alliance\autorun\logs\autorun-20260423-*.log" -OutputDir "C:\Program Files (x86)\Steam\steamapps\common\Supreme Commander Forged Alliance\autorun\analysis\session-20260423"`
 
 ## Do Not Skip
 - Do not ship a version without a passing Lua syntax check.
