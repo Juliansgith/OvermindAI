@@ -368,28 +368,33 @@ function UpdatePolicy(aiBrain, now)
     if focusOnT1Spam or contestMapMode or prioritizeProduction then
         policy.MexUpgradeConcurrency = math.min(policy.MexUpgradeConcurrency, frontSecureUpgradeWindow and 2 or 1)
     end
-    local reclaimQuotaAllowed = now >= 360
+    local reclaimQuotaAllowed = now >= 300
         and phase ~= 'bootstrap'
-        and (macroCounts.Mex or 0) >= 6
         and (macroCounts.FactoryTotal or 0) >= 2
         and not acuCrisisActive
+    local reclaimQuotaMexReady = (macroCounts.Mex or 0) >= 6
+        or ((macroCounts.Mex or 0) >= 5 and reclaimFieldScore >= 140)
+        or reclaimFieldScore >= 220
     local lowMexExpansionNeed = now < 1500 and (macroCounts.Mex or 0) < 11 and phase ~= 'bootstrap'
     policy.EngineerReclaimQuota = 0
     if reclaimQuotaAllowed
+        and reclaimQuotaMexReady
         and (reclaimPressureMode
+            or reclaimFieldScore >= 160
             or ((planner.ReclaimFirst == true or planner.OuterRetentionActive == true) and reclaimFieldScore >= 90)) then
         policy.EngineerReclaimQuota = 1
     end
-    if reclaimQuotaAllowed and reclaimFieldAvailable and pressure.SurvivalCrisis ~= true then
+    if reclaimQuotaAllowed and reclaimQuotaMexReady and reclaimFieldAvailable and pressure.SurvivalCrisis ~= true then
         policy.EngineerReclaimQuota = math.max(policy.EngineerReclaimQuota, 1)
     end
-    if reclaimQuotaAllowed and reclaimFieldScore >= 190 and (velocity.ReclaimStagnationTime or 0) >= 45 and pressure.SurvivalCrisis ~= true then
+    if reclaimQuotaAllowed and reclaimQuotaMexReady and reclaimFieldScore >= 190 and (velocity.ReclaimStagnationTime or 0) >= 45 and pressure.SurvivalCrisis ~= true then
         policy.EngineerReclaimQuota = 2
     end
-    if reclaimQuotaAllowed and reclaimFieldScore >= 220 and pressure.SurvivalCrisis ~= true then
+    if reclaimQuotaAllowed and reclaimQuotaMexReady and reclaimFieldScore >= 220 and pressure.SurvivalCrisis ~= true then
         policy.EngineerReclaimQuota = math.max(policy.EngineerReclaimQuota, 2)
     end
     if reclaimQuotaAllowed
+        and reclaimQuotaMexReady
         and reclaimFieldScore >= 150
         and (velocity.ReclaimStagnationTime or 0) >= 60
         and (velocity.ReclaimRateShort or 0) <= 0.2
