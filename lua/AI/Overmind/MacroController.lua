@@ -145,9 +145,21 @@ local function DetermineDesiredPhase(aiBrain, runtime, now)
     local starterMexTarget = (contestTempoMap or focusOnT1Spam) and 5 or 6
     local starterMexDeadline = contestTempoMap and 420 or 540
     local landFactoryFloorTarget = (contestTempoMap or focusOnT1Spam) and 2 or 3
+    local firstHQFloorReady = readyLand >= 4
+        and readyMex >= 5
+        and readyPower >= 5
+        and not ecoCrash
+    local pressureEscapeExpired = firstHQFloorReady
+        and not acuCrisisActive
+        and (
+            now >= 720
+            or (readyLand >= 5 and massBudget >= 4.8)
+            or (readyLand >= 6 and now >= 540)
+        )
     local hqPressureEscape = t2LandFactories <= 0
         and activeLandFactoryUpgrades <= 0
         and readyLand >= 2
+        and not pressureEscapeExpired
         and (
             acuCrisisActive
             or ((landPanic or underHarass or approachReal) and (frontPressure >= 0.18 or basePressure >= 0.14))
@@ -199,6 +211,9 @@ local function DetermineDesiredPhase(aiBrain, runtime, now)
             return 'mass_consolidation', 'hq_pressure_escape', facts
         end
         if focusOnT1Spam then
+            if firstHQFloorReady and now >= 660 and not acuCrisisActive then
+                return 'first_land_hq', 't1_spam_forced_hq', facts
+            end
             if readyLand >= 4
                 and readyMex >= 5
                 and readyPower >= 4

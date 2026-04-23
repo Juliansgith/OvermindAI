@@ -139,6 +139,26 @@ local function BuildBattlefieldObjectives(aiBrain, runtime, signals, state, now)
         end
     end
 
+    if reclaimFieldPos and reclaimFieldScore >= 110 then
+        state.StickyReclaimFieldPos = reclaimFieldPos
+        state.StickyReclaimFieldScore = reclaimFieldScore
+        state.StickyReclaimFieldUntil = now + (reclaimFieldScore >= 220 and 150 or 105)
+    elseif state.StickyReclaimFieldPos and now < (state.StickyReclaimFieldUntil or -999) then
+        local stickyMass = EstimateReclaimMassAtPos(state.StickyReclaimFieldPos, 46)
+        if stickyMass >= 45 and not signals.ACUCrisisActive then
+            reclaimFieldPos = reclaimFieldPos or state.StickyReclaimFieldPos
+            reclaimFieldScore = math.max(reclaimFieldScore, math.min(stickyMass, (state.StickyReclaimFieldScore or stickyMass) * 0.7))
+        else
+            state.StickyReclaimFieldPos = false
+            state.StickyReclaimFieldScore = 0
+            state.StickyReclaimFieldUntil = -999
+        end
+    else
+        state.StickyReclaimFieldPos = false
+        state.StickyReclaimFieldScore = 0
+        state.StickyReclaimFieldUntil = -999
+    end
+
     local outerContestAlive = (signals.OuterContestUnits or 0) >= 2
     local strongHomeCollapse = signals.ACUCrisisActive
         or (signals.ApproachClose and not outerContestAlive)

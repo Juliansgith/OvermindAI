@@ -2175,7 +2175,15 @@ local function DecideCapacityPlan(runtime, current, constraints, rolePlan)
     if hqPressureEscape and not preserveAirWindow then
         airTarget = math.min(airTarget, math.min(current.Factories.Air.Total, 1))
         if current.Factories.Land.Ready >= 2 then
-            landTarget = math.max(landTarget, math.min(landCap, current.Factories.Land.Total + 1))
+            local pressureFactoryCap = 4
+            if (mexReady or 0) >= 8 and (now or 0) >= 900 then
+                pressureFactoryCap = 5
+            end
+            if current.Factories.Land.Total < pressureFactoryCap then
+                landTarget = math.max(landTarget, math.min(landCap, current.Factories.Land.Total + 1))
+            else
+                landTarget = math.min(landTarget, current.Factories.Land.Total)
+            end
         end
     end
     if (outerRetentionActive or reclaimFirst)
@@ -2188,7 +2196,12 @@ local function DecideCapacityPlan(runtime, current, constraints, rolePlan)
         if not outerControlStable or current.Factories.Land.Ready < 5 then
             airTarget = math.min(airTarget, math.max(contestScoutAirFloor, math.min(current.Factories.Air.Total, 1)))
         end
-        landTarget = math.max(landTarget, math.min(landCap, math.max(current.Factories.Land.Total, current.Factories.Land.Ready + 1)))
+        local outerFactoryCap = ((mexReady or 0) < 8 and (now or 0) < 1200) and 4 or landCap
+        if current.Factories.Land.Total < outerFactoryCap then
+            landTarget = math.max(landTarget, math.min(landCap, math.max(current.Factories.Land.Total, current.Factories.Land.Ready + 1)))
+        else
+            landTarget = math.min(landTarget, current.Factories.Land.Total)
+        end
     end
     if objectiveStarterClamp and not preserveAirWindow then
         airTarget = math.min(airTarget, contestScoutAirFloor)

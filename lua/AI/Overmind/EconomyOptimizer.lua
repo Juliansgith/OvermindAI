@@ -372,10 +372,15 @@ function UpdatePolicy(aiBrain, now)
         and phase ~= 'bootstrap'
         and (macroCounts.FactoryTotal or 0) >= 2
         and not acuCrisisActive
+        and pressure.SurvivalCrisis ~= true
     local reclaimQuotaMexReady = (macroCounts.Mex or 0) >= 6
         or ((macroCounts.Mex or 0) >= 5 and reclaimFieldScore >= 140)
+        or ((macroCounts.Mex or 0) >= 5 and reclaimPressureMode)
         or reclaimFieldScore >= 220
     local lowMexExpansionNeed = now < 1500 and (macroCounts.Mex or 0) < 11 and phase ~= 'bootstrap'
+    local reclaimWorkerReady = (macroCounts.Engineers or 0) >= 8
+    local reclaimConversionDebt = (velocity.ReclaimStagnationTime or 0) >= 45
+        or ((velocity.ReclaimRateShort or 0) <= 0.15 and reclaimFieldScore >= 90)
     policy.EngineerReclaimQuota = 0
     if reclaimQuotaAllowed
         and reclaimQuotaMexReady
@@ -384,13 +389,16 @@ function UpdatePolicy(aiBrain, now)
             or ((planner.ReclaimFirst == true or planner.OuterRetentionActive == true) and reclaimFieldScore >= 90)) then
         policy.EngineerReclaimQuota = 1
     end
-    if reclaimQuotaAllowed and reclaimQuotaMexReady and reclaimFieldAvailable and pressure.SurvivalCrisis ~= true then
+    if reclaimQuotaAllowed and reclaimQuotaMexReady and reclaimWorkerReady and reclaimFieldScore >= 90 and reclaimConversionDebt then
         policy.EngineerReclaimQuota = math.max(policy.EngineerReclaimQuota, 1)
     end
-    if reclaimQuotaAllowed and reclaimQuotaMexReady and reclaimFieldScore >= 190 and (velocity.ReclaimStagnationTime or 0) >= 45 and pressure.SurvivalCrisis ~= true then
+    if reclaimQuotaAllowed and reclaimQuotaMexReady and reclaimFieldAvailable then
+        policy.EngineerReclaimQuota = math.max(policy.EngineerReclaimQuota, 1)
+    end
+    if reclaimQuotaAllowed and reclaimQuotaMexReady and reclaimFieldScore >= 190 and (velocity.ReclaimStagnationTime or 0) >= 45 and reclaimWorkerReady then
         policy.EngineerReclaimQuota = 2
     end
-    if reclaimQuotaAllowed and reclaimQuotaMexReady and reclaimFieldScore >= 220 and pressure.SurvivalCrisis ~= true then
+    if reclaimQuotaAllowed and reclaimQuotaMexReady and reclaimFieldScore >= 220 and reclaimWorkerReady then
         policy.EngineerReclaimQuota = math.max(policy.EngineerReclaimQuota, 2)
     end
     if reclaimQuotaAllowed
@@ -398,7 +406,7 @@ function UpdatePolicy(aiBrain, now)
         and reclaimFieldScore >= 150
         and (velocity.ReclaimStagnationTime or 0) >= 60
         and (velocity.ReclaimRateShort or 0) <= 0.2
-        and pressure.SurvivalCrisis ~= true then
+        and reclaimWorkerReady then
         policy.EngineerReclaimQuota = math.max(policy.EngineerReclaimQuota, 2)
     end
     policy.EngineerExpansionQuota = (contestMapMode or focusOnT1Spam or lowMexExpansionNeed) and 2 or 1

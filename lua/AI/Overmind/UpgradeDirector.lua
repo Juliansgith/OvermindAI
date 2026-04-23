@@ -615,7 +615,7 @@ local function MaybeStartMexUpgrade(aiBrain, now, state)
     state.InFlight = (state.InFlight or 0) + 1
 end
 
-local function PickFactoryTarget(aiBrain, runtime, state)
+local function PickFactoryTarget(aiBrain, runtime, state, now)
     local director = runtime.ProductionDirector or {}
     local current = director.Current or {}
     local constraints = director.ConstraintState or {}
@@ -652,7 +652,18 @@ local function PickFactoryTarget(aiBrain, runtime, state)
     state.Mandatory = needsFirstHQOverall and true or false
     state.PowerRecoveryWanted = constraints.PowerBufferLow and needsFirstHQOverall
 
-    if macro.HQPressureEscape == true and needsFirstHQOverall then
+    local firstHQEscapeFloorReady = readyLand >= 4
+        and mexReady >= 5
+        and powerReady >= 5
+        and not constraints.EcoCrash
+    local forceFirstHQAfterEscape = firstHQEscapeFloorReady
+        and not (now < (runtime.ACUCrisisUntil or -999))
+        and (
+            now >= 720
+            or readyLand >= 5
+            or macro.NeedFirstLandHQ == true
+        )
+    if macro.HQPressureEscape == true and needsFirstHQOverall and not forceFirstHQAfterEscape then
         state.Reason = 'pressure_escape'
         state.NeedsFirstLandHQ = true
         state.Mandatory = false
@@ -863,7 +874,7 @@ local function UpdateDirector(aiBrain, now)
 
     PickMexTarget(aiBrain, runtime, state.Extractor)
     MaybeStartMexUpgrade(aiBrain, now, state.Extractor)
-    PickFactoryTarget(aiBrain, runtime, state.Factory)
+    PickFactoryTarget(aiBrain, runtime, state.Factory, now)
 
     OvermindEconomyLedger.PublishUpgradeActivity(aiBrain, runtime, now, {
         ActiveMexUpgrades = state.Extractor.InFlight or 0,
