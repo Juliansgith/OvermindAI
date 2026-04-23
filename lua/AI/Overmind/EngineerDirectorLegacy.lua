@@ -979,7 +979,8 @@ local function ShouldDeferEcoForSecondFactory(aiBrain, runtime, now, kind)
     local eco = (runtime and runtime.EcoState) or {}
     local _, mexReady = GetCurrentMexCounts(aiBrain)
     local _, powerReady = GetCurrentPowerCounts(aiBrain, runtime)
-    local severeEnergyCrisis = (eco.EnergyStorageRatio or 0) <= 0.055 or (eco.EnergyTrend or 0) <= -34
+    local severeEnergyCrisis = (eco.EnergyTrend or 0) <= -45
+        or ((eco.EnergyStorageRatio or 0) <= 0.015 and (eco.EnergyTrend or 0) <= -20)
     if severeEnergyCrisis then
         return false
     end
@@ -1001,7 +1002,8 @@ local function ShouldWorkPowerStructure(aiBrain, runtime, now, fraction)
     local factoryReady = (((current.Factories or {}).Ready) or 0)
     local powerTotal, powerReady = GetCurrentPowerCounts(aiBrain, runtime)
     local pendingPower = math.max(0, powerTotal - powerReady)
-    local severeEnergyCrisis = (eco.EnergyStorageRatio or 0) <= 0.055 or (eco.EnergyTrend or 0) <= -34
+    local severeEnergyCrisis = (eco.EnergyTrend or 0) <= -45
+        or ((eco.EnergyStorageRatio or 0) <= 0.015 and (eco.EnergyTrend or 0) <= -20)
 
     if NeedsBootstrapPower(aiBrain, runtime) or severeEnergyCrisis then
         return true
