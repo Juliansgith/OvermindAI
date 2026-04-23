@@ -802,6 +802,9 @@ local function FindFollowupExpansionTarget(aiBrain, runtime, mainPos, enemyPos, 
     return bestPos
 end
 
+local GetCurrentMexCounts
+local HasSecondLandFactoryDebt
+
 local function DispatchExpansionEngineer(aiBrain, runtime, now, engineers, mainPos, enemyPos, safeExpandDistance, threatCap)
     local director = runtime and runtime.ProductionDirector or {}
     local constraints = director and director.ConstraintState or {}
@@ -810,11 +813,15 @@ local function DispatchExpansionEngineer(aiBrain, runtime, now, engineers, mainP
     local raid = runtime and runtime.RaidDefense or {}
     local engState = runtime and runtime.EngineerState or {}
     local mexEmergency = engState and engState.MexEmergencyActive == true
+    local _, mexReadyActual = GetCurrentMexCounts(aiBrain)
     local bootstrap = constraints and constraints.EconBootstrap == true
     local starterPhase = constraints and constraints.StarterPhase == true
     local contestDispatch = policy.ForwardContestBias == true
         or policy.ReclaimPressureMode == true
         or macro.HQPressureEscape == true
+    if HasSecondLandFactoryDebt(aiBrain, now) and mexReadyActual >= 4 and not mexEmergency then
+        return 0
+    end
     if (bootstrap or starterPhase) and NeedsBootstrapPower(aiBrain, runtime) then
         return 0
     end
@@ -947,26 +954,42 @@ local function CountExistingAndReady(aiBrain, category)
 end
 
 local function GetCurrentPowerCounts(aiBrain, runtime)
-    local current = (((runtime or {}).ProductionDirector or {}).Current or {})
-    local power = ((current.Eco or {}).Power or {})
-    local total = power.Total or 0
-    local ready = power.Ready or 0
-    if total <= 0 and aiBrain then
-        total, ready = CountExistingAndReady(aiBrain, EnergyCategory)
-    end
-    return total, ready
+    return CountExistingAndReady(aiBrain, EnergyCategory)
 end
 
-local function HasSecondLandFactoryDebt(runtime, now)
-    local director = (runtime and runtime.ProductionDirector) or {}
-    local current = director.Current or {}
-    local factories = current.Factories or {}
-    local land = factories.Land or {}
-    local capacity = director.CapacityPlan or {}
+GetCurrentMexCounts = function(aiBrain)
+    return CountExistingAndReady(aiBrain, MexCategory)
+end
+
+local function GetCurrentLandFactoryCounts(aiBrain)
+    return CountExistingAndReady(aiBrain, categories.FACTORY * categories.LAND * categories.STRUCTURE)
+end
+
+HasSecondLandFactoryDebt = function(aiBrain, now)
+    local landTotal, landReady = GetCurrentLandFactoryCounts(aiBrain)
     return now < 480
-        and (land.Ready or 0) >= 1
-        and (land.Total or 0) < 2
-        and ((capacity.LandTarget or 0) >= 2 or capacity.AddLandFactory == true)
+        and landReady >= 1
+        and landTotal < 2
+end
+
+local function ShouldDeferEcoForSecondFactory(aiBrain, runtime, now, kind)
+    if not HasSecondLandFactoryDebt(aiBrain, now) then
+        return false
+    end
+    local eco = (runtime and runtime.EcoState) or {}
+    local _, mexReady = GetCurrentMexCounts(aiBrain)
+    local _, powerReady = GetCurrentPowerCounts(aiBrain, runtime)
+    local severeEnergyCrisis = (eco.EnergyStorageRatio or 0) <= 0.055 or (eco.EnergyTrend or 0) <= -34
+    if severeEnergyCrisis then
+        return false
+    end
+    if kind == 'Power' then
+        return powerReady >= 2
+    end
+    if kind == 'Mex' then
+        return mexReady >= 4 and powerReady >= 2
+    end
+    return false
 end
 
 local function ShouldWorkPowerStructure(aiBrain, runtime, now, fraction)
@@ -984,7 +1007,7 @@ local function ShouldWorkPowerStructure(aiBrain, runtime, now, fraction)
         return true
     end
 
-    if HasSecondLandFactoryDebt(runtime, now) and powerReady >= 2 then
+    if ShouldDeferEcoForSecondFactory(aiBrain, runtime, now, 'Power') then
         return false
     end
 
@@ -1026,6 +1049,9 @@ local function ScoreStructureTarget(aiBrain, runtime, structure, kind, pos, frac
     local distMain = Distance2D(pos, mainPos)
     local localThreat = aiBrain:GetThreatAtPosition(pos, 1, true, 'AntiSurface') or 0
     if kind == 'Power' and not ShouldWorkPowerStructure(aiBrain, runtime, GetGameTimeSeconds(), fraction) then
+        return -999999, localThreat
+    end
+    if kind == 'Mex' and ShouldDeferEcoForSecondFactory(aiBrain, runtime, GetGameTimeSeconds(), 'Mex') then
         return -999999, localThreat
     end
 
@@ -1468,7 +1494,7 @@ local function GetPriorityMexRecoveryTarget(aiBrain, runtime, mainPos, structure
                     local fraction = GetFraction(unit)
                     if fraction < 0.995 then
                         local threat = aiBrain:GetThreatAtPosition(pos, 1, true, 'AntiSurface') or 0
-                        if threat <= 2.8 then
+                        if threat <= 2.8 and not ShouldDeferEcoForSecondFactory(aiBrain, runtime, GetGameTimeSeconds(), 'Mex') then
                             local score = 300 + (fraction * 180) - (dist * 0.18)
                             if fraction >= 0.35 then
                                 score = score + 120
@@ -1644,10 +1670,13 @@ local function TryOpenSurplusExpansionBuild(aiBrain, runtime, eng, mainPos, enem
 
     local macroPhase = (((runtime or {}).MacroController or {}).Phase)
         or ((((runtime or {}).ProductionDirector or {}).MacroObjective) or 'none')
-    local mexReady = (((((runtime or {}).ProductionDirector or {}).Current or {}).Eco or {}).Mex or {}).Ready or 0
+    local _, mexReady = GetCurrentMexCounts(aiBrain)
     local engState = runtime and runtime.EngineerState or {}
     if runtime then
         runtime.EngineerState = engState
+    end
+    if HasSecondLandFactoryDebt(aiBrain, now) and mexReady >= 4 and not engState.MexEmergencyActive then
+        return false
     end
     engState.PeakMexReady = math.max(engState.PeakMexReady or 0, mexReady)
     local mexLossCount = math.max(0, (engState.PeakMexReady or mexReady) - mexReady)
