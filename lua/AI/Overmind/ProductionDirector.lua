@@ -2239,6 +2239,15 @@ local function DecideCapacityPlan(runtime, current, constraints, rolePlan)
     if macroObjective == 'first_land_hq' and current.Factories.Land.Ready >= 4 and not completionLock then
         landTarget = math.min(landTarget, math.max(current.Factories.Land.Total, current.Factories.Land.Ready))
     end
+    local macroFacts = ((runtime.MacroController or {}).Facts) or {}
+    local preHQFactoryCap = ((macroFacts.T2LandFactories or 0) <= 0)
+        and (mexReady or 0) < 8
+        and (now or 0) < 1200
+    if preHQFactoryCap and current.Factories.Land.Total >= 4 then
+        landTarget = math.min(landTarget, current.Factories.Land.Total)
+    elseif preHQFactoryCap then
+        landTarget = math.min(landTarget, 4)
+    end
     local ecoFactoryCap = math.max(
         4,
         2 + math.floor((mexReady or 0) * 0.72) + math.floor((eco.MassIncome or 0) * 0.22)

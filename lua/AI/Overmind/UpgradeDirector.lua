@@ -657,9 +657,8 @@ local function PickFactoryTarget(aiBrain, runtime, state, now)
         and powerReady >= 5
         and not constraints.EcoCrash
     local forceFirstHQAfterEscape = firstHQEscapeFloorReady
-        and not (now < (runtime.ACUCrisisUntil or -999))
         and (
-            now >= 720
+            now >= 660
             or readyLand >= 5
             or macro.NeedFirstLandHQ == true
         )
@@ -744,7 +743,16 @@ local function PickFactoryTarget(aiBrain, runtime, state, now)
             and not constraints.QueueStarved
             and (eco.MassTrend or 0) >= -0.28
             and (eco.MassStorageRatio or 0) >= 0.02)
-        if (hqPowerOverride or hqFactoryOverride) and not constraints.CriticalStructure and not constraints.EcoCrash and not constraints.QueueStarved then
+        local hqStructureOverride = constraints.CriticalStructure
+            and mandatoryFirstHQ
+            and firstHQEscapeFloorReady
+            and readyLand >= 4
+            and powerReady >= 6
+            and not constraints.EcoCrash
+            and not constraints.QueueStarved
+            and (eco.EnergyTrend or 0) >= -18
+            and (constraints.CriticalStructureKind ~= 'Power' or powerReady >= 8)
+        if (hqPowerOverride or hqFactoryOverride or hqStructureOverride) and not constraints.EcoCrash and not constraints.QueueStarved then
             -- fall through
         else
             state.Reason = constraints.CriticalFactory and (airFactoryDebt and 'air_factory_debt' or 'critical_factory')

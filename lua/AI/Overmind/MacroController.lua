@@ -150,9 +150,8 @@ local function DetermineDesiredPhase(aiBrain, runtime, now)
         and readyPower >= 5
         and not ecoCrash
     local pressureEscapeExpired = firstHQFloorReady
-        and not acuCrisisActive
         and (
-            now >= 720
+            now >= 660
             or (readyLand >= 5 and massBudget >= 4.8)
             or (readyLand >= 6 and now >= 540)
         )
@@ -211,7 +210,7 @@ local function DetermineDesiredPhase(aiBrain, runtime, now)
             return 'mass_consolidation', 'hq_pressure_escape', facts
         end
         if focusOnT1Spam then
-            if firstHQFloorReady and now >= 660 and not acuCrisisActive then
+            if firstHQFloorReady and now >= 660 then
                 return 'first_land_hq', 't1_spam_forced_hq', facts
             end
             if readyLand >= 4
