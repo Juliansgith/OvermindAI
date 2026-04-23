@@ -1415,11 +1415,13 @@ local function DecideRolePlan(runtime, current, constraints, demand, budget, con
         engineerDesired = engineerDesired + 1
     end
     local reclaimQuota = policy.EngineerReclaimQuota or 0
-    local reclaimConversionDebt = reclaimQuota > 0
-        or ((policy.ReclaimStagnationTime or 0) >= 60
+    local reclaimConversionDebt = (now or 0) >= 360
+        and (reclaimQuota > 0
+            or ((policy.ReclaimStagnationTime or 0) >= 60
             and (policy.ReclaimRateShort or 0) <= 0.2
-            and (((runtime.StrategicPlanner or {}).ReclaimFieldScore or 0) >= 100))
-    local lowMexOwnership = (now or 0) < 1500
+            and (((runtime.StrategicPlanner or {}).ReclaimFieldScore or 0) >= 100)))
+    local lowMexOwnership = (now or 0) >= 420
+        and (now or 0) < 1500
         and mexReady < 10
         and current.Factories.Land.Ready >= 2
         and not constraints.EcoCrash
@@ -2206,6 +2208,21 @@ local function DecideCapacityPlan(runtime, current, constraints, rolePlan)
             airTarget = math.min(airTarget, math.max(contestScoutAirFloor, math.min(current.Factories.Air.Total, 1)))
         end
     end
+    local lowMexAirConservation = (now or 0) < 1200
+        and mexReady < 8
+        and not emergencyAirFactory
+        and not severeAirRaidRecovery
+        and not constraints.AirPanic
+        and not constraints.BomberPanic
+        and not constraints.ExposedMexAirRaid
+        and not constraints.CounterAirWindow
+    if lowMexAirConservation then
+        local lowMexAirTarget = (contestScoutAirWindow or watchAirFactory or threatenedAirUnlock) and 1 or 0
+        if current.Factories.Air.Total > 0 then
+            lowMexAirTarget = math.max(lowMexAirTarget, 1)
+        end
+        airTarget = math.min(airTarget, lowMexAirTarget)
+    end
     if macroObjective == 'first_land_hq' and current.Factories.Land.Ready >= 4 and not completionLock then
         landTarget = math.min(landTarget, math.max(current.Factories.Land.Total, current.Factories.Land.Ready))
     end
@@ -2267,19 +2284,39 @@ local function DecideCapacityPlan(runtime, current, constraints, rolePlan)
             end
         end
 
-        local cut = math.min(math.max(0, landTarget - minLand), overflow)
-        landTarget = landTarget - cut
-        overflow = overflow - cut
-
-        if overflow > 0 then
-            cut = math.min(math.max(0, seaTarget - minSea), overflow)
-            seaTarget = seaTarget - cut
-            overflow = overflow - cut
-        end
-        if overflow > 0 then
+        local cutAirFirst = (now or 0) < 1500
+            and (mexReady < 10 or liveCombatWindow or landRoleGap >= airRoleGap)
+        local cut
+        if cutAirFirst then
             cut = math.min(math.max(0, airTarget - minAir), overflow)
             airTarget = airTarget - cut
             overflow = overflow - cut
+
+            if overflow > 0 then
+                cut = math.min(math.max(0, seaTarget - minSea), overflow)
+                seaTarget = seaTarget - cut
+                overflow = overflow - cut
+            end
+            if overflow > 0 then
+                cut = math.min(math.max(0, landTarget - minLand), overflow)
+                landTarget = landTarget - cut
+                overflow = overflow - cut
+            end
+        else
+            cut = math.min(math.max(0, landTarget - minLand), overflow)
+            landTarget = landTarget - cut
+            overflow = overflow - cut
+
+            if overflow > 0 then
+                cut = math.min(math.max(0, seaTarget - minSea), overflow)
+                seaTarget = seaTarget - cut
+                overflow = overflow - cut
+            end
+            if overflow > 0 then
+                cut = math.min(math.max(0, airTarget - minAir), overflow)
+                airTarget = airTarget - cut
+                overflow = overflow - cut
+            end
         end
         if overflow > 0 then
             landTarget = math.max(1, landTarget - overflow)
