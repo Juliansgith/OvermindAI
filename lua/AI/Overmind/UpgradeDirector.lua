@@ -827,12 +827,13 @@ local function PickFactoryTarget(aiBrain, runtime, state, now)
 
     local best = false
     local bestScore = -999999
+    local safeQueueLimit = forceFirstHQAfterEscape and 4 or 0
     local allFactories = aiBrain:GetListOfUnits(categories.FACTORY * categories.LAND * categories.STRUCTURE, false, true) or {}
     for _, fac in allFactories do
         if fac and not fac.Dead and IsReadyStructure(fac) and not fac:IsUnitState('Upgrading') and EntityCategoryContains(categories.TECH1, fac) then
             local upgradeBp = GetUpgradeBlueprintId(fac)
             local pos = fac.GetPosition and fac:GetPosition() or false
-            if upgradeBp and pos and GetCommandQueueLength(fac) <= 0 then
+            if upgradeBp and pos and GetCommandQueueLength(fac) <= safeQueueLimit then
                 local score, risk, threat, dist, _ = ScoreSafeUpgradeLocation(aiBrain, pos, mainPos, factoryClusterPos, 280)
                 local riskLimit = mandatoryFirstHQ and 4.2 or 3
                 local threatLimit = mandatoryFirstHQ and 2.6 or 1.8
@@ -861,12 +862,13 @@ local function PickFactoryTarget(aiBrain, runtime, state, now)
         local forcedTarget = false
         local forcedBp = false
         local forcedScore = 999999
+        local forcedQueueLimit = forceFirstHQAfterEscape and 6 or 1
         local allFactories = aiBrain:GetListOfUnits(categories.FACTORY * categories.LAND * categories.STRUCTURE, false, true) or {}
         for _, fac in allFactories do
             if fac and not fac.Dead and IsReadyStructure(fac) and not fac:IsUnitState('Upgrading') and EntityCategoryContains(categories.TECH1, fac) then
                 local upgradeBp = GetUpgradeBlueprintId(fac)
                 local pos = fac.GetPosition and fac:GetPosition() or false
-                if upgradeBp and pos and GetCommandQueueLength(fac) <= 1 then
+                if upgradeBp and pos and GetCommandQueueLength(fac) <= forcedQueueLimit then
                     local _, risk, threat, dist, _ = ScoreSafeUpgradeLocation(aiBrain, pos, mainPos, factoryClusterPos, 320)
                     if risk <= 6.0 and threat <= 4.0 then
                         local forcedValue = (risk * 10) + (threat * 8) + (dist * 0.03)
@@ -889,12 +891,13 @@ local function PickFactoryTarget(aiBrain, runtime, state, now)
             local emergencyTarget = false
             local emergencyBp = false
             local emergencyScore = 999999
+            local emergencyQueueLimit = forceFirstHQAfterEscape and 8 or 1
             local fallbackFactories = aiBrain:GetListOfUnits(categories.FACTORY * categories.LAND * categories.STRUCTURE, false, true) or {}
             for _, fac in fallbackFactories do
                 if fac and not fac.Dead and IsReadyStructure(fac) and not fac:IsUnitState('Upgrading') and EntityCategoryContains(categories.TECH1, fac) then
                     local upgradeBp = GetUpgradeBlueprintId(fac)
                     local pos = fac.GetPosition and fac:GetPosition() or false
-                    if upgradeBp and pos and fac:CanBuild(upgradeBp) and GetCommandQueueLength(fac) <= 1 then
+                    if upgradeBp and pos and fac:CanBuild(upgradeBp) and GetCommandQueueLength(fac) <= emergencyQueueLimit then
                         local _, risk, threat, dist, _ = ScoreSafeUpgradeLocation(aiBrain, pos, mainPos, factoryClusterPos, 420)
                         local fallbackValue = (risk * 7) + (threat * 5) + (dist * 0.02)
                         if fallbackValue < emergencyScore then

@@ -541,7 +541,7 @@ local function ShouldForceFirstTechEngineer(aiBrain, factory, runtime, eco)
 end
 
 local function ShouldUpgradeFactory(aiBrain, factory, runtime, eco, qLen)
-    if qLen > 0 or not factory or factory.Dead then
+    if not factory or factory.Dead then
         return false, false
     end
     if ClassifyFactory(factory) ~= 'land' then
@@ -556,6 +556,13 @@ local function ShouldUpgradeFactory(aiBrain, factory, runtime, eco, qLen)
     local plan = runtime.ProductionDirector or {}
     local upgradeDirector = runtime.UpgradeDirector or {}
     local directedFactory = upgradeDirector.Factory or {}
+    local factoryId = tostring(factory.GetEntityId and factory:GetEntityId() or factory.UnitId or factory)
+    local directedUpgradeTarget = directedFactory.Managed == true
+        and directedFactory.Enabled == true
+        and directedFactory.TargetId == factoryId
+    if qLen > 0 and not directedUpgradeTarget then
+        return false, false
+    end
     local current = plan.Current or {}
     local constraints = plan.ConstraintState or {}
     local techPlan = plan.TechPlan or {}
@@ -574,7 +581,6 @@ local function ShouldUpgradeFactory(aiBrain, factory, runtime, eco, qLen)
         and ((factoryTask.AssignedBuilders or 0) < math.max(1, factoryTask.RequiredBuilders or 0))
 
     if directedFactory.Managed == true then
-        local factoryId = tostring(factory.GetEntityId and factory:GetEntityId() or factory.UnitId or factory)
         if directedFactory.Enabled ~= true or directedFactory.TargetId ~= factoryId then
             return false, false
         end
@@ -664,6 +670,9 @@ local function TryIssuePlannedBuild(aiBrain, factory, runtime, now, state, queue
 
     local shouldUpgrade, upgradeBp = ShouldUpgradeFactory(aiBrain, factory, runtime, eco, qLen)
     if shouldUpgrade and upgradeBp and IssueUpgrade then
+        if qLen > 0 and IssueClearCommands then
+            IssueClearCommands({ factory })
+        end
         IssueUpgrade({ factory }, upgradeBp)
         state.LastIssuedTime = now
         state.LastRole = 'FactoryUpgrade'
