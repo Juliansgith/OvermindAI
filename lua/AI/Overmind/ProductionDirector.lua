@@ -2334,10 +2334,11 @@ local function DecideMacroObjective(aiBrain, runtime, current, constraints, tech
     local earlyMassBudget = (eco.MassIncome or 0)
         + math.max(0, (eco.MassTrend or 0) * 8)
         + math.max(0, ((eco.MassStorageRatio or 0) - 0.06) * 10)
+    local starterMexTarget = math.max(4, ((constraints.StarterMexFloor or 5) - 1))
     local starterMexNeed = readyLand >= 1
         and powerReady >= 1
-        and mexReady < 4
-        and now < 240
+        and mexReady < starterMexTarget
+        and now < 420
         and not constraints.CriticalFactory
         and not constraints.CriticalStructure
 

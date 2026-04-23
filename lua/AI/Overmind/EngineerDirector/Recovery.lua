@@ -643,10 +643,14 @@ local function TryOpenSurplusExpansionBuild(aiBrain, runtime, eng, mainPos, enem
     if not eng or eng.Dead or not mainPos or not IssueBuildMobile then
         return false
     end
-    if now < ((runtime.LastSurplusExpansionIssueTime or -999) + 10) then
+    local macroPhase = (((runtime or {}).MacroController or {}).Phase)
+        or ((((runtime or {}).ProductionDirector or {}).MacroObjective) or 'none')
+    local issueCooldown = (macroPhase == 'starter_mex_claim') and 4 or 10
+    if now < ((runtime.LastSurplusExpansionIssueTime or -999) + issueCooldown) then
         return false
     end
-    if CountUnfinishedMexes(aiBrain, mainPos, math.max(520, safeExpandDistance)) >= 1 then
+    local maxUnfinishedMexes = (macroPhase == 'starter_mex_claim') and 2 or 1
+    if CountUnfinishedMexes(aiBrain, mainPos, math.max(520, safeExpandDistance)) >= maxUnfinishedMexes then
         return false
     end
 

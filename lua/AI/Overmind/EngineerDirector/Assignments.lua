@@ -643,6 +643,7 @@ local function ProcessEngineer(aiBrain, runtime, eng, now, ctx)
     if isIdle and not constructing then
         if ctx.structureTask.Active
             and (ctx.structureTask.Kind == 'Power' or ctx.structureTask.Kind == 'Mex')
+            and (ctx.macroPhase ~= 'starter_mex_claim' or ctx.structureTask.Kind == 'Power')
             and ctx.structureTargetObject
             and (
                 not ctx.fieldTaskWindow
@@ -660,8 +661,8 @@ local function ProcessEngineer(aiBrain, runtime, eng, now, ctx)
             end
             acted = true
         elseif ctx.macroPhase == 'starter_mex_claim'
-            and localThreat < 1.8
-            and dist <= 320
+            and localThreat < 2.05
+            and dist <= 420
             and Recovery.TryOpenSurplusExpansionBuild(aiBrain, runtime, eng, ctx.mainPos, ctx.enemyPos, ctx.safeExpandDistance, now) then
             ctx.dispatchedExpand = ctx.dispatchedExpand + 1
             acted = true

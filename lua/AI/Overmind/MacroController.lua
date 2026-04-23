@@ -208,8 +208,8 @@ local function DetermineDesiredPhase(aiBrain, runtime, now)
             and (structure.SafeForwardMexCount >= 2 or structure.ContestableZoneCount >= 2)
             and now < 960
         )
-    local starterMexTarget = (contestTempoMap or focusOnT1Spam) and 3 or 4
-    local starterMexDeadline = contestTempoMap and 210 or 300
+    local starterMexTarget = (contestTempoMap or focusOnT1Spam) and 4 or 5
+    local starterMexDeadline = contestTempoMap and 300 or 420
     local landFactoryFloorTarget = (contestTempoMap or focusOnT1Spam) and 2 or 3
     local hqPressureEscape = t2LandFactories <= 0
         and activeLandFactoryUpgrades <= 0
@@ -318,8 +318,8 @@ local function ApplyLatch(state, desiredPhase, desiredReason, facts, now)
         return desiredPhase, desiredReason
     end
 
-    local starterLatchMexFloor = facts.ContestTempoMap and 3 or 4
-    local starterLatchDeadline = facts.ContestTempoMap and 210 or 300
+    local starterLatchMexFloor = facts.ContestTempoMap and 4 or 5
+    local starterLatchDeadline = facts.ContestTempoMap and 300 or 420
     if current == 'starter_mex_claim'
         and facts.ReadyMexes < starterLatchMexFloor
         and now < starterLatchDeadline
