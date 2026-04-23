@@ -43,3 +43,7 @@ venv/
 # Generated economy autotune campaigns
 autotune/runs/
 autotune/champions/
+autotune/db-reports/
+
+# Local database and env files
+.env.autotune-db

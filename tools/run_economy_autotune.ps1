@@ -23,6 +23,11 @@ param(
     [switch]$NoPromote,
     [switch]$RestoreOriginalOnExit,
     [switch]$DisableAdaptiveMutation,
+    [switch]$UseDatabase,
+    [switch]$DbInitSchema,
+    [string]$DbComposeFile = '',
+    [string]$DbEnvFile = '',
+    [string]$DbProjectName = 'overmind-autotune',
     [switch]$DryRun,
     [switch]$KeepLosingCandidateConfig
 )
@@ -47,10 +52,16 @@ trap {
 $RepoRoot = Split-Path -Parent $PSScriptRoot
 $ConfigPath = Join-Path $RepoRoot 'lua\AI\Overmind\AutoTuneConfig.lua'
 $ReleaseChecks = Join-Path $RepoRoot 'tools\release_checks.ps1'
+$DbHelperPath = Join-Path $RepoRoot 'tools\lib\AutotuneDb.ps1'
+$DbIngestScript = Join-Path $RepoRoot 'tools\db_ingest_autotune.ps1'
 $AutorunRoot = 'C:\Program Files (x86)\Steam\steamapps\common\Supreme Commander Forged Alliance\autorun'
 $StartScript = Join-Path $AutorunRoot 'bin\start_autorun_parallel.ps1'
 $AnalyzeScript = Join-Path $AutorunRoot 'bin\analyze_autorun_logs.ps1'
 $KpiScript = Join-Path $AutorunRoot 'bin\extract_autorun_kpis.ps1'
+
+if (Test-Path -LiteralPath $DbHelperPath) {
+    . $DbHelperPath
+}
 
 if ([string]::IsNullOrWhiteSpace($RunRoot)) {
     $RunRoot = Join-Path $RepoRoot 'autotune\runs'
@@ -1012,6 +1023,7 @@ Ensure-Directory $RunRoot
 $sessionTag = Get-Date -Format 'yyyyMMdd-HHmmss'
 $sessionDir = Join-Path $RunRoot $sessionTag
 Ensure-Directory $sessionDir
+$buildMeta = if (Get-Command Get-OvermindBuildMetadata -ErrorAction SilentlyContinue) { Get-OvermindBuildMetadata -RepoRoot $RepoRoot } else { $null }
 
 if ($BaseSeed -le 0) {
     $BaseSeed = Get-Random -Minimum 1 -Maximum 2000000000
@@ -1171,8 +1183,10 @@ $Script:RestoreConfigPath = ''
 $summary = [pscustomobject]@{
     Session = $sessionTag
     RunDir = $sessionDir
+    CreatedAt = (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')
     BaseSeed = $BaseSeed
     MapName = $MapName
+    Candidates = $Candidates
     GamesPerCandidate = $GamesPerCandidate
     ParallelInstances = $ParallelInstances
     TargetSpeed = $TargetSpeed
@@ -1189,6 +1203,9 @@ $summary = [pscustomobject]@{
     RetestMaps = Get-RetestMapList
     AdaptiveMutationSources = $adaptiveHints.SourceCount
     FailureAwareMutation = $true
+    Version = if ($buildMeta) { $buildMeta.Version } else { $null }
+    Fingerprint = if ($buildMeta) { $buildMeta.Fingerprint } else { $null }
+    GitCommit = if ($buildMeta) { $buildMeta.GitCommit } else { $null }
     BaselineScore = $promotionBaseline.Score
     BaselineAvgGameTime = $promotionBaseline.AvgGameTime
     BaselineAvgMassRatio = $promotionBaseline.AvgMassRatio
@@ -1208,11 +1225,36 @@ $results | Select-Object CandidateId, Score, Games, WinRate, AvgGameTime, AvgMas
     Export-Csv -Path (Join-Path $sessionDir 'candidate-scores.csv') -NoTypeInformation -Encoding UTF8
 Write-SessionReport -Path (Join-Path $sessionDir 'session-report.md') -Summary $summary -Results $results
 
+$sessionSummaryPath = Join-Path $sessionDir 'session-summary.json'
+
+if ($UseDatabase -and -not $DryRun -and (Test-Path -LiteralPath $DbIngestScript)) {
+    try {
+        $dbArgs = @(
+            '-ExecutionPolicy', 'Bypass',
+            '-File', $DbIngestScript,
+            '-SessionSummaryPath', $sessionSummaryPath,
+            '-StartDb',
+            '-ComposeFile', $DbComposeFile,
+            '-EnvFile', $DbEnvFile,
+            '-ProjectName', $DbProjectName
+        )
+        if ($DbInitSchema) {
+            $dbArgs += '-InitSchema'
+        }
+        & powershell @dbArgs
+        if ($LASTEXITCODE -ne 0) {
+            Write-Warning 'Autotune DB ingestion failed after session completion.'
+        }
+    } catch {
+        Write-Warning ("Autotune DB ingestion failed: {0}" -f $_)
+    }
+}
+
 if ($RestoreOriginalOnExit -and -not $DryRun -and (Test-Path -LiteralPath $baselineRawPath)) {
     Copy-Item -LiteralPath $baselineRawPath -Destination $ConfigPath -Force
     Invoke-ReleaseSync
     Write-Host "RestoreOriginalOnExit set; restored baseline config from $baselineRawPath"
 }
 
-Write-Host "Session summary: $(Join-Path $sessionDir 'session-summary.json')"
+Write-Host "Session summary: $sessionSummaryPath"
 Write-Host "Session report: $(Join-Path $sessionDir 'session-report.md')"

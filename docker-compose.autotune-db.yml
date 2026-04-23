@@ -1,0 +1,30 @@
+services:
+  postgres:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${AUTOTUNE_DB_NAME:-overmind_autotune}
+      POSTGRES_USER: ${AUTOTUNE_DB_USER:-overmind}
+      POSTGRES_PASSWORD: ${AUTOTUNE_DB_PASSWORD:-overmind_dev}
+    ports:
+      - "${AUTOTUNE_DB_PORT:-54329}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    volumes:
+      - overmind_autotune_pgdata:/var/lib/postgresql/data
+
+  adminer:
+    image: adminer:4
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "${AUTOTUNE_ADMINER_PORT:-18081}:8080"
+
+volumes:
+  overmind_autotune_pgdata:
+    name: overmind_autotune_pgdata

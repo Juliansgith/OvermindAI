@@ -24,6 +24,11 @@ param(
     [switch]$StopOnPromotion,
     [switch]$RestoreOriginalOnExit,
     [switch]$DisableAdaptiveMutation,
+    [switch]$UseDatabase,
+    [switch]$DbInitSchema,
+    [string]$DbComposeFile = '',
+    [string]$DbEnvFile = '',
+    [string]$DbProjectName = 'overmind-autotune',
     [switch]$DryRun
 )
 
@@ -34,6 +39,12 @@ $RepoRoot = Split-Path -Parent $PSScriptRoot
 $ConfigPath = Join-Path $RepoRoot 'lua\AI\Overmind\AutoTuneConfig.lua'
 $AutotuneScript = Join-Path $PSScriptRoot 'run_economy_autotune.ps1'
 $ReleaseChecks = Join-Path $RepoRoot 'tools\release_checks.ps1'
+$DbHelperPath = Join-Path $RepoRoot 'tools\lib\AutotuneDb.ps1'
+$DbIngestScript = Join-Path $RepoRoot 'tools\db_ingest_autotune.ps1'
+
+if (Test-Path -LiteralPath $DbHelperPath) {
+    . $DbHelperPath
+}
 
 if ([string]::IsNullOrWhiteSpace($RunRoot)) {
     $RunRoot = Join-Path $RepoRoot 'autotune\runs'
@@ -96,6 +107,7 @@ Ensure-Directory $ChampionDir
 $overnightTag = Get-Date -Format 'yyyyMMdd-HHmmss'
 $overnightDir = Join-Path $RunRoot ("overnight-{0}" -f $overnightTag)
 Ensure-Directory $overnightDir
+$buildMeta = if (Get-Command Get-OvermindBuildMetadata -ErrorAction SilentlyContinue) { Get-OvermindBuildMetadata -RepoRoot $RepoRoot } else { $null }
 $originalConfigPath = Join-Path $overnightDir 'original-AutoTuneConfig.lua'
 Copy-Item -LiteralPath $ConfigPath -Destination $originalConfigPath -Force
 
@@ -153,6 +165,11 @@ for ($campaign = 1; $campaign -le $Campaigns; $campaign++) {
     )
     if ($NoPromote) { $args += '-NoPromote' }
     if ($DisableAdaptiveMutation) { $args += '-DisableAdaptiveMutation' }
+    if ($UseDatabase) { $args += '-UseDatabase' }
+    if ($UseDatabase -and $campaign -eq 1 -and $DbInitSchema) { $args += '-DbInitSchema' }
+    if (-not [string]::IsNullOrWhiteSpace($DbComposeFile)) { $args += @('-DbComposeFile', $DbComposeFile) }
+    if (-not [string]::IsNullOrWhiteSpace($DbEnvFile)) { $args += @('-DbEnvFile', $DbEnvFile) }
+    if (-not [string]::IsNullOrWhiteSpace($DbProjectName)) { $args += @('-DbProjectName', $DbProjectName) }
     if ($DryRun) { $args += '-DryRun' }
 
     Write-Host ("Starting campaign {0}/{1}, seed={2}" -f $campaign, $Campaigns, $campaignSeed)
@@ -187,6 +204,7 @@ for ($campaign = 1; $campaign -le $Campaigns; $campaign++) {
 $overnightSummary = [pscustomobject]@{
     Session = $overnightTag
     RunDir = $overnightDir
+    CreatedAt = (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')
     CampaignsRequested = $Campaigns
     CampaignsCompleted = $campaignSummaries.Count
     BaseSeed = $BaseSeed
@@ -202,10 +220,35 @@ $overnightSummary = [pscustomobject]@{
     RetestTop = $RetestTop
     RetestGames = $RetestGames
     RetestMaps = if ([string]::IsNullOrWhiteSpace($RetestMaps)) { @($MapName) } else { @($RetestMaps -split ',' | ForEach-Object { $_.Trim() } | Where-Object { $_ }) }
+    Version = if ($buildMeta) { $buildMeta.Version } else { $null }
+    Fingerprint = if ($buildMeta) { $buildMeta.Fingerprint } else { $null }
+    GitCommit = if ($buildMeta) { $buildMeta.GitCommit } else { $null }
     Promotions = @($campaignSummaries | Where-Object { $_.Promoted }).Count
     Results = $campaignSummaries | Select-Object Session, Promoted, BestCandidate, BestScore, BestAvgGameTime, BestAvgMassRatio, BestPrimaryFailureClass, BaselineScore, BaselineAvgGameTime, BaselineAvgMassRatio, PromotionAllowed, PromotionBlockedReasons
 }
-$overnightSummary | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath (Join-Path $overnightDir 'overnight-summary.json') -Encoding UTF8
+$overnightSummaryPath = Join-Path $overnightDir 'overnight-summary.json'
+$overnightSummary | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $overnightSummaryPath -Encoding UTF8
 Write-OvernightReport -Path (Join-Path $overnightDir 'overnight-report.md') -Summary $overnightSummary
-Write-Host "Overnight summary: $(Join-Path $overnightDir 'overnight-summary.json')"
+
+if ($UseDatabase -and -not $DryRun -and (Test-Path -LiteralPath $DbIngestScript)) {
+    try {
+        $dbArgs = @(
+            '-ExecutionPolicy', 'Bypass',
+            '-File', $DbIngestScript,
+            '-OvernightSummaryPath', $overnightSummaryPath,
+            '-StartDb',
+            '-ComposeFile', $DbComposeFile,
+            '-EnvFile', $DbEnvFile,
+            '-ProjectName', $DbProjectName
+        )
+        & powershell @dbArgs
+        if ($LASTEXITCODE -ne 0) {
+            Write-Warning 'Autotune DB ingestion failed for overnight summary.'
+        }
+    } catch {
+        Write-Warning ("Autotune DB overnight ingestion failed: {0}" -f $_)
+    }
+}
+
+Write-Host "Overnight summary: $overnightSummaryPath"
 Write-Host "Overnight report: $(Join-Path $overnightDir 'overnight-report.md')"
