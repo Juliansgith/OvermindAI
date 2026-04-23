@@ -2494,19 +2494,19 @@ local function ProcessEngineer(aiBrain, runtime, eng, now, ctx)
     local acted = false
 
     if isIdle and not constructing then
-        if expansionCommitActive
-            and localThreat < 2.1
-            and dist <= math.max(560, ctx.safeExpandDistance + 80)
-            and TryOpenSurplusExpansionBuild(aiBrain, runtime, eng, ctx.mainPos, ctx.enemyPos, ctx.safeExpandDistance, now) then
-            ctx.dispatchedExpand = ctx.dispatchedExpand + 1
-            acted = true
-        elseif ctx.contestFieldMode
+        if ctx.contestFieldMode
             and ctx.fieldTaskWindow
             and ctx.reclaimField < ctx.fieldTaskQuota
             and ctx.needBase <= 0
             and not (ctx.factoryTask.Active and (ctx.factoryTask.AssignedBuilders or 0) <= 0 and (ctx.macroPhase == 'bootstrap_factory' or ctx.macroPhase == 'land_factory_floor'))
             and TryReclaimFieldZone(aiBrain, runtime, eng, ctx.reclaimFieldPos, now) then
             ctx.reclaimField = ctx.reclaimField + 1
+            acted = true
+        elseif expansionCommitActive
+            and localThreat < 2.1
+            and dist <= math.max(560, ctx.safeExpandDistance + 80)
+            and TryOpenSurplusExpansionBuild(aiBrain, runtime, eng, ctx.mainPos, ctx.enemyPos, ctx.safeExpandDistance, now) then
+            ctx.dispatchedExpand = ctx.dispatchedExpand + 1
             acted = true
         elseif ctx.structureTask.Active
             and (ctx.structureTask.Kind == 'Power' or ctx.structureTask.Kind == 'Mex')
