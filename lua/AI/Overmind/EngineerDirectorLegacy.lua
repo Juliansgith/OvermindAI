@@ -2911,6 +2911,24 @@ local function ProcessEngineer(aiBrain, runtime, eng, now, ctx)
         return
     end
 
+    if secondLandFactoryDebt
+        and IsReadyBuilder(eng)
+        and not claimedByRadarOrder
+        and dist <= 240
+        and localThreat < 2.2
+        and TryOpenSecondLandFactoryBuild(aiBrain, runtime, eng, ctx.mainPos, now) then
+        if claimedByFactoryTask and ctx.factoryTask.BuilderIds and entityId then
+            ctx.factoryTask.BuilderIds[entityId] = nil
+            ctx.factoryTask.AssignedBuilders = math.max(0, (ctx.factoryTask.AssignedBuilders or 1) - 1)
+        end
+        if claimedByStructureTask and ctx.structureTask.BuilderIds and entityId then
+            ctx.structureTask.BuilderIds[entityId] = nil
+            ctx.structureTask.AssignedBuilders = math.max(0, (ctx.structureTask.AssignedBuilders or 1) - 1)
+        end
+        ctx.forcedFactoryRecover = ctx.forcedFactoryRecover + 1
+        return
+    end
+
     if ((claimedByFactoryTask and not ignoreFactoryClaim)
         or (claimedByStructureTask and not ignoreStructureClaim and not ignoreEcoClaimForSecondFactory)
         or claimedByRadarOrder) then
