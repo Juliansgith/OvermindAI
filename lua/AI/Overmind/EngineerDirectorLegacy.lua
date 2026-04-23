@@ -2455,9 +2455,10 @@ local function AssignBuildersToUnfinishedStructure(aiBrain, runtime, now, target
     local raid = runtime.RaidDefense or {}
     local airThreatened = bomberWatch or bomberPanic or raid.UnderAirHarass or exposedMexAirRaid
     local targetFraction = GetFraction(target)
+    local firstT2PowerTarget = IsUnfinishedFirstT2PowerTarget(aiBrain, target)
     local requiredBuilders = ComputeStructureTaskRequirements(kind, targetFraction, stallTime, eco)
     local kindLower = string.lower(kind or 'none')
-    if mexEmergencyActive and kind ~= 'Mex' then
+    if mexEmergencyActive and kind ~= 'Mex' and not firstT2PowerTarget then
         if mexEmergencyRebuild then
             if kind == 'Power' and targetFraction >= 0.78 then
                 requiredBuilders = math.max(1, requiredBuilders - 1)
@@ -2481,6 +2482,10 @@ local function AssignBuildersToUnfinishedStructure(aiBrain, runtime, now, target
     local forceInterrupt = stallTime >= 8 or kind == 'Mex' or kind == 'Power' or (kind == 'Radar' and radarCritical)
     if forceFinishPower then
         requiredBuilders = math.max(2, requiredBuilders)
+        forceInterrupt = true
+    end
+    if firstT2PowerTarget then
+        requiredBuilders = math.max(5, requiredBuilders + 3)
         forceInterrupt = true
     end
     if (kindLower == 'aa' or kindLower == 'defense') and (targetFraction >= 0.15 or stallTime >= 4) then
@@ -2511,6 +2516,9 @@ local function AssignBuildersToUnfinishedStructure(aiBrain, runtime, now, target
     if forceFinishPower then
         dispatchRadius = dispatchRadius + 120
     end
+    if firstT2PowerTarget then
+        dispatchRadius = math.max(dispatchRadius, 560)
+    end
     if kindLower == 'aa' or kindLower == 'defense' then
         dispatchRadius = dispatchRadius + 100
     elseif kindLower == 'structure' and targetFraction >= 0.45 then
@@ -2536,6 +2544,9 @@ local function AssignBuildersToUnfinishedStructure(aiBrain, runtime, now, target
     end
     if forceFinishPower then
         interruptQCap = math.max(interruptQCap, 4)
+    end
+    if firstT2PowerTarget then
+        interruptQCap = math.max(interruptQCap, 8)
     end
     if kindLower == 'aa' or kindLower == 'defense' or (kindLower == 'structure' and targetFraction >= 0.45) then
         interruptQCap = math.max(interruptQCap, 4)
@@ -2571,13 +2582,19 @@ local function AssignBuildersToUnfinishedStructure(aiBrain, runtime, now, target
                     local isCommander = EntityCategoryContains(categories.COMMAND, unit)
                     local localThreat = aiBrain:GetThreatAtPosition(pos, 1, true, 'AntiSurface') or 0
                     local safeCap = isCommander and 3.2 or 2.6
+                    if firstT2PowerTarget then
+                        safeCap = safeCap + 2.2
+                    end
                     if kind == 'Mex' then
                         safeCap = safeCap + 0.4
                     end
                     if stallTime >= 18 then
                         safeCap = safeCap + 0.5
                     end
-                    local safe = localThreat <= safeCap and targetThreat <= (safeCap + 0.8)
+                    local safe = localThreat <= safeCap and targetThreat <= (safeCap + (firstT2PowerTarget and 2.4 or 0.8))
+                    if firstT2PowerTarget and mainPos and Distance2D(targetPos, mainPos) <= 190 and Distance2D(pos, mainPos) <= 240 then
+                        safe = true
+                    end
                     if isCommander and mainPos and Distance2D(pos, mainPos) > 170 then
                         safe = false
                     end
@@ -2599,7 +2616,8 @@ local function AssignBuildersToUnfinishedStructure(aiBrain, runtime, now, target
                                 Busy = busy,
                                 AlreadyAssigned = alreadyAssigned and true or false,
                                 IsCommander = isCommander and true or false,
-                                Score = ScoreStructureBuilder(dist, busy, alreadyAssigned, isCommander, qLen, kind),
+                                Score = ScoreStructureBuilder(dist, busy, alreadyAssigned, isCommander, qLen, kind)
+                                    + (firstT2PowerTarget and 300 or 0),
                             })
                         end
                     end
