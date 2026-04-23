@@ -1414,16 +1414,40 @@ local function DecideRolePlan(runtime, current, constraints, demand, budget, con
     if reclaimFirst then
         engineerDesired = engineerDesired + 1
     end
+    local reclaimQuota = policy.EngineerReclaimQuota or 0
+    local reclaimConversionDebt = reclaimQuota > 0
+        or ((policy.ReclaimStagnationTime or 0) >= 60
+            and (policy.ReclaimRateShort or 0) <= 0.2
+            and (((runtime.StrategicPlanner or {}).ReclaimFieldScore or 0) >= 100))
+    local lowMexOwnership = (now or 0) < 1500
+        and mexReady < 10
+        and current.Factories.Land.Ready >= 2
+        and not constraints.EcoCrash
+    if lowMexOwnership or reclaimConversionDebt then
+        local expansionWorkerFloor = 8
+            + math.floor((current.Factories.Ready or 0) * 1.45)
+            + math.max(0, 10 - mexReady)
+            + (reclaimQuota * 2)
+        if mexReady < 7 then
+            expansionWorkerFloor = expansionWorkerFloor + 2
+        end
+        if reclaimConversionDebt then
+            expansionWorkerFloor = expansionWorkerFloor + 2
+        end
+        engineerDesired = math.max(engineerDesired, math.min(26, expansionWorkerFloor))
+    end
     if current.Factories.Land.Ready >= 1
         and (now or 0) < 660
         and earlyLandScreenUnits < (((now or 0) < 240) and 4 or (((now or 0) < 420) and 8 or 12))
+        and not lowMexOwnership
+        and not reclaimConversionDebt
         and not constraints.CriticalFactory
         and not constraints.CriticalStructure
         and not constraints.EcoCrash then
         local engineerCap = ((now or 0) < 420) and 6 or 8
         engineerDesired = math.min(engineerDesired, math.max(engineerCap, current.RoleUnits.Engineer or 0))
     end
-    engineerDesired = Clamp(engineerDesired, 3, 20)
+    engineerDesired = Clamp(engineerDesired, 3, 28)
 
     return {
         Engineer = BuildRoleEntry('Engineer', current.Roles.Engineer, current.RoleUnits.Engineer, engineerDesired, Clamp(0.42 + (demand.EcoRecovery * 0.08) + (constraints.CriticalFactory and 0.18 or 0) + (mexPressure and 0.14 or 0) + (severeMexDeficit and 0.1 or 0), 0.2, 0.98), SelectReason((mexPressure or severeMexDeficit) and 'mex_recovery' or ((constraints.BomberPanic or constraints.ExposedMexAirRaid) and 'engineer_preserve' or (constraints.BomberWatch and 'bomber_watch' or (constraints.CriticalFactory and 'critical_factory' or (constraints.EcoWeak and 'eco_recovery' or 'worker_floor')))), (demand.ExpansionPressure > 0) and 'expansion' or nil, (constraints.QueueStarved and 'queue_recovery' or nil))),

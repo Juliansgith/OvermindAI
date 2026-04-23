@@ -166,6 +166,7 @@ function UpdatePolicy(aiBrain, now)
     local forceFactoryRecovery = recovery.ForceFactoryRecovery == true
     local forceBaseRecovery = recovery.ForceBaseEngineerRecovery == true
     local stagnation = recovery.StagnationTime or 0
+    local acuCrisisActive = now < (runtime.ACUCrisisUntil or -999)
     local phase, macroCounts = DetermineMacroPhase(aiBrain, runtime, eco, opp, recovery, now)
     runtime.MacroPhase = phase
     runtime.MacroCounts = macroCounts
@@ -224,12 +225,16 @@ function UpdatePolicy(aiBrain, now)
             or structure.SafeForwardMexCount >= 2
             or structure.OuterMexShare >= 0.34
         )
+    local reclaimFieldScore = planner.ReclaimFieldScore or 0
+    local reclaimFieldAvailable = reclaimFieldScore >= 110
+    local reclaimUnderPressure = reclaimFieldAvailable or (structure.SafeForwardMexCount or 0) >= 2
     local reclaimPressureMode = (contestMapMode or prioritizeProduction)
         and stableTempoEco
         and now >= 240
         and not forceFactoryRecovery
         and not forceBaseRecovery
-        and not enemyPressure
+        and not acuCrisisActive
+        and (not enemyPressure or reclaimUnderPressure)
         and (
             structure.ContestableZoneCount >= 2
             or structure.OuterMexShare >= 0.34
@@ -362,14 +367,31 @@ function UpdatePolicy(aiBrain, now)
     if focusOnT1Spam or contestMapMode or prioritizeProduction then
         policy.MexUpgradeConcurrency = math.min(policy.MexUpgradeConcurrency, frontSecureUpgradeWindow and 2 or 1)
     end
+    local lowMexExpansionNeed = now < 1500 and (macroCounts.Mex or 0) < 11 and phase ~= 'bootstrap'
     policy.EngineerReclaimQuota = 0
-    if reclaimPressureMode or ((planner.ReclaimFirst == true or planner.OuterRetentionActive == true) and (planner.ReclaimFieldScore or 0) >= 90) then
+    if reclaimPressureMode or ((planner.ReclaimFirst == true or planner.OuterRetentionActive == true) and reclaimFieldScore >= 90) then
         policy.EngineerReclaimQuota = 1
     end
-    if (planner.ReclaimFieldScore or 0) >= 190 and (velocity.ReclaimStagnationTime or 0) >= 45 and pressure.SurvivalCrisis ~= true then
+    if reclaimFieldAvailable and now >= 220 and phase ~= 'bootstrap' and pressure.SurvivalCrisis ~= true and not acuCrisisActive then
+        policy.EngineerReclaimQuota = math.max(policy.EngineerReclaimQuota, 1)
+    end
+    if reclaimFieldScore >= 190 and (velocity.ReclaimStagnationTime or 0) >= 45 and pressure.SurvivalCrisis ~= true then
         policy.EngineerReclaimQuota = 2
     end
-    policy.EngineerExpansionQuota = (contestMapMode or focusOnT1Spam) and 2 or 1
+    if reclaimFieldScore >= 220 and now >= 360 and pressure.SurvivalCrisis ~= true and not acuCrisisActive then
+        policy.EngineerReclaimQuota = math.max(policy.EngineerReclaimQuota, 2)
+    end
+    if reclaimFieldScore >= 150
+        and (velocity.ReclaimStagnationTime or 0) >= 60
+        and (velocity.ReclaimRateShort or 0) <= 0.2
+        and pressure.SurvivalCrisis ~= true
+        and not acuCrisisActive then
+        policy.EngineerReclaimQuota = math.max(policy.EngineerReclaimQuota, 2)
+    end
+    policy.EngineerExpansionQuota = (contestMapMode or focusOnT1Spam or lowMexExpansionNeed) and 2 or 1
+    if lowMexExpansionNeed and (macroCounts.Mex or 0) < 8 then
+        policy.EngineerExpansionQuota = 3
+    end
     policy.EngineerBaseQuota = pressure.SurvivalCrisis and 4 or ((phase == 'bootstrap' or phase == 'recover') and 3 or 2)
 
     if now < 420 then
@@ -644,6 +666,13 @@ function UpdatePolicy(aiBrain, now)
         policy.MassFabMassTrend = policy.MassFabMassTrend + 0.2
         policy.MassFabEnergyTrend = policy.MassFabEnergyTrend + 40
         policy.MassFabMinT3Mex = policy.MassFabMinT3Mex + 2
+    end
+
+    if lowMexExpansionNeed
+        or (reclaimFieldScore >= 130 and (velocity.ReclaimStagnationTime or 0) >= 60 and pressure.SurvivalCrisis ~= true) then
+        policy.EngineerReserveMin = math.max(policy.EngineerReserveMin, 5)
+        policy.BaseEngineerFloor = math.max(policy.BaseEngineerFloor, 4)
+        policy.EngineerFactoryRatio = math.max(policy.EngineerFactoryRatio, 1.02)
     end
 
     policy.FactoryMassRatio = Clamp(policy.FactoryMassRatio, 0.18, 0.5)

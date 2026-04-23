@@ -328,11 +328,20 @@ local function TryReclaimFieldZone(aiBrain, runtime, eng, targetPos, now)
     local quietField = enemySupport <= 0
         and supportWeightedThreat <= 0.25
         and routeRisk <= (quotaForced and 2.8 or 2.2)
+    if quotaForced then
+        minFieldMass = math.min(minFieldMass, planner.ReclaimFirst and 45 or 60)
+        threatCap = math.max(threatCap, outerBacked and 2.55 or 2.15)
+        routeRiskCap = math.max(routeRiskCap, outerBacked and 4.6 or 4.0)
+        quietField = quietField
+            or (enemySupport <= 0 and supportWeightedThreat <= 0.55 and routeRisk <= 3.8)
+        minSupport = quietField and 0 or math.min(minSupport, 1)
+    end
 
     if table.getn(reclaimTargets) <= 0 or reclaimMass < minFieldMass then
         return false
     end
-    if distMain > (((runtime.EcoPolicy or {}).SafeExpandDistance or 680) + 100) then
+    local maxFieldDistance = ((runtime.EcoPolicy or {}).SafeExpandDistance or 680) + (quotaForced and 220 or 100)
+    if distMain > maxFieldDistance then
         return false
     end
     if supportWeightedThreat > threatCap then
