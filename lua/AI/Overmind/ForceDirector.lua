@@ -369,6 +369,10 @@ function Module.Update(aiBrain, now)
     local tradeTechForTempo = planner.TradeTechForTempo == true
     local outerRetentionActive = planner.OuterRetentionActive == true
     local reclaimFirst = planner.ReclaimFirst == true
+    local engineerState = runtime.EngineerState or {}
+    local current = ((runtime.ProductionDirector or {}).Current) or {}
+    local mexReady = (((current.Eco or {}).Mex or {}).Ready) or 0
+    local mapControl = ((runtime.ZoneModel or {}).MapControl) or 0.5
     local ownPos = GetMainPos(aiBrain, runtime)
     local frontPos = intel.FrontLinePos or runtime.PrimaryEnemyPos or ownPos
     local raidPos = intel.BestRaidPos or runtime.PrimaryEnemyPos or frontPos
@@ -450,6 +454,15 @@ function Module.Update(aiBrain, now)
     local airGuardNeed = Clamp(2 + (airThreatZones * 2) + (raid.UnderAirHarass and 2 or 0) + (severeBomberRaid and 2 or 0), 2, 12)
     local outerContestNeed = 0
     local previousOuterCount = (previousTasks.outer_contest and (previousTasks.outer_contest.CurrentUnits or 0)) or 0
+    local expansionEscortWanted = outerContestPos
+        and not acuCrisisActive
+        and not approachTowardHome
+        and landCombatTotal >= 4
+        and (
+            engineerState.MexEmergencyActive == true
+            or reclaimFirst
+            or (now < 1200 and mexReady < 9 and mapControl < 0.42)
+        )
     if approachClose then
         baseGuardDirectNeed = Clamp(baseGuardDirectNeed + math.max(1, math.min(5, math.floor(approachThreat * 0.28))), 4, 16)
         mainlineNeed = Clamp(mainlineNeed + math.max(1, math.min(6, math.floor(approachThreat * 0.32))), 8, 40)
@@ -501,6 +514,13 @@ function Module.Update(aiBrain, now)
             airGuardNeed = Clamp(airGuardNeed + 1, 2, 12)
         end
         outerContestNeed = math.max(outerContestNeed, 2)
+    end
+    if expansionEscortWanted then
+        local escortNeed = 2 + math.floor(math.min(10, landCombatTotal) * 0.18)
+        if mexReady < 6 or mapControl < 0.28 then
+            escortNeed = escortNeed + 1
+        end
+        outerContestNeed = math.max(outerContestNeed, Clamp(escortNeed, 2, landCombatTotal < 8 and 3 or 6))
     end
     if forceAirAnswer then
         airGuardNeed = Clamp(airGuardNeed + 1, 2, 12)
@@ -969,6 +989,7 @@ function Module.Update(aiBrain, now)
         BomberStrike = CountUnits(bomberStrike),
         AirScout = CountUnits(airScoutGroup),
     }
+    state.ExpansionEscortActive = expansionEscortWanted and outerContestNeed > 0
 
     state.RoleDemand = {
     }
@@ -1088,7 +1109,7 @@ function Module.Update(aiBrain, now)
     }, now)
     UpdateTask(state, 'outer_contest', {
         Role = 'outer_contest',
-        Priority = 58 + math.floor(math.min(18, outerContestValue / 40)) + (reclaimFirst and 8 or 0) + ((primaryTheater ~= 'Home') and 4 or 0),
+        Priority = 58 + math.floor(math.min(18, outerContestValue / 40)) + (reclaimFirst and 8 or 0) + (expansionEscortWanted and 12 or 0) + ((primaryTheater ~= 'Home') and 4 or 0),
         AnchorPos = ownPos,
         TargetPos = outerContestPos,
         StagingPos = LerpPos(ownPos, outerContestPos or frontPos, 0.48),
@@ -1096,7 +1117,7 @@ function Module.Update(aiBrain, now)
         DesiredUnits = outerContestNeed,
         DesiredStrength = outerContestDesiredStrength,
         Timeout = 75,
-        Objective = reclaimFirst and 'secure_reclaim_field' or 'hold_outer_contest',
+        Objective = expansionEscortWanted and 'screen_expansion_engineers' or (reclaimFirst and 'secure_reclaim_field' or 'hold_outer_contest'),
         RouteName = 'expansion',
         HoldRadius = 20,
         CommitRadius = 42,

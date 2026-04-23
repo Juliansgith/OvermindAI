@@ -4,6 +4,7 @@ local Threat = import('/mods/OvermindAI/lua/AI/Overmind/EngineerDirector/Threat.
 local OvermindMemory = import('/mods/OvermindAI/lua/AI/Overmind/Memory.lua')
 
 local T1MexCategory = categories.STRUCTURE * categories.MASSEXTRACTION * categories.TECH1
+local LandCombatCategory = categories.MOBILE * categories.LAND - categories.ENGINEER - categories.SCOUT - categories.COMMAND
 
 
 local M = {}
@@ -246,6 +247,59 @@ local function HasFriendlyMexAtPos(aiBrain, pos, radius)
     return (aiBrain:GetNumUnitsAroundPoint(categories.STRUCTURE * categories.MASSEXTRACTION, pos, radius or 8, 'Ally') or 0) > 0
 end
 
+local function LerpPos(a, b, alpha)
+    local t = alpha or 0.5
+    return {
+        (a[1] or 0) + (((b[1] or 0) - (a[1] or 0)) * t),
+        (a[2] or 0) + (((b[2] or 0) - (a[2] or 0)) * t),
+        (a[3] or 0) + (((b[3] or 0) - (a[3] or 0)) * t),
+    }
+end
+
+local function HasExpansionEscortSupport(aiBrain, runtime, mainPos, targetPos)
+    if not aiBrain or not targetPos then
+        return false
+    end
+
+    if (aiBrain:GetNumUnitsAroundPoint(LandCombatCategory, targetPos, 54, 'Ally') or 0) >= 2 then
+        return true
+    end
+    if mainPos then
+        local routePos = LerpPos(mainPos, targetPos, 0.58)
+        if (aiBrain:GetNumUnitsAroundPoint(LandCombatCategory, routePos, 42, 'Ally') or 0) >= 2 then
+            return true
+        end
+    end
+
+    local force = runtime and runtime.ForceDirector or {}
+    local outerTask = ((force.Tasks or {}).outer_contest) or {}
+    local outerCount = outerTask.CurrentUnits or table.getn(outerTask.AssignedUnitRefs or {})
+    local outerTarget = outerTask.TargetPos
+        or ((runtime and runtime.StrategicPlanner or {}).ReclaimFieldPos)
+        or ((runtime and runtime.StrategicPlanner or {}).OuterContestPos)
+    return outerCount >= 2 and outerTarget and Common.Distance2D(outerTarget, targetPos) <= 130
+end
+
+local function NeedsExpansionEscort(aiBrain, runtime, mainPos, targetPos, now, mexReady)
+    if not aiBrain or not mainPos or not targetPos then
+        return false
+    end
+    local distMain = Common.Distance2D(mainPos, targetPos)
+    if (now or 0) < 210 or distMain < 155 then
+        return false
+    end
+
+    local routeRisk = OvermindMemory.GetRouteRisk(aiBrain, mainPos, targetPos, 4, 48)
+    local targetThreat = aiBrain:GetThreatAtPosition(targetPos, 1, true, 'AntiSurface') or 0
+    local mapControl = ((runtime and runtime.ZoneModel) and runtime.ZoneModel.MapControl) or 0.5
+    local mexEmergency = ((runtime and runtime.EngineerState) and runtime.EngineerState.MexEmergencyActive == true) or false
+    return mexEmergency
+        or (mexReady or 0) < 8
+        or mapControl < 0.34
+        or routeRisk > 1.45
+        or targetThreat > 0.25
+end
+
 local function NeedsBootstrapPower(aiBrain, runtime)
     local director = runtime and runtime.ProductionDirector or {}
     local constraints = director and director.ConstraintState or {}
@@ -300,9 +354,10 @@ local function FindExpansionTarget(aiBrain, runtime, mainPos, enemyPos, maxDista
             and node.Classification ~= 'enemy_side'
             and (node.GraphDistHome or 999999) <= (maxDistance + 120)
             and (node.Threat or 0) <= (threatCap + 0.45)
-            and (node.RouteRisk or 0) <= 8
+            and (node.RouteRisk or 0) <= 5
             and not HasFriendlyMexAtPos(aiBrain, node.Pos, 8)
-            and not IsReservedExpansionTarget(runtime, now, node.Pos, engineerId) then
+            and not IsReservedExpansionTarget(runtime, now, node.Pos, engineerId)
+            and IsSafeExpansionTarget(aiBrain, runtime, node.Pos, mainPos, enemyPos, maxDistance, threatCap + 0.15) then
             return node.Pos
         end
     end
@@ -395,6 +450,7 @@ local function DispatchExpansionEngineer(aiBrain, runtime, now, engineers, mainP
     local raid = runtime and runtime.RaidDefense or {}
     local engState = runtime and runtime.EngineerState or {}
     local mexEmergency = engState and engState.MexEmergencyActive == true
+    local mexReady = (((director.Current or {}).Eco or {}).Mex or {}).Ready or 0
     local bootstrap = constraints and constraints.EconBootstrap == true
     local starterPhase = constraints and constraints.StarterPhase == true
     local contestDispatch = policy.ForwardContestBias == true
@@ -436,13 +492,19 @@ local function DispatchExpansionEngineer(aiBrain, runtime, now, engineers, mainP
                 if not target then
                     break
                 end
+                local targetSupported = HasExpansionEscortSupport(aiBrain, runtime, mainPos, target)
+                if NeedsExpansionEscort(aiBrain, runtime, mainPos, target, now, mexReady) and not targetSupported then
+                    runtime.LastExpansionEscortBlockedTime = now
+                    runtime.LastExpansionEscortBlockedPos = target
+                    break
+                end
                 local bp = PickMexBlueprint(eng)
                 if bp and IssueBuildMobile then
                     local engineerId = Common.GetEntityId(eng)
                     ReserveExpansionTarget(runtime, now, target, engineerId)
                     IssueBuildMobile({ eng }, target, bp, {})
                     local landReady = ((((runtime.ProductionDirector or {}).Current or {}).Factories or {}).Land or {}).Ready or 0
-                    if now < 420 or landReady <= 1 then
+                    if targetSupported or ((now < 300 or landReady <= 1) and Common.Distance2D(mainPos, target) <= 165) then
                         local followup = FindFollowupExpansionTarget(
                             aiBrain,
                             runtime,

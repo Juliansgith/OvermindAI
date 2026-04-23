@@ -748,7 +748,8 @@ function RunPressureCycle(aiBrain, now)
     local raidTarget = (raidTask and raidTask.TargetPos) or intel.BestRaidPos or (runtime.ZoneModel and runtime.ZoneModel.BestRaidPos) or primaryEnemyPos
     local outerTarget = (outerTask and outerTask.TargetPos) or (runtime.StrategicPlanner and (runtime.StrategicPlanner.ReclaimFieldPos or runtime.StrategicPlanner.OuterContestPos)) or intel.BestExpansionPos or raidTarget
     local outerStage = (outerTask and outerTask.StagingPos) or LerpPos(ownPos, outerTarget or frontPos, 0.46)
-    local outerRetentionActive = (runtime.StrategicPlanner and runtime.StrategicPlanner.OuterRetentionActive == true) or false
+    local outerRetentionActive = (runtime.StrategicPlanner and runtime.StrategicPlanner.OuterRetentionActive == true)
+        or (((runtime.ForceDirector or {}).ExpansionEscortActive == true) and true or false)
     local reclaimFirst = (runtime.StrategicPlanner and runtime.StrategicPlanner.ReclaimFirst == true) or false
     local function RegroupSideCohort(task, units, count, targetPos)
         if count <= 0 or not IssueMove then

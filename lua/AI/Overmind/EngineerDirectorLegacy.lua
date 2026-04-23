@@ -639,6 +639,57 @@ local function HasFriendlyMexAtPos(aiBrain, pos, radius)
     return (aiBrain:GetNumUnitsAroundPoint(categories.STRUCTURE * categories.MASSEXTRACTION, pos, radius or 8, 'Ally') or 0) > 0
 end
 
+local function HasExpansionEscortSupport(aiBrain, runtime, mainPos, targetPos)
+    if not aiBrain or not targetPos then
+        return false
+    end
+
+    local nearTarget = aiBrain:GetNumUnitsAroundPoint(LandCombatCategory, targetPos, 54, 'Ally') or 0
+    if nearTarget >= 2 then
+        return true
+    end
+
+    if mainPos then
+        local routePos = {
+            (mainPos[1] or 0) + (((targetPos[1] or 0) - (mainPos[1] or 0)) * 0.58),
+            (mainPos[2] or 0) + (((targetPos[2] or 0) - (mainPos[2] or 0)) * 0.58),
+            (mainPos[3] or 0) + (((targetPos[3] or 0) - (mainPos[3] or 0)) * 0.58),
+        }
+        local routeSupport = aiBrain:GetNumUnitsAroundPoint(LandCombatCategory, routePos, 42, 'Ally') or 0
+        if routeSupport >= 2 then
+            return true
+        end
+    end
+
+    local force = runtime and runtime.ForceDirector or {}
+    local outerTask = ((force.Tasks or {}).outer_contest) or {}
+    local outerCount = outerTask.CurrentUnits or table.getn(outerTask.AssignedUnitRefs or {})
+    local outerTarget = outerTask.TargetPos
+        or ((runtime and runtime.StrategicPlanner or {}).ReclaimFieldPos)
+        or ((runtime and runtime.StrategicPlanner or {}).OuterContestPos)
+    return outerCount >= 2 and outerTarget and Distance2D(outerTarget, targetPos) <= 130
+end
+
+local function NeedsExpansionEscort(aiBrain, runtime, mainPos, targetPos, now, mexReady)
+    if not aiBrain or not mainPos or not targetPos then
+        return false
+    end
+    local distMain = Distance2D(mainPos, targetPos)
+    if now < 210 or distMain < 155 then
+        return false
+    end
+
+    local routeRisk = OvermindMemory.GetRouteRisk(aiBrain, mainPos, targetPos, 4, 48)
+    local targetThreat = aiBrain:GetThreatAtPosition(targetPos, 1, true, 'AntiSurface') or 0
+    local mapControl = ((runtime and runtime.ZoneModel) and runtime.ZoneModel.MapControl) or 0.5
+    local mexEmergency = ((runtime and runtime.EngineerState) and runtime.EngineerState.MexEmergencyActive == true) or false
+    return mexEmergency
+        or (mexReady or 0) < 8
+        or mapControl < 0.34
+        or routeRisk > 1.45
+        or targetThreat > 0.25
+end
+
 local function NeedsBootstrapPower(aiBrain, runtime)
     local director = runtime and runtime.ProductionDirector or {}
     local constraints = director and director.ConstraintState or {}
@@ -712,9 +763,10 @@ local function FindExpansionTarget(aiBrain, runtime, mainPos, enemyPos, maxDista
             and node.Classification ~= 'enemy_side'
             and (node.GraphDistHome or 999999) <= (maxDistance + 120)
             and (node.Threat or 0) <= (threatCap + 0.45)
-            and (node.RouteRisk or 0) <= 8
+            and (node.RouteRisk or 0) <= 5
             and not HasFriendlyMexAtPos(aiBrain, node.Pos, 8)
-            and not IsReservedExpansionTarget(runtime, now, node.Pos, engineerId) then
+            and not IsReservedExpansionTarget(runtime, now, node.Pos, engineerId)
+            and IsSafeExpansionTarget(aiBrain, runtime, node.Pos, mainPos, enemyPos, maxDistance, threatCap + (mexRebuildUrgent and 0.15 or 0)) then
             if mexRebuildUrgent then
                 return node.Pos
             end
@@ -877,14 +929,24 @@ local function DispatchExpansionEngineer(aiBrain, runtime, now, engineers, mainP
                 if not target then
                     break
                 end
+                local targetSupported = HasExpansionEscortSupport(aiBrain, runtime, mainPos, target)
+                local targetNeedsEscort = NeedsExpansionEscort(aiBrain, runtime, mainPos, target, now, mexReadyActual)
+                if targetNeedsEscort and not targetSupported then
+                    runtime.LastExpansionEscortBlockedTime = now
+                    runtime.LastExpansionEscortBlockedPos = target
+                    break
+                end
                 local bp = PickMexBlueprint(eng)
                     if bp and IssueBuildMobile then
                         local engineerId = GetEntityId(eng)
                         ReserveExpansionTarget(runtime, now, target, engineerId)
                         IssueBuildMobile({ eng }, target, bp, {})
                         local landReady = ((((runtime.ProductionDirector or {}).Current or {}).Factories or {}).Land or {}).Ready or 0
-                        local followupBudget = (mexEmergency and 2) or 1
-                        if now < 420 or landReady <= 1 or mexEmergency then
+                        local followupBudget = targetSupported and ((mexEmergency and 1) or 1) or 0
+                        if (now < 300 or landReady <= 1) and Distance2D(mainPos, target) <= 165 then
+                            followupBudget = math.max(followupBudget, 1)
+                        end
+                        if followupBudget > 0 then
                             local anchorPos = target
                             for _ = 1, followupBudget do
                                 local followup = FindFollowupExpansionTarget(
@@ -1984,6 +2046,13 @@ local function TryOpenSurplusExpansionBuild(aiBrain, runtime, eng, mainPos, enem
     if not target then
         return false
     end
+    local targetSupported = HasExpansionEscortSupport(aiBrain, runtime, mainPos, target)
+    local targetNeedsEscort = NeedsExpansionEscort(aiBrain, runtime, mainPos, target, now, mexReady)
+    if targetNeedsEscort and not targetSupported then
+        runtime.LastExpansionEscortBlockedTime = now
+        runtime.LastExpansionEscortBlockedPos = target
+        return false
+    end
 
     local bp = PickMexBlueprint(eng)
     if not bp then
@@ -1993,7 +2062,12 @@ local function TryOpenSurplusExpansionBuild(aiBrain, runtime, eng, mainPos, enem
     ReserveExpansionTarget(runtime, now, target, engineerId)
     IssueBuildMobile({ eng }, target, bp, {})
 
-    local followupBudget = (macroPhase == 'starter_mex_claim') and 4 or (((rebuildUrgent or mexExpansionUrgent) or mexReady <= 6) and 3 or 1)
+    local followupBudget = 0
+    if targetSupported then
+        followupBudget = (macroPhase == 'starter_mex_claim') and 2 or (((rebuildUrgent or mexExpansionUrgent) or mexReady <= 6) and 1 or 1)
+    elseif Distance2D(mainPos, target) <= 165 and now < 360 then
+        followupBudget = 1
+    end
     if followupBudget > 0 then
         local anchorPos = target
         local followupDistance = math.max(searchPrimary, safeExpandDistance + 140)
