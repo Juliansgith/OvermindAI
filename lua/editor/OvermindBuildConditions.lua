@@ -1048,6 +1048,16 @@ local function IsFactoryControllerHealthy(aiBrain)
     return true
 end
 
+local function IsEngineerDirectorHealthy(aiBrain)
+    if not IsOvermindBrain(aiBrain) then
+        return false
+    end
+
+    local runtime = aiBrain.OvermindRuntime or {}
+    local now = GetGameTimeSeconds()
+    return (runtime.LastEngineerDirectorTime or -999) >= (now - 18)
+end
+
 function ShouldUseLegacyFactoryProduction(aiBrain, mode)
     if not IsOvermindBrain(aiBrain) then
         return false
@@ -1076,6 +1086,14 @@ function ShouldUseLegacyFactoryProduction(aiBrain, mode)
     end
 
     return false
+end
+
+function ShouldUseLegacyPowerProduction(aiBrain)
+    if not IsOvermindBrain(aiBrain) then
+        return false
+    end
+
+    return not IsEngineerDirectorHealthy(aiBrain)
 end
 
 local function IsFactoryExpansionEcoBlocked(aiBrain, landFactories, airFactories, seaFactories)

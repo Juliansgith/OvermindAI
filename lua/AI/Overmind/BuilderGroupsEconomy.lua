@@ -1436,6 +1436,7 @@ BuilderGroup {
         InstanceCount = 1,
         BuilderConditions = {
             { OMBC, 'IsOvermindBrain', {} },
+            { OMBC, 'ShouldUseLegacyPowerProduction', {} },
             { OMBC, 'ShouldPrioritizeFirstTech2Power', {} },
         },
         BuilderType = 'Any',
@@ -1453,6 +1454,7 @@ BuilderGroup {
         InstanceCount = 1,
         BuilderConditions = {
             { OMBC, 'IsOvermindBrain', {} },
+            { OMBC, 'ShouldUseLegacyPowerProduction', {} },
             { OMBC, 'ShouldBuildPower', {} },
             { EBC, 'LessThanEconStorageRatio', { 1.0, 0.65 } },
             { EBC, 'LessThanEconEfficiencyOverTime', { 2.0, 1.12 } },
@@ -1823,6 +1825,7 @@ BuilderGroup {
         Priority = 940,
         BuilderConditions = {
             { OMBC, 'IsOvermindBrain', {} },
+            { OMBC, 'ShouldUseLegacyPowerProduction', {} },
             { OMBC, 'ShouldBuildPower', {} },
             { EBC, 'LessThanEconStorageRatio', { 1.0, 0.7 } },
             { EBC, 'GreaterThanEconIncome', { 3, 70 } },

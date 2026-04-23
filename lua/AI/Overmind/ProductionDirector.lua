@@ -2939,7 +2939,7 @@ function Module.Update(aiBrain, now)
 
     if now - (state.LastLogTime or -999) >= 34 then
         state.LastLogTime = now
-        LOG(string.format('*OVERMIND PRODDIR A%d t=%.1f mode=%s obj=%s/%s conf=%.2f debt=%.2f fac=%d/%d/%d->%d/%d/%d bud=%.2f/%.2f/%.2f/%.2f/%.2f/%.2f/%.2f str=%.1f/%.1f/%.1f->%.1f/%.1f/%.1f gap=%.1f/%.1f/%.1f eng=%.1f/%.1f(%d/%d) eco=%d:%d/%d:%d/%d ft=%d:%s:%d/%d mex=%d:%s:%.2f struct=R%d S%d AA%d PD%d tech=%d:%s emerg=%d%d%d',
+        LOG(string.format('*OVERMIND PRODDIR A%d t=%.1f mode=%s obj=%s/%s conf=%.2f debt=%.2f fac=%d/%d/%d->%d/%d/%d bud=%.2f/%.2f/%.2f/%.2f/%.2f/%.2f/%.2f str=%.1f/%.1f/%.1f->%.1f/%.1f/%.1f gap=%.1f/%.1f/%.1f eng=%.1f/%.1f(%d/%d) eco=%d:%d/%d:%d/%d mex=%d:%d ft=%d:%s:%d/%d upg=%d:%s:%.2f struct=R%d S%d AA%d PD%d tech=%d:%s emerg=%d%d%d',
             aiBrain:GetArmyIndex(),
             now,
             mode,
@@ -2978,6 +2978,8 @@ function Module.Update(aiBrain, now)
             (((current.Eco or {}).Mex or {}).Total) or 0,
             (((current.Eco or {}).Power or {}).Ready) or 0,
             (((current.Eco or {}).Power or {}).Total) or 0,
+            (((current.Eco or {}).Mex or {}).Ready) or 0,
+            (((current.Eco or {}).Mex or {}).Total) or 0,
             current.FactoryTask.Active and 1 or 0,
             current.FactoryTask.Domain or 'none',
             current.FactoryTask.AssignedBuilders or 0,

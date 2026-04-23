@@ -634,6 +634,19 @@ function Module.Update(aiBrain, now)
     elseif acuEmergencyNeed > 0 then
         minimumMainlineCommit = math.max(2, minimumMainlineCommit - 6)
     end
+    if not acuCrisisActive
+        and not approachTowardHome
+        and primaryTheater ~= 'Home'
+        and (outerRetentionActive or tradeTechForTempo or punishGreed or raidCentrality >= 0.35) then
+        local fieldShare = outerRetentionActive and 0.54 or 0.46
+        local fieldFloor = Clamp(
+            math.floor(landCombatTotal * fieldShare)
+                + ((contestedZones >= 2) and 2 or 0)
+                + ((primaryTheater == 'Enemy') and 1 or 0),
+            4,
+            math.max(4, landCombatTotal - 1))
+        minimumMainlineCommit = math.max(minimumMainlineCommit, fieldFloor)
+    end
     if outerRetentionActive
         and outerContestPos
         and not acuCrisisActive
@@ -675,6 +688,19 @@ function Module.Update(aiBrain, now)
         local maxGuardTotal = landCombatTotal - acuEscortNeed - interceptNeed - minimumMainlineCommit
         if maxGuardTotal < 0 then
             maxGuardTotal = 0
+        end
+        if not frontCrisis
+            and not assetSiege
+            and not approachTowardHome
+            and primaryTheater ~= 'Home' then
+            local softGuardCap = Clamp(
+                math.floor(landCombatTotal * (outerRetentionActive and 0.2 or 0.26))
+                    + math.floor(math.max(0, homeThreat) / 3)
+                    + (raid.UnderAirHarass and 1 or 0)
+                    + math.max(0, math.floor(math.max(0, homeGuardBias) * 1.5)),
+                2,
+                math.max(3, math.floor(landCombatTotal * 0.38)))
+            maxGuardTotal = math.min(maxGuardTotal, softGuardCap)
         end
         local currentGuardNeed = baseGuardDirectNeed + baseGuardAANeed
         if currentGuardNeed > maxGuardTotal then

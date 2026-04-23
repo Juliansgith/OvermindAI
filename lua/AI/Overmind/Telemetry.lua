@@ -212,6 +212,8 @@ function Capture(aiBrain, now)
         EngineerStrengthNeed = GetRoleField(rolePlan, 'Engineer', 'DesiredStrength'),
         EngineerUnitsHave = GetRoleField(rolePlan, 'Engineer', 'CurrentUnits'),
         EngineerUnitsNeed = GetRoleField(rolePlan, 'Engineer', 'DesiredUnits'),
+        MexReady = (((current.Eco or {}).Mex or {}).Ready) or 0,
+        MexTotal = (((current.Eco or {}).Mex or {}).Total) or 0,
         StructRadar = structurePlan.Radar or 0,
         StructBaseAA = structurePlan.BaseAA or 0,
         StructPD = structurePlan.PD or 0,
@@ -289,7 +291,7 @@ function Capture(aiBrain, now)
     for _, checkpoint in checkpoints do
         if now >= checkpoint and not tele.Checkpoints[checkpoint] then
             tele.Checkpoints[checkpoint] = true
-            LOG(string.format('*OVERMIND CHECKPOINT A%d t=%ds fac=%d idleFac=%d qdef=%d qratio=%.2f harL=%d(%d) harA=%d(%d) raid=%d/%d/%d(%d) eng=%d baseEng=%d def=%d acuDist=%.1f acuEsc=%d risk=%d map=%.2f stagn=%.1f rf=%d rs=%d re=%d rd=%d phase=%s strat=%s/%s/%s:%.2f graph=%s/%d/%d intel=%d/%d cluster=%d:%.1f/%.0f force=%d/%d/%d tasks=%d[%s/%s/%s] goal=%s prod=%s fac=%d/%d/%d->%d/%d/%d pause=%d q=%s ft=%d:%s:%d/%d:%.1f st=%d:%s:%d/%d:%.1f str=%.1f/%.1f/%.1f->%.1f/%.1f/%.1f gap=%.1f/%.1f/%.1f engp=%.1f/%.1f(%d/%d) mex=%d:%s:%.2f struct=%d/%d/%d tech=%d:%s',
+            LOG(string.format('*OVERMIND CHECKPOINT A%d t=%ds fac=%d idleFac=%d qdef=%d qratio=%.2f harL=%d(%d) harA=%d(%d) raid=%d/%d/%d(%d) eng=%d baseEng=%d def=%d acuDist=%.1f acuEsc=%d risk=%d map=%.2f stagn=%.1f rf=%d rs=%d re=%d rd=%d phase=%s strat=%s/%s/%s:%.2f graph=%s/%d/%d intel=%d/%d cluster=%d:%.1f/%.0f force=%d/%d/%d tasks=%d[%s/%s/%s] goal=%s prod=%s fac=%d/%d/%d->%d/%d/%d pause=%d q=%s ft=%d:%s:%d/%d:%.1f st=%d:%s:%d/%d:%.1f str=%.1f/%.1f/%.1f->%.1f/%.1f/%.1f gap=%.1f/%.1f/%.1f engp=%.1f/%.1f(%d/%d) mex=%d:%d upg=%d:%s:%.2f struct=%d/%d/%d tech=%d:%s',
                 aiBrain:GetArmyIndex(),
                 checkpoint,
                 sample.FactoryCount or 0,
@@ -369,6 +371,8 @@ function Capture(aiBrain, now)
                 sample.EngineerStrengthNeed or 0,
                 sample.EngineerUnitsHave or 0,
                 sample.EngineerUnitsNeed or 0,
+                sample.MexReady or 0,
+                sample.MexTotal or 0,
                 sample.ExtractorUpgrades or 0,
                 sample.ExtractorUpgradeMode or 'none',
                 sample.ExtractorUpgradePriority or 0,
