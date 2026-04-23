@@ -29,6 +29,8 @@ param(
     [string]$DbComposeFile = '',
     [string]$DbEnvFile = '',
     [string]$DbProjectName = 'overmind-autotune',
+    [int]$DbHistoryPool = 24,
+    [int]$DbDirectionPool = 16,
     [switch]$DryRun
 )
 
@@ -159,10 +161,10 @@ for ($campaign = 1; $campaign -le $Campaigns; $campaign++) {
         '-MaxSurvivalRegression', $MaxSurvivalRegression,
         '-RetestTop', $RetestTop,
         '-RetestGames', $RetestGames,
-        '-RetestMaps', $RetestMaps,
         '-RunRoot', $campaignRunRoot,
         '-ChampionDir', $ChampionDir
     )
+    if (-not [string]::IsNullOrWhiteSpace($RetestMaps)) { $args += @('-RetestMaps', $RetestMaps) }
     if ($NoPromote) { $args += '-NoPromote' }
     if ($DisableAdaptiveMutation) { $args += '-DisableAdaptiveMutation' }
     if ($UseDatabase) { $args += '-UseDatabase' }
@@ -170,6 +172,8 @@ for ($campaign = 1; $campaign -le $Campaigns; $campaign++) {
     if (-not [string]::IsNullOrWhiteSpace($DbComposeFile)) { $args += @('-DbComposeFile', $DbComposeFile) }
     if (-not [string]::IsNullOrWhiteSpace($DbEnvFile)) { $args += @('-DbEnvFile', $DbEnvFile) }
     if (-not [string]::IsNullOrWhiteSpace($DbProjectName)) { $args += @('-DbProjectName', $DbProjectName) }
+    if ($DbHistoryPool -gt 0) { $args += @('-DbHistoryPool', $DbHistoryPool) }
+    if ($DbDirectionPool -gt 0) { $args += @('-DbDirectionPool', $DbDirectionPool) }
     if ($DryRun) { $args += '-DryRun' }
 
     Write-Host ("Starting campaign {0}/{1}, seed={2}" -f $campaign, $Campaigns, $campaignSeed)
@@ -237,10 +241,10 @@ if ($UseDatabase -and -not $DryRun -and (Test-Path -LiteralPath $DbIngestScript)
             '-File', $DbIngestScript,
             '-OvernightSummaryPath', $overnightSummaryPath,
             '-StartDb',
-            '-ComposeFile', $DbComposeFile,
-            '-EnvFile', $DbEnvFile,
             '-ProjectName', $DbProjectName
         )
+        if (-not [string]::IsNullOrWhiteSpace($DbComposeFile)) { $dbArgs += @('-ComposeFile', $DbComposeFile) }
+        if (-not [string]::IsNullOrWhiteSpace($DbEnvFile)) { $dbArgs += @('-EnvFile', $DbEnvFile) }
         & powershell @dbArgs
         if ($LASTEXITCODE -ne 0) {
             Write-Warning 'Autotune DB ingestion failed for overnight summary.'

@@ -28,6 +28,8 @@ param(
     [string]$DbComposeFile = '',
     [string]$DbEnvFile = '',
     [string]$DbProjectName = 'overmind-autotune',
+    [int]$DbHistoryPool = 24,
+    [int]$DbDirectionPool = 16,
     [switch]$DryRun,
     [switch]$KeepLosingCandidateConfig
 )
@@ -79,6 +81,8 @@ if ($MinAvgGameTime -lt 0) { throw 'MinAvgGameTime must be zero or higher.' }
 if ($MaxSurvivalRegression -lt 0 -or $MaxSurvivalRegression -gt 1) { throw 'MaxSurvivalRegression must be between 0 and 1.' }
 if ($RetestTop -lt 0) { throw 'RetestTop must be zero or higher.' }
 if ($RetestGames -lt 0) { throw 'RetestGames must be zero or higher.' }
+if ($DbHistoryPool -lt 0) { throw 'DbHistoryPool must be zero or higher.' }
+if ($DbDirectionPool -lt 0) { throw 'DbDirectionPool must be zero or higher.' }
 
 if ([string]::IsNullOrWhiteSpace($ChampionDir)) {
     $ChampionDir = Join-Path $RepoRoot 'autotune\champions'
@@ -113,15 +117,35 @@ function Clamp-Number {
 }
 
 function Get-ObjectPropertyValue {
-    param($Object, [string]$Name)
+    param(
+        $Object,
+        [string]$Name,
+        $Default = 0
+    )
     if ($null -eq $Object -or [string]::IsNullOrWhiteSpace($Name)) {
-        return 0
+        return $Default
+    }
+    if ($Object -is [System.Collections.IDictionary]) {
+        if ($Object.Contains($Name)) {
+            return $Object[$Name]
+        }
+        return $Default
     }
     $prop = $Object.PSObject.Properties[$Name]
     if ($null -eq $prop) {
-        return 0
+        return $Default
     }
     return $prop.Value
+}
+
+function New-EmptyHintSet {
+    param([string]$Source = 'none')
+
+    return [pscustomobject]@{
+        Directions = @{}
+        SourceCount = 0
+        Source = $Source
+    }
 }
 
 function New-TuneSpecs {
@@ -175,9 +199,12 @@ function New-TuneSpecs {
 
 function Get-DefaultTuneConfig {
     $cfg = [ordered]@{
-        Version = 3
+        Version = 4
         CandidateId = 'baseline'
         ParentCandidateId = 'manual'
+        ParentSource = 'manual'
+        ParentSessionId = ''
+        ParentFailureClass = ''
         GeneratedAt = (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')
         GeneratedBy = 'run_economy_autotune.ps1'
         Score = 0
@@ -246,6 +273,9 @@ function Write-TuneConfig {
         'Version',
         'CandidateId',
         'ParentCandidateId',
+        'ParentSource',
+        'ParentSessionId',
+        'ParentFailureClass',
         'GeneratedAt',
         'GeneratedBy',
         'Score',
@@ -273,6 +303,27 @@ function Copy-TuneConfig {
     return $clone
 }
 
+function ConvertTo-TuneConfigHashtable {
+    param($InputObject)
+
+    $cfg = Get-DefaultTuneConfig
+    if ($null -eq $InputObject) {
+        return $cfg
+    }
+
+    if ($InputObject -is [System.Collections.IDictionary]) {
+        foreach ($key in $InputObject.Keys) {
+            $cfg[[string]$key] = $InputObject[$key]
+        }
+        return $cfg
+    }
+
+    foreach ($prop in $InputObject.PSObject.Properties) {
+        $cfg[[string]$prop.Name] = $prop.Value
+    }
+    return $cfg
+}
+
 function Get-SafeName {
     param([string]$Value)
     if ([string]::IsNullOrWhiteSpace($Value)) {
@@ -297,6 +348,47 @@ function Get-RetestMapList {
         return @($MapName)
     }
     return $maps
+}
+
+function Merge-HintSets {
+    param(
+        [object[]]$HintSets,
+        [string]$Source = 'merged'
+    )
+
+    $merged = @{}
+    $sourceCount = 0
+    foreach ($hint in @($HintSets)) {
+        if ($null -eq $hint) {
+            continue
+        }
+        $sourceCount += To-Int (Get-ObjectPropertyValue -Object $hint -Name 'SourceCount')
+        $directions = Get-ObjectPropertyValue -Object $hint -Name 'Directions'
+        if ($directions -isnot [System.Collections.IDictionary]) {
+            continue
+        }
+        foreach ($name in $directions.Keys) {
+            if (-not $merged.ContainsKey($name)) {
+                $merged[$name] = 0
+            }
+            $merged[$name] += To-Int $directions[$name]
+        }
+    }
+
+    $final = @{}
+    foreach ($name in $merged.Keys) {
+        if ($merged[$name] -gt 0) {
+            $final[$name] = 1
+        } elseif ($merged[$name] -lt 0) {
+            $final[$name] = -1
+        }
+    }
+
+    return [pscustomobject]@{
+        Directions = $final
+        SourceCount = $sourceCount
+        Source = $Source
+    }
 }
 
 function Get-AdaptiveHints {
@@ -347,6 +439,242 @@ function Get-AdaptiveHints {
     return [pscustomobject]@{
         Directions = $directions
         SourceCount = $rows.Count
+        Source = 'local-history'
+    }
+}
+
+function Invoke-DbJsonQuery {
+    param(
+        $Settings,
+        [string]$Query
+    )
+
+    if ($null -eq $Settings -or -not (Get-Command Invoke-AutotuneSqlQuery -ErrorAction SilentlyContinue)) {
+        return @()
+    }
+
+    try {
+        $lines = @(Invoke-AutotuneSqlQuery -Settings $Settings -Query $Query -Quiet)
+    } catch {
+        Write-Warning ("DB query failed: {0}" -f $_)
+        return @()
+    }
+
+    $rows = @()
+    foreach ($line in $lines) {
+        if ([string]::IsNullOrWhiteSpace($line) -or $line -eq 'row_json') {
+            continue
+        }
+        try {
+            $rows += ($line | ConvertFrom-Json)
+        } catch {
+        }
+    }
+    return $rows
+}
+
+function Get-DbHistoricalCandidates {
+    param(
+        $Settings,
+        [string]$MapValue,
+        [int]$PoolSize
+    )
+
+    if ($PoolSize -le 0 -or [string]::IsNullOrWhiteSpace($MapValue)) {
+        return @()
+    }
+
+    $query = @"
+select json_build_object(
+    'SessionId', cr.session_id,
+    'CandidateId', cr.candidate_id,
+    'Score', cr.score,
+    'AvgMassRatio', cr.avg_mass_ratio,
+    'AvgGameTime', cr.avg_game_time,
+    'PrimaryFailureClass', cr.primary_failure_class,
+    'Promoted', cr.promoted,
+    'MapName', sr.map_name,
+    'OpponentKey', sr.opponent_key,
+    'Config', cr.config_json
+)::text as row_json
+from autotune.candidate_results cr
+join autotune.session_runs sr on sr.session_id = cr.session_id
+where cr.runtime_clean = true
+  and cr.config_json is not null
+  and cr.candidate_id not in ('baseline', 'retest-baseline')
+order by
+  case when sr.map_name = $(ConvertTo-AutotuneSqlLiteral $MapValue) then 0 else 1 end,
+  case when cr.promoted then 0 else 1 end,
+  coalesce(cr.avg_mass_ratio, 0) desc,
+  cr.score desc
+limit $PoolSize;
+"@
+
+    $rawRows = @(Invoke-DbJsonQuery -Settings $Settings -Query $query)
+    $rows = @()
+    foreach ($row in $rawRows) {
+        $rows += [pscustomobject]@{
+            SessionId = [string]$row.SessionId
+            CandidateId = [string]$row.CandidateId
+            Score = To-Double $row.Score
+            AvgMassRatio = To-Double $row.AvgMassRatio
+            AvgGameTime = To-Double $row.AvgGameTime
+            PrimaryFailureClass = [string]$row.PrimaryFailureClass
+            Promoted = [bool]$row.Promoted
+            MapName = [string]$row.MapName
+            OpponentKey = [string]$row.OpponentKey
+            Config = ConvertTo-TuneConfigHashtable -InputObject $row.Config
+            Source = if ($row.Promoted) { 'db-champion' } else { 'db-history' }
+        }
+    }
+    return $rows
+}
+
+function Get-HistoryDirectionHints {
+    param(
+        [array]$Candidates,
+        [string]$ScopeLabel
+    )
+
+    $empty = New-EmptyHintSet -Source $ScopeLabel
+    $usable = @($Candidates | Where-Object { $null -ne $_.Config })
+    if ($usable.Count -lt 8) {
+        return $empty
+    }
+
+    $sorted = @($usable | Sort-Object @{ Expression = { if ($_.Promoted) { 1 } else { 0 } }; Descending = $true }, @{ Expression = { $_.Score }; Descending = $true })
+    $take = [math]::Min($DbDirectionPool, [math]::Max(3, [int][math]::Floor($sorted.Count * 0.25)))
+    $top = @($sorted | Select-Object -First $take)
+    $bottom = @($sorted | Select-Object -Last $take)
+    $directions = @{}
+    $specs = New-TuneSpecs
+    foreach ($name in $specs.Keys) {
+        $topAvg = (@($top | ForEach-Object { To-Double (Get-ObjectPropertyValue -Object $_.Config -Name $name) }) | Measure-Object -Average).Average
+        $bottomAvg = (@($bottom | ForEach-Object { To-Double (Get-ObjectPropertyValue -Object $_.Config -Name $name) }) | Measure-Object -Average).Average
+        $step = To-Double $specs[$name].Step
+        if ($null -ne $topAvg -and $null -ne $bottomAvg -and [math]::Abs($topAvg - $bottomAvg) -ge ($step * 0.9)) {
+            $directions[$name] = if ($topAvg -gt $bottomAvg) { 1 } else { -1 }
+        }
+    }
+
+    return [pscustomobject]@{
+        Directions = $directions
+        SourceCount = $usable.Count
+        Source = $ScopeLabel
+    }
+}
+
+function Get-DbFailureRecoveryHints {
+    param(
+        [array]$Candidates,
+        [string]$FailureClass
+    )
+
+    $empty = New-EmptyHintSet -Source ('db-failure:' + $FailureClass)
+    if ([string]::IsNullOrWhiteSpace($FailureClass)) {
+        return $empty
+    }
+
+    $failureRows = @($Candidates | Where-Object { $_.PrimaryFailureClass -eq $FailureClass -and $null -ne $_.Config } |
+        Sort-Object -Property Score -Descending |
+        Select-Object -First ([math]::Max(4, $DbDirectionPool)))
+    $recoveryRows = @($Candidates | Where-Object { $_.PrimaryFailureClass -ne $FailureClass -and $null -ne $_.Config } |
+        Sort-Object @{ Expression = { if ($_.Promoted) { 1 } else { 0 } }; Descending = $true }, @{ Expression = { $_.Score }; Descending = $true } |
+        Select-Object -First ([math]::Max(6, $DbDirectionPool)))
+    if ($failureRows.Count -lt 3 -or $recoveryRows.Count -lt 3) {
+        return $empty
+    }
+
+    $directions = @{}
+    $specs = New-TuneSpecs
+    foreach ($name in $specs.Keys) {
+        $failureAvg = (@($failureRows | ForEach-Object { To-Double (Get-ObjectPropertyValue -Object $_.Config -Name $name) }) | Measure-Object -Average).Average
+        $recoveryAvg = (@($recoveryRows | ForEach-Object { To-Double (Get-ObjectPropertyValue -Object $_.Config -Name $name) }) | Measure-Object -Average).Average
+        $step = To-Double $specs[$name].Step
+        if ($null -ne $failureAvg -and $null -ne $recoveryAvg -and [math]::Abs($recoveryAvg - $failureAvg) -ge ($step * 0.9)) {
+            $directions[$name] = if ($recoveryAvg -gt $failureAvg) { 1 } else { -1 }
+        }
+    }
+
+    return [pscustomobject]@{
+        Directions = $directions
+        SourceCount = $failureRows.Count + $recoveryRows.Count
+        Source = ('db-failure:' + $FailureClass)
+    }
+}
+
+function Select-MutationParent {
+    param(
+        $Baseline,
+        $Best,
+        [array]$Results,
+        [array]$DbCandidates,
+        [int]$CandidateIndex,
+        [System.Random]$Random
+    )
+
+    $localPool = @($Results |
+        Where-Object { $_.RuntimeClean -and $null -ne $_.Config } |
+        Sort-Object -Property Score -Descending |
+        Select-Object -First 3)
+    $dbPool = @($DbCandidates | Select-Object -First ([math]::Max(0, $DbHistoryPool)))
+
+    if ($CandidateIndex -eq 1) {
+        $dbChampion = @($dbPool | Where-Object { $_.Promoted } | Select-Object -First 1)
+        if ($dbChampion.Count -gt 0) {
+            return $dbChampion[0]
+        }
+    }
+    if ($CandidateIndex -eq 2 -and $localPool.Count -gt 0) {
+        return [pscustomobject]@{
+            SessionId = $sessionTag
+            CandidateId = [string]$localPool[0].CandidateId
+            Score = To-Double $localPool[0].Score
+            AvgMassRatio = To-Double $localPool[0].AvgMassRatio
+            AvgGameTime = To-Double $localPool[0].AvgGameTime
+            PrimaryFailureClass = [string]$localPool[0].PrimaryFailureClass
+            Promoted = $false
+            Config = Copy-TuneConfig -Config $localPool[0].Config
+            Source = 'session-best'
+        }
+    }
+
+    $preferDb = $false
+    $bestFailure = [string](Get-ObjectPropertyValue -Object $Best -Name 'PrimaryFailureClass')
+    if ($dbPool.Count -gt 0 -and $bestFailure -in @('eco_starved', 'no_expansion', 'reclaim_failure', 'factory_spend_stall', 'over_defensive_stall', 'map_control_collapse')) {
+        $preferDb = $true
+    }
+
+    $useDb = $dbPool.Count -gt 0 -and ($preferDb -or $Random.NextDouble() -lt 0.4)
+    if ($useDb) {
+        $topSlice = [math]::Min($dbPool.Count, [math]::Max(1, [int][math]::Ceiling($dbPool.Count * 0.4)))
+        return $dbPool[$Random.Next(0, $topSlice)]
+    }
+    if ($localPool.Count -gt 0) {
+        $chosenLocal = $localPool[$Random.Next(0, $localPool.Count)]
+        return [pscustomobject]@{
+            SessionId = $sessionTag
+            CandidateId = [string]$chosenLocal.CandidateId
+            Score = To-Double $chosenLocal.Score
+            AvgMassRatio = To-Double $chosenLocal.AvgMassRatio
+            AvgGameTime = To-Double $chosenLocal.AvgGameTime
+            PrimaryFailureClass = [string]$chosenLocal.PrimaryFailureClass
+            Promoted = $false
+            Config = Copy-TuneConfig -Config $chosenLocal.Config
+            Source = 'session-local'
+        }
+    }
+
+    return [pscustomobject]@{
+        SessionId = $sessionTag
+        CandidateId = [string]$Baseline.CandidateId
+        Score = To-Double $Baseline.Score
+        AvgMassRatio = To-Double $Baseline.AvgMassRatio
+        AvgGameTime = To-Double $Baseline.AvgGameTime
+        PrimaryFailureClass = [string]$Baseline.PrimaryFailureClass
+        Promoted = $false
+        Config = Copy-TuneConfig -Config $Baseline.Config
+        Source = 'baseline-fallback'
     }
 }
 
@@ -456,9 +784,12 @@ function New-MutatedConfig {
         $cfg[$key] = $Parent[$key]
     }
 
-    $cfg.Version = 3
+    $cfg.Version = 4
     $cfg.CandidateId = "candidate-$CandidateIndex"
     $cfg.ParentCandidateId = [string]($Parent.CandidateId)
+    $cfg.ParentSource = [string](Get-ObjectPropertyValue -Object $Parent -Name 'ParentSource')
+    $cfg.ParentSessionId = [string](Get-ObjectPropertyValue -Object $Parent -Name 'ParentSessionId')
+    $cfg.ParentFailureClass = [string](Get-ObjectPropertyValue -Object $Parent -Name 'ParentFailureClass')
     $cfg.GeneratedAt = (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')
     $cfg.GeneratedBy = 'run_economy_autotune.ps1'
     $cfg.Score = 0
@@ -867,6 +1198,10 @@ function Run-Candidate {
     $logDir = Invoke-AutorunBatch -CandidateId $CandidateId -CandidateDir $candidateDir -Games $runGames -SeedBase $SeedBase -MapOverride $runMap
     [void](Invoke-Analysis -CandidateDir $candidateDir -LogDir $logDir)
     $result = Score-Candidate -CandidateId $CandidateId -CandidateDir $candidateDir -Config $Config
+    $result | Add-Member -NotePropertyName ParentCandidateId -NotePropertyValue ([string](Get-ObjectPropertyValue -Object $Config -Name 'ParentCandidateId')) -Force
+    $result | Add-Member -NotePropertyName ParentSource -NotePropertyValue ([string](Get-ObjectPropertyValue -Object $Config -Name 'ParentSource')) -Force
+    $result | Add-Member -NotePropertyName ParentSessionId -NotePropertyValue ([string](Get-ObjectPropertyValue -Object $Config -Name 'ParentSessionId')) -Force
+    $result | Add-Member -NotePropertyName ParentFailureClass -NotePropertyValue ([string](Get-ObjectPropertyValue -Object $Config -Name 'ParentFailureClass')) -Force
     Write-Host ("[$CandidateId] score={0} games={1} winRate={2} avgTime={3} massRatio={4} clean={5}" -f $result.Score, $result.Games, $result.WinRate, $result.AvgGameTime, $result.AvgMassRatio, $result.RuntimeClean)
     return $result
 }
@@ -1010,10 +1345,10 @@ function Write-SessionReport {
     }
     $lines += '## Candidates'
     $lines += ''
-    $lines += '| Candidate | Score | Games | Avg Time | Mass Ratio | Failure | Clean |'
-    $lines += '| --- | ---: | ---: | ---: | ---: | --- | --- |'
+    $lines += '| Candidate | Parent | Source | Score | Games | Avg Time | Mass Ratio | Failure | Clean |'
+    $lines += '| --- | --- | --- | ---: | ---: | ---: | ---: | --- | --- |'
     foreach ($row in @($Results | Sort-Object -Property Score -Descending)) {
-        $lines += "| $($row.CandidateId) | $($row.Score) | $($row.Games) | $($row.AvgGameTime) | $($row.AvgMassRatio) | $($row.PrimaryFailureClass) | $($row.RuntimeClean) |"
+        $lines += "| $($row.CandidateId) | $($row.ParentCandidateId) | $($row.ParentSource) | $($row.Score) | $($row.Games) | $($row.AvgGameTime) | $($row.AvgMassRatio) | $($row.PrimaryFailureClass) | $($row.RuntimeClean) |"
     }
     $lines += ''
     Set-Content -LiteralPath $Path -Value ($lines -join [Environment]::NewLine) -Encoding UTF8
@@ -1030,8 +1365,12 @@ if ($BaseSeed -le 0) {
 }
 $rng = [System.Random]::new($BaseSeed)
 $adaptiveHints = Get-AdaptiveHints -Path $RunRoot
+$dbSettings = $null
+$dbHistoryCandidates = @()
+$dbAdaptiveHints = New-EmptyHintSet -Source 'db-history'
 $baselineConfig = Read-TuneConfig -Path $ConfigPath
 $baselineConfig.CandidateId = if ($baselineConfig.CandidateId) { [string]$baselineConfig.CandidateId } else { 'baseline' }
+$baselineConfig.ParentSource = if ([string]::IsNullOrWhiteSpace([string]$baselineConfig.ParentSource)) { 'manual' } else { [string]$baselineConfig.ParentSource }
 $baselineRawPath = Join-Path $sessionDir 'baseline-AutoTuneConfig.raw.lua'
 if (Test-Path -LiteralPath $ConfigPath) {
     Copy-Item -LiteralPath $ConfigPath -Destination $baselineRawPath -Force
@@ -1047,6 +1386,22 @@ Write-Host "  candidates=$Candidates gamesPerCandidate=$GamesPerCandidate parall
 Write-Host "  runDir=$sessionDir"
 if ($adaptiveHints.SourceCount -gt 0) {
     Write-Host ("  adaptive mutation hints={0} sourceCandidates={1}" -f $adaptiveHints.Directions.Count, $adaptiveHints.SourceCount)
+}
+if ($UseDatabase -and (Get-Command Get-AutotuneDbSettings -ErrorAction SilentlyContinue)) {
+    try {
+        $dbSettings = Get-AutotuneDbSettings -RepoRoot $RepoRoot -ComposeFile $DbComposeFile -EnvFile $DbEnvFile -ProjectName $DbProjectName
+        $dbHistoryCandidates = @(Get-DbHistoricalCandidates -Settings $dbSettings -MapValue $MapName -PoolSize ([math]::Max($DbHistoryPool, 48)))
+        $dbAdaptiveHints = Get-HistoryDirectionHints -Candidates $dbHistoryCandidates -ScopeLabel 'db-history'
+        if ($dbHistoryCandidates.Count -gt 0) {
+            $dbChampionCount = @($dbHistoryCandidates | Where-Object { $_.Promoted }).Count
+            Write-Host ("  db history candidates={0} champions={1} adaptiveDirections={2}" -f $dbHistoryCandidates.Count, $dbChampionCount, $dbAdaptiveHints.Directions.Count)
+        }
+    } catch {
+        Write-Warning ("DB mutation context unavailable: {0}" -f $_)
+        $dbSettings = $null
+        $dbHistoryCandidates = @()
+        $dbAdaptiveHints = New-EmptyHintSet -Source 'db-history'
+    }
 }
 
 $results = @()
@@ -1068,17 +1423,32 @@ if (-not $SkipBaseline) {
         PrimaryFailureClass = 'skipped_baseline'
         Runs = @()
         Config = $baselineConfig
+        ParentCandidateId = [string](Get-ObjectPropertyValue -Object $baselineConfig -Name 'ParentCandidateId')
+        ParentSource = [string](Get-ObjectPropertyValue -Object $baselineConfig -Name 'ParentSource')
+        ParentSessionId = [string](Get-ObjectPropertyValue -Object $baselineConfig -Name 'ParentSessionId')
+        ParentFailureClass = [string](Get-ObjectPropertyValue -Object $baselineConfig -Name 'ParentFailureClass')
     }
 }
 
+$baseline = @($results | Where-Object { $_.CandidateId -eq 'baseline' } | Select-Object -First 1)[0]
 $best = $results[0]
 for ($i = 1; $i -le $Candidates; $i++) {
-    $parent = $best.Config
-    $failureHints = Get-FailureMutationHints -FailureClass $best.PrimaryFailureClass
-    if ($i -eq 1 -and $failureHints.Directions.Count -gt 0) {
-        Write-Host ("  failure-aware mutation class={0} hints={1}" -f $failureHints.SourceFailureClass, $failureHints.Directions.Count)
+    $parentSelection = Select-MutationParent -Baseline $baseline -Best $best -Results $results -DbCandidates $dbHistoryCandidates -CandidateIndex $i -Random $rng
+    $parent = ConvertTo-TuneConfigHashtable -InputObject $parentSelection.Config
+    $localFailureHints = Get-FailureMutationHints -FailureClass $best.PrimaryFailureClass
+    $dbFailureHints = Get-DbFailureRecoveryHints -Candidates $dbHistoryCandidates -FailureClass $best.PrimaryFailureClass
+    $failureHints = Merge-HintSets -HintSets @($localFailureHints, $dbFailureHints) -Source 'failure-aware'
+    $combinedAdaptiveHints = Merge-HintSets -HintSets @($adaptiveHints, $dbAdaptiveHints) -Source 'adaptive'
+    if ($i -eq 1) {
+        Write-Host ("  parent source={0} candidate={1} session={2}" -f $parentSelection.Source, $parentSelection.CandidateId, $parentSelection.SessionId)
+        if ($failureHints.Directions.Count -gt 0) {
+            Write-Host ("  failure-aware mutation class={0} hints={1}" -f $best.PrimaryFailureClass, $failureHints.Directions.Count)
+        }
     }
-    $candidateConfig = New-MutatedConfig -Parent $parent -CandidateIndex $i -Random $rng -AdaptiveHints $adaptiveHints -FailureHints $failureHints
+    $parent.ParentSource = [string]$parentSelection.Source
+    $parent.ParentSessionId = [string]$parentSelection.SessionId
+    $parent.ParentFailureClass = [string]$parentSelection.PrimaryFailureClass
+    $candidateConfig = New-MutatedConfig -Parent $parent -CandidateIndex $i -Random $rng -AdaptiveHints $combinedAdaptiveHints -FailureHints $failureHints
     $candidateSeed = $BaseSeed + ($i * 100000)
     $candidateResult = Run-Candidate -CandidateId ("candidate-$i") -Config $candidateConfig -SessionDir $sessionDir -SeedBase $candidateSeed
     $results += $candidateResult
@@ -1087,7 +1457,6 @@ for ($i = 1; $i -le $Candidates; $i++) {
     }
 }
 
-$baseline = @($results | Where-Object { $_.CandidateId -eq 'baseline' } | Select-Object -First 1)[0]
 $promotionBaseline = $baseline
 $promotionBest = $best
 $retestResults = @()
@@ -1202,6 +1571,8 @@ $summary = [pscustomobject]@{
     RetestGames = $RetestGames
     RetestMaps = Get-RetestMapList
     AdaptiveMutationSources = $adaptiveHints.SourceCount
+    DbHistorySources = $dbHistoryCandidates.Count
+    DbAdaptiveDirections = $dbAdaptiveHints.Directions.Count
     FailureAwareMutation = $true
     Version = if ($buildMeta) { $buildMeta.Version } else { $null }
     Fingerprint = if ($buildMeta) { $buildMeta.Fingerprint } else { $null }
@@ -1218,10 +1589,10 @@ $summary = [pscustomobject]@{
     Margin = [math]::Round($margin, 5)
     PromotionAllowed = [bool]$promotionDecision.Allowed
     PromotionBlockedReasons = $promotionDecision.Reasons
-    Results = $results | Select-Object CandidateId, Score, Games, WinRate, AvgGameTime, AvgMassRatio, PrimaryFailureClass, RuntimeClean
+    Results = $results | Select-Object CandidateId, ParentCandidateId, ParentSource, ParentSessionId, ParentFailureClass, Score, Games, WinRate, AvgGameTime, AvgMassRatio, PrimaryFailureClass, RuntimeClean
 }
 $summary | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $sessionDir 'session-summary.json') -Encoding UTF8
-$results | Select-Object CandidateId, Score, Games, WinRate, AvgGameTime, AvgMassRatio, PrimaryFailureClass, RuntimeClean |
+$results | Select-Object CandidateId, ParentCandidateId, ParentSource, ParentSessionId, ParentFailureClass, Score, Games, WinRate, AvgGameTime, AvgMassRatio, PrimaryFailureClass, RuntimeClean |
     Export-Csv -Path (Join-Path $sessionDir 'candidate-scores.csv') -NoTypeInformation -Encoding UTF8
 Write-SessionReport -Path (Join-Path $sessionDir 'session-report.md') -Summary $summary -Results $results
 
@@ -1234,10 +1605,10 @@ if ($UseDatabase -and -not $DryRun -and (Test-Path -LiteralPath $DbIngestScript)
             '-File', $DbIngestScript,
             '-SessionSummaryPath', $sessionSummaryPath,
             '-StartDb',
-            '-ComposeFile', $DbComposeFile,
-            '-EnvFile', $DbEnvFile,
             '-ProjectName', $DbProjectName
         )
+        if (-not [string]::IsNullOrWhiteSpace($DbComposeFile)) { $dbArgs += @('-ComposeFile', $DbComposeFile) }
+        if (-not [string]::IsNullOrWhiteSpace($DbEnvFile)) { $dbArgs += @('-EnvFile', $DbEnvFile) }
         if ($DbInitSchema) {
             $dbArgs += '-InitSchema'
         }
