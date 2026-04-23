@@ -932,10 +932,11 @@ local function IsFactoryCapacityOvershoot(capacity, domain, landFactories, airFa
     local total = land + air + sea
 
     local desiredTotal = capacity.DesiredTotal
-    if desiredTotal == nil then
+    local hasExplicitTargets = capacity.LandTarget ~= nil or capacity.AirTarget ~= nil or capacity.SeaTarget ~= nil
+    if desiredTotal == nil and hasExplicitTargets then
         desiredTotal = (capacity.LandTarget or land) + (capacity.AirTarget or air) + (capacity.SeaTarget or sea)
     end
-    if desiredTotal ~= nil and total >= (desiredTotal + 1) then
+    if desiredTotal ~= nil and total >= desiredTotal then
         return true
     end
 
@@ -949,11 +950,11 @@ local function IsFactoryCapacityOvershoot(capacity, domain, landFactories, airFa
     end
 
     if normalized == 'land' then
-        return capacity.LandTarget ~= nil and land >= ((capacity.LandTarget or 0) + 1)
+        return capacity.LandTarget ~= nil and land >= (capacity.LandTarget or 0)
     elseif normalized == 'air' then
-        return capacity.AirTarget ~= nil and air >= ((capacity.AirTarget or 0) + 1)
+        return capacity.AirTarget ~= nil and air >= (capacity.AirTarget or 0)
     elseif normalized == 'navy' then
-        return capacity.SeaTarget ~= nil and sea >= ((capacity.SeaTarget or 0) + 1)
+        return capacity.SeaTarget ~= nil and sea >= (capacity.SeaTarget or 0)
     end
 
     return false
@@ -963,6 +964,16 @@ local function ApproveFactoryBuildRequest(aiBrain, domain)
     local runtime = aiBrain and aiBrain.OvermindRuntime or false
     if not runtime then
         return true
+    end
+
+    local capacity = GetAuthoritativeCapacityPlan(aiBrain)
+    if capacity and not HasCriticalFactoryTask(aiBrain, domain) then
+        local landFactories = GetExistingUnitCount(aiBrain, categories.FACTORY * categories.LAND * categories.STRUCTURE)
+        local airFactories = GetExistingUnitCount(aiBrain, categories.FACTORY * categories.AIR * categories.STRUCTURE)
+        local seaFactories = GetExistingUnitCount(aiBrain, categories.FACTORY * categories.NAVAL * categories.STRUCTURE)
+        if IsFactoryCapacityOvershoot(capacity, domain, landFactories, airFactories, seaFactories) then
+            return false
+        end
     end
 
     local gate = runtime.FactoryBuildGate or {}
@@ -1464,7 +1475,48 @@ function ShouldBuildPower(aiBrain, maxEnergyRatio, maxEnergyTrend, maxMassRatioF
 
     local director = GetProductionDirector(aiBrain)
     local constraints = director and director.ConstraintState or {}
+    local severeEnergyCrisis = (econ.EnergyStorageRatio or 0) <= 0.08 or (econ.EnergyTrend or 0) <= -28
+    local bootstrapLike = IsEconomyBootstrapState(aiBrain) or IsStarterPhaseState(aiBrain)
+
+    if now < 420 and not severeEnergyCrisis then
+        local earlyCap = 4
+        if now < 180 then
+            earlyCap = math.max(2, math.min(3, mexReady + 1))
+        elseif now < 300 then
+            earlyCap = math.max(3, math.min(4, mexReady))
+        else
+            earlyCap = math.max(4, math.min(6, mexReady + 1))
+        end
+        if factoryCount >= 3 then
+            earlyCap = earlyCap + 1
+        end
+        if pgenCount >= earlyCap
+            and (econ.EnergyStorageRatio or 0) >= 0.035
+            and (econ.EnergyTrend or 0) >= -18 then
+            return false
+        end
+        if now < 300
+            and pendingPgens >= 1
+            and pgenReady >= 2
+            and (econ.EnergyStorageRatio or 0) >= 0.025
+            and (econ.EnergyTrend or 0) >= -24 then
+            return false
+        end
+    end
+
     if constraints.PowerBufferLow == true then
+        if now < 520 and not severeEnergyCrisis then
+            local bufferCap = mexReady + 2
+            if factoryCount <= 1 then
+                bufferCap = math.max(2, mexReady + 1)
+            end
+            bufferCap = math.max(3, math.min(7, bufferCap))
+            if pgenCount >= bufferCap
+                and (econ.EnergyStorageRatio or 0) >= 0.03
+                and (econ.EnergyTrend or 0) >= -20 then
+                return false
+            end
+        end
         return true
     end
     if IsEconomyBootstrapState(aiBrain) or IsStarterPhaseState(aiBrain) then
@@ -1484,8 +1536,6 @@ function ShouldBuildPower(aiBrain, maxEnergyRatio, maxEnergyTrend, maxMassRatioF
         end
     end
 
-    local severeEnergyCrisis = econ.EnergyStorageRatio <= 0.1 or econ.EnergyTrend <= -20
-    local bootstrapLike = IsEconomyBootstrapState(aiBrain) or IsStarterPhaseState(aiBrain)
     if not severeEnergyCrisis then
         local pendingCap = bootstrapLike and 2 or 3
         if pendingPgens >= pendingCap then
