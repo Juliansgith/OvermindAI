@@ -82,6 +82,23 @@
 - Analyze specific run tag:
   - `powershell -ExecutionPolicy Bypass -File C:\Program Files (x86)\Steam\steamapps\common\Supreme Commander Forged Alliance\autorun\bin\analyze_autorun_logs.ps1 -LogsPath "C:\Program Files (x86)\Steam\steamapps\common\Supreme Commander Forged Alliance\autorun\logs\autorun-20260423-*.log" -OutputDir "C:\Program Files (x86)\Steam\steamapps\common\Supreme Commander Forged Alliance\autorun\analysis\session-20260423"`
 
+## Advanced Analysis Tools
+- Version-vs-version comparator:
+  - `powershell -ExecutionPolicy Bypass -File C:\Program Files (x86)\Steam\steamapps\common\Supreme Commander Forged Alliance\autorun\bin\compare_autorun_versions.ps1 -BaselineDir "...\analysis\v200_batch1" -CandidateDir "...\analysis\v201_single" -BaselineLabel v200 -CandidateLabel v201 -OutputDir "...\analysis\comparisons\v201-vs-v200"`
+- Early-game KPI extractor (mex/factory timings, expansion, reclaim-field, stagnation, mass ratio):
+  - `powershell -ExecutionPolicy Bypass -File C:\Program Files (x86)\Steam\steamapps\common\Supreme Commander Forged Alliance\autorun\bin\extract_autorun_kpis.ps1 -LogsPath "...\autorun\logs\autorun-20260423-*.log" -OutputDir "...\autorun\analysis\kpis\session-20260423"`
+- Parallel determinism/divergence checker:
+  - `powershell -ExecutionPolicy Bypass -File C:\Program Files (x86)\Steam\steamapps\common\Supreme Commander Forged Alliance\autorun\bin\measure_autorun_divergence.ps1 -LogsPath "...\autorun\logs\autorun-20260423-090129-i*.log" -OutputDir "...\autorun\analysis\divergence\20260423-090129"`
+- Failure classifier (root-cause grouped warning/error classes):
+  - `powershell -ExecutionPolicy Bypass -File C:\Program Files (x86)\Steam\steamapps\common\Supreme Commander Forged Alliance\autorun\bin\classify_autorun_failures.ps1 -LogsPath "...\autorun\logs\autorun-20260423-*.log" -OutputDir "...\autorun\analysis\failures\session-20260423"`
+- Campaign manager (validation-first, chunked batches, resume state, defaults to `25x`):
+  - `powershell -ExecutionPolicy Bypass -File C:\Program Files (x86)\Steam\steamapps\common\Supreme Commander Forged Alliance\autorun\bin\run_autorun_campaign.ps1 -VersionTag v201 -TotalGames 100 -ParallelInstances 5`
+
+## Replay Archiving
+- Archive replays by version/run tag into `autorun\replay_archive\<version>\<runTag>\...`:
+  - `powershell -ExecutionPolicy Bypass -File C:\Program Files (x86)\Steam\steamapps\common\Supreme Commander Forged Alliance\autorun\bin\archive_autorun_replays.ps1 -VersionTag v201 -RunTag 20260423-090129`
+- The campaign manager calls replay archiving automatically after each batch unless `-NoReplayArchive` is set.
+
 ## Do Not Skip
 - Do not ship a version without a passing Lua syntax check.
 - Do not leave a completed version synced but uncommitted.
