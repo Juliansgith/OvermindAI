@@ -306,12 +306,6 @@ local function SelectEarlyLandScreenRole(kind, plan, rolePlan)
     local severeLandCrisis = emerg.LandPanic
         or emerg.FrontCollapse
         or ((constraints.BasePressure or 0) >= 0.35)
-    local engineerAttritionFloor = math.max(3, math.min(6, engineerFloor - 2))
-    if now < 1200
-        and engineerUnits < engineerAttritionFloor
-        and (engineer.UnitGap or 0) > 0 then
-        return 'Engineer', 1002
-    end
     if now < 720
         and not severeLandCrisis
         and engineerUnits < engineerFloor
@@ -452,20 +446,15 @@ local function PickPlannedRole(factory, runtime, eco)
     if kind == 'land' and engineerDemand > 0 and rolePlan.Engineer then
         local emerg = plan.EmergencyOverrides or {}
         local constraints = plan.ConstraintState or {}
-        local engineer = rolePlan.Engineer or {}
-        local currentEngineers = (demand.CurrentEngineers or engineer.CurrentUnits or 0)
-        local targetEngineers = math.max(demand.TargetEngineers or 0, engineer.DesiredUnits or 0)
         local severeLandCrisis = emerg.LandPanic
             or emerg.FrontCollapse
             or ((constraints.BasePressure or 0) >= 0.36)
-        local attritionEmergency = currentEngineers < math.max(3, math.min(7, math.floor(targetEngineers * 0.45)))
-            or (engineerDemand >= 6 and currentEngineers < 8)
         local immediateEcoDemand = (demand.InitialMexBuildersWanted or 0) > 0
             or (demand.FactoryFinishWanted or 0) > 0
             or (demand.StructureFinishWanted or 0) > 0
             or (demand.BaseWanted or 0) > 0
             or (demand.PowerWanted or 0) > 0
-        if immediateEcoDemand or attritionEmergency or not severeLandCrisis or CountLandScreenUnits(rolePlan) >= (now < 420 and 4 or 7) then
+        if immediateEcoDemand or not severeLandCrisis or CountLandScreenUnits(rolePlan) >= (now < 420 and 4 or 7) then
             return 'Engineer', 1040 + (engineerDemand * 18), rolePlan.Engineer
         end
     end
