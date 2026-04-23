@@ -30,6 +30,8 @@ param(
     [string]$DbProjectName = 'overmind-autotune',
     [int]$DbHistoryPool = 24,
     [int]$DbDirectionPool = 16,
+    [int]$DbActionMinSamples = 20,
+    [switch]$DisableActionHints,
     [switch]$DryRun,
     [switch]$KeepLosingCandidateConfig
 )
@@ -83,6 +85,7 @@ if ($RetestTop -lt 0) { throw 'RetestTop must be zero or higher.' }
 if ($RetestGames -lt 0) { throw 'RetestGames must be zero or higher.' }
 if ($DbHistoryPool -lt 0) { throw 'DbHistoryPool must be zero or higher.' }
 if ($DbDirectionPool -lt 0) { throw 'DbDirectionPool must be zero or higher.' }
+if ($DbActionMinSamples -lt 1) { throw 'DbActionMinSamples must be at least 1.' }
 
 if ([string]::IsNullOrWhiteSpace($ChampionDir)) {
     $ChampionDir = Join-Path $RepoRoot 'autotune\champions'
@@ -612,6 +615,248 @@ function Get-DbFailureRecoveryHints {
         SourceCount = $failureRows.Count + $recoveryRows.Count
         Source = ('db-failure:' + $FailureClass)
     }
+}
+
+function Add-HintDelta {
+    param(
+        [hashtable]$Directions,
+        [string]$Name,
+        [int]$Delta
+    )
+
+    if ([string]::IsNullOrWhiteSpace($Name) -or $Delta -eq 0) {
+        return
+    }
+    if (-not $Directions.ContainsKey($Name)) {
+        $Directions[$Name] = 0
+    }
+    $Directions[$Name] += $Delta
+}
+
+function Add-TextActionHints {
+    param(
+        [hashtable]$Directions,
+        [string]$Text,
+        [int]$Delta
+    )
+
+    if ([string]::IsNullOrWhiteSpace($Text) -or $Delta -eq 0) {
+        return
+    }
+
+    $value = $Text.ToLowerInvariant()
+    if ($value -match 'reclaim_field') {
+        Add-HintDelta -Directions $Directions -Name 'StrategyReclaimFieldBias' -Delta $Delta
+        Add-HintDelta -Directions $Directions -Name 'ReclaimQuotaBias' -Delta $Delta
+        Add-HintDelta -Directions $Directions -Name 'StrategyForwardTheaterBias' -Delta $Delta
+    }
+    if ($value -match 'trade_tech_for_tempo|front_pressure|push_window|land_push|tempo') {
+        Add-HintDelta -Directions $Directions -Name 'StrategyTempoBias' -Delta $Delta
+        Add-HintDelta -Directions $Directions -Name 'StrategyForwardTheaterBias' -Delta $Delta
+    }
+    if ($value -match 'starter_mex_claim|expand') {
+        Add-HintDelta -Directions $Directions -Name 'StrategyExpandBias' -Delta $Delta
+        Add-HintDelta -Directions $Directions -Name 'ExpansionQuotaBias' -Delta $Delta
+    }
+    if ($value -match 'stabilize|home_approach|hold:') {
+        Add-HintDelta -Directions $Directions -Name 'StrategyStabilizeBias' -Delta $Delta
+    }
+    if ($value -match 'air_switch|air_control') {
+        Add-HintDelta -Directions $Directions -Name 'StrategyAirBias' -Delta $Delta
+        Add-HintDelta -Directions $Directions -Name 'EarlyAirUnlockBias' -Delta $Delta
+    }
+    if ($value -match 'first_land_hq') {
+        Add-HintDelta -Directions $Directions -Name 'FactoryHQTimingBias' -Delta (-1 * $Delta)
+        Add-HintDelta -Directions $Directions -Name 'FactoryHQEcoBias' -Delta (-1 * $Delta)
+    }
+    if ($value -match 'starter_mex_claim|land_factory_floor|bootstrap_factory') {
+        Add-HintDelta -Directions $Directions -Name 'UpgradeTimeBias' -Delta $Delta
+        Add-HintDelta -Directions $Directions -Name 'MexUpgradeBudgetBias' -Delta (-1 * $Delta)
+    }
+    if ($value -match 'pressure|focus_t1_spam|missing_first_factory|pre_hq_floor') {
+        Add-HintDelta -Directions $Directions -Name 'FactoryTempoBias' -Delta $Delta
+    }
+    if ($value -match 'retreat|recall') {
+        Add-HintDelta -Directions $Directions -Name 'ACUOpeningMaxDistance' -Delta (-1 * $Delta)
+        Add-HintDelta -Directions $Directions -Name 'ACUMidMaxDistance' -Delta (-1 * $Delta)
+        Add-HintDelta -Directions $Directions -Name 'ACULateMaxDistance' -Delta (-1 * $Delta)
+        Add-HintDelta -Directions $Directions -Name 'StrategyStabilizeBias' -Delta $Delta
+    }
+}
+
+function Add-ForceActionHints {
+    param(
+        [hashtable]$Directions,
+        [string]$ActionValue,
+        [int]$Delta
+    )
+
+    if ([string]::IsNullOrWhiteSpace($ActionValue) -or $Delta -eq 0) {
+        return
+    }
+    if ($ActionValue -notmatch '^g(\d+)-m(\d+)-o(\d+)-r(\d+)$') {
+        return
+    }
+
+    $guard = [int]$Matches[1]
+    $main = [int]$Matches[2]
+    $outer = [int]$Matches[3]
+    $raid = [int]$Matches[4]
+
+    if ($outer -gt 0) {
+        Add-HintDelta -Directions $Directions -Name 'ForceOuterContestBias' -Delta $Delta
+        Add-HintDelta -Directions $Directions -Name 'StrategyOuterRetentionBias' -Delta $Delta
+    } elseif ($Delta -lt 0) {
+        Add-HintDelta -Directions $Directions -Name 'ForceOuterContestBias' -Delta 1
+        Add-HintDelta -Directions $Directions -Name 'StrategyOuterRetentionBias' -Delta 1
+    }
+
+    if ($raid -gt 0) {
+        Add-HintDelta -Directions $Directions -Name 'ForceRaidBias' -Delta $Delta
+    } elseif ($Delta -lt 0) {
+        Add-HintDelta -Directions $Directions -Name 'ForceRaidBias' -Delta 1
+    }
+
+    if ($main -gt 0) {
+        Add-HintDelta -Directions $Directions -Name 'StrategyForwardTheaterBias' -Delta $Delta
+    }
+
+    if ($guard -gt ($main + $outer + $raid + 2)) {
+        Add-HintDelta -Directions $Directions -Name 'ForceHomeGuardBias' -Delta $Delta
+    } elseif ($guard -gt 0 -and $outer -le 0 -and $raid -le 0 -and $Delta -lt 0) {
+        Add-HintDelta -Directions $Directions -Name 'ForceHomeGuardBias' -Delta -1
+    }
+}
+
+function Convert-ActionRowsToHints {
+    param(
+        [array]$Rows,
+        [string]$Source
+    )
+
+    $directions = @{}
+    $sourceCount = 0
+    foreach ($row in @($Rows)) {
+        $weight = To-Int (Get-ObjectPropertyValue -Object $row -Name 'HintWeight')
+        if ($weight -eq 0) {
+            continue
+        }
+
+        $subsystem = [string](Get-ObjectPropertyValue -Object $row -Name 'subsystem')
+        $actionType = [string](Get-ObjectPropertyValue -Object $row -Name 'action_type')
+        $actionValue = [string](Get-ObjectPropertyValue -Object $row -Name 'action_value')
+        $sourceCount += [math]::Max(1, (To-Int (Get-ObjectPropertyValue -Object $row -Name 'samples')))
+
+        Add-TextActionHints -Directions $directions -Text $actionValue -Delta $weight
+
+        switch ($subsystem) {
+            'force' {
+                Add-ForceActionHints -Directions $directions -ActionValue $actionValue -Delta $weight
+            }
+            'engineer' {
+                Add-HintDelta -Directions $directions -Name 'ExpansionQuotaBias' -Delta $weight
+                Add-HintDelta -Directions $directions -Name 'ReclaimQuotaBias' -Delta $weight
+            }
+            'factory' {
+                Add-HintDelta -Directions $directions -Name 'FactoryTempoBias' -Delta $weight
+            }
+            'upgrade' {
+                Add-HintDelta -Directions $directions -Name 'UpgradeTimeBias' -Delta $weight
+                Add-HintDelta -Directions $directions -Name 'MexUpgradeBudgetBias' -Delta (-1 * $weight)
+            }
+            'metrics' {
+                Add-HintDelta -Directions $directions -Name 'StrategyForwardTheaterBias' -Delta $weight
+            }
+        }
+
+        if ($actionType -eq 'mode_shift' -and $actionValue -eq 'air_control') {
+            Add-HintDelta -Directions $directions -Name 'EarlyAirUnlockBias' -Delta $weight
+            Add-HintDelta -Directions $directions -Name 'StrategyAirBias' -Delta $weight
+        }
+    }
+
+    $final = @{}
+    foreach ($name in $directions.Keys) {
+        if ($directions[$name] -gt 0) {
+            $final[$name] = 1
+        } elseif ($directions[$name] -lt 0) {
+            $final[$name] = -1
+        }
+    }
+
+    return [pscustomobject]@{
+        Directions = $final
+        SourceCount = $sourceCount
+        Source = $Source
+    }
+}
+
+function Get-DbActionHints {
+    param(
+        $Settings,
+        [string]$FailureClass = '',
+        [int]$WindowSeconds = 120,
+        [int]$MinSamples = 20
+    )
+
+    $source = if ([string]::IsNullOrWhiteSpace($FailureClass)) { 'db-action' } else { 'db-action:' + $FailureClass }
+    $empty = New-EmptyHintSet -Source $source
+    if ($DisableActionHints -or $null -eq $Settings) {
+        return $empty
+    }
+
+    $rows = @()
+    if ([string]::IsNullOrWhiteSpace($FailureClass)) {
+        $positiveQuery = @"
+select json_build_object(
+    'subsystem', subsystem,
+    'action_type', action_type,
+    'action_value', action_value,
+    'samples', samples,
+    'HintWeight', 1
+)::text as row_json
+from autotune.v_action_value_by_choice
+where window_seconds = $(ConvertTo-AutotuneSqlLiteral $WindowSeconds)
+  and samples >= $(ConvertTo-AutotuneSqlLiteral $MinSamples)
+order by avg_reward desc, samples desc
+limit 20;
+"@
+        $negativeQuery = @"
+select json_build_object(
+    'subsystem', subsystem,
+    'action_type', action_type,
+    'action_value', action_value,
+    'samples', samples,
+    'HintWeight', -1
+)::text as row_json
+from autotune.v_action_value_by_choice
+where window_seconds = $(ConvertTo-AutotuneSqlLiteral $WindowSeconds)
+  and samples >= $(ConvertTo-AutotuneSqlLiteral $MinSamples)
+order by avg_reward asc, samples desc
+limit 20;
+"@
+        $rows += @(Invoke-DbJsonQuery -Settings $Settings -Query $positiveQuery)
+        $rows += @(Invoke-DbJsonQuery -Settings $Settings -Query $negativeQuery)
+        return Convert-ActionRowsToHints -Rows $rows -Source $source
+    }
+
+    $failureQuery = @"
+select json_build_object(
+    'subsystem', subsystem,
+    'action_type', action_type,
+    'action_value', action_value,
+    'samples', samples,
+    'HintWeight', -1
+)::text as row_json
+from autotune.v_action_failure_precursors
+where primary_failure_class = $(ConvertTo-AutotuneSqlLiteral $FailureClass)
+  and window_seconds = $(ConvertTo-AutotuneSqlLiteral $WindowSeconds)
+  and samples >= $(ConvertTo-AutotuneSqlLiteral $MinSamples)
+order by avg_reward asc, samples desc
+limit 20;
+"@
+    $rows = @(Invoke-DbJsonQuery -Settings $Settings -Query $failureQuery)
+    return Convert-ActionRowsToHints -Rows $rows -Source $source
 }
 
 function Select-MutationParent {
@@ -1404,6 +1649,7 @@ $adaptiveHints = Get-AdaptiveHints -Path $RunRoot
 $dbSettings = $null
 $dbHistoryCandidates = @()
 $dbAdaptiveHints = New-EmptyHintSet -Source 'db-history'
+$dbActionHints = New-EmptyHintSet -Source 'db-action'
 $baselineConfig = Read-TuneConfig -Path $ConfigPath
 $baselineConfig.CandidateId = if ($baselineConfig.CandidateId) { [string]$baselineConfig.CandidateId } else { 'baseline' }
 $baselineConfig.ParentSource = if ([string]::IsNullOrWhiteSpace([string]$baselineConfig.ParentSource)) { 'manual' } else { [string]$baselineConfig.ParentSource }
@@ -1428,15 +1674,17 @@ if ($UseDatabase -and (Get-Command Get-AutotuneDbSettings -ErrorAction SilentlyC
         $dbSettings = Get-AutotuneDbSettings -RepoRoot $RepoRoot -ComposeFile $DbComposeFile -EnvFile $DbEnvFile -ProjectName $DbProjectName
         $dbHistoryCandidates = @(Get-DbHistoricalCandidates -Settings $dbSettings -MapValue $MapName -PoolSize ([math]::Max($DbHistoryPool, 48)))
         $dbAdaptiveHints = Get-HistoryDirectionHints -Candidates $dbHistoryCandidates -ScopeLabel 'db-history'
+        $dbActionHints = Get-DbActionHints -Settings $dbSettings -WindowSeconds 120 -MinSamples $DbActionMinSamples
         if ($dbHistoryCandidates.Count -gt 0) {
             $dbChampionCount = @($dbHistoryCandidates | Where-Object { $_.Promoted }).Count
-            Write-Host ("  db history candidates={0} champions={1} adaptiveDirections={2}" -f $dbHistoryCandidates.Count, $dbChampionCount, $dbAdaptiveHints.Directions.Count)
+            Write-Host ("  db history candidates={0} champions={1} adaptiveDirections={2} actionDirections={3}" -f $dbHistoryCandidates.Count, $dbChampionCount, $dbAdaptiveHints.Directions.Count, $dbActionHints.Directions.Count)
         }
     } catch {
         Write-Warning ("DB mutation context unavailable: {0}" -f $_)
         $dbSettings = $null
         $dbHistoryCandidates = @()
         $dbAdaptiveHints = New-EmptyHintSet -Source 'db-history'
+        $dbActionHints = New-EmptyHintSet -Source 'db-action'
     }
 }
 
@@ -1473,12 +1721,16 @@ for ($i = 1; $i -le $Candidates; $i++) {
     $parent = ConvertTo-TuneConfigHashtable -InputObject $parentSelection.Config
     $localFailureHints = Get-FailureMutationHints -FailureClass $best.PrimaryFailureClass
     $dbFailureHints = Get-DbFailureRecoveryHints -Candidates $dbHistoryCandidates -FailureClass $best.PrimaryFailureClass
-    $failureHints = Merge-HintSets -HintSets @($localFailureHints, $dbFailureHints) -Source 'failure-aware'
-    $combinedAdaptiveHints = Merge-HintSets -HintSets @($adaptiveHints, $dbAdaptiveHints) -Source 'adaptive'
+    $dbActionFailureHints = Get-DbActionHints -Settings $dbSettings -FailureClass $best.PrimaryFailureClass -WindowSeconds 120 -MinSamples $DbActionMinSamples
+    $failureHints = Merge-HintSets -HintSets @($localFailureHints, $dbFailureHints, $dbActionFailureHints) -Source 'failure-aware'
+    $combinedAdaptiveHints = Merge-HintSets -HintSets @($adaptiveHints, $dbAdaptiveHints, $dbActionHints) -Source 'adaptive'
     if ($i -eq 1) {
         Write-Host ("  parent source={0} candidate={1} session={2}" -f $parentSelection.Source, $parentSelection.CandidateId, $parentSelection.SessionId)
         if ($failureHints.Directions.Count -gt 0) {
             Write-Host ("  failure-aware mutation class={0} hints={1}" -f $best.PrimaryFailureClass, $failureHints.Directions.Count)
+        }
+        if ($dbActionHints.Directions.Count -gt 0 -or $dbActionFailureHints.Directions.Count -gt 0) {
+            Write-Host ("  action-aware hints global={0} failure={1}" -f $dbActionHints.Directions.Count, $dbActionFailureHints.Directions.Count)
         }
     }
     $parent.ParentSource = [string]$parentSelection.Source

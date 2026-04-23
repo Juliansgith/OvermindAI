@@ -44,6 +44,9 @@ venv/
 autotune/runs/
 autotune/champions/
 autotune/db-reports/
+autotune/action-datasets/
+autotune/action-priors/
+autotune/launches/
 
 # Local database and env files
 .env.autotune-db

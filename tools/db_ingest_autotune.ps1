@@ -175,6 +175,51 @@ function Add-SqlLine {
     [void]$Builder.AppendLine($Line)
 }
 
+function ConvertTo-AutotuneSqlJsonText {
+    param([string]$JsonText)
+
+    if ([string]::IsNullOrWhiteSpace($JsonText)) {
+        return 'NULL'
+    }
+
+    try {
+        $parsed = $JsonText | ConvertFrom-Json -ErrorAction Stop
+        return ConvertTo-AutotuneSqlJson -Value $parsed
+    } catch {
+        return ("'{0}'::jsonb" -f ($JsonText.Replace("'", "''")))
+    }
+}
+
+function Ensure-CandidateActionArtifacts {
+    param([string]$CandidateDir)
+
+    $actionsDir = Join-Path $CandidateDir 'analysis\actions'
+    $eventsPath = Join-Path $actionsDir 'action_events.csv'
+    $outcomesPath = Join-Path $actionsDir 'action_outcomes.csv'
+    if ((Test-Path -LiteralPath $eventsPath) -and (Test-Path -LiteralPath $outcomesPath)) {
+        return
+    }
+
+    $logsDir = Join-Path $CandidateDir 'logs'
+    $extractorPath = Join-Path $PSScriptRoot 'extract_autotune_actions.ps1'
+    if (-not (Test-Path -LiteralPath $logsDir) -or -not (Test-Path -LiteralPath $extractorPath)) {
+        return
+    }
+
+    if (-not (Test-Path -LiteralPath $actionsDir)) {
+        $null = New-Item -ItemType Directory -Path $actionsDir -Force
+    }
+
+    try {
+        & powershell -ExecutionPolicy Bypass -File $extractorPath -LogsPath (Join-Path $logsDir '*.log') -OutputDir $actionsDir | Out-Null
+        if ($LASTEXITCODE -ne 0) {
+            Write-Warning ("Action extraction failed for '{0}' with exit code {1}" -f $CandidateDir, $LASTEXITCODE)
+        }
+    } catch {
+        Write-Warning ("Action extraction failed for '{0}': {1}" -f $CandidateDir, $_.Exception.Message)
+    }
+}
+
 function Get-CandidateArtifacts {
     param(
         [string]$SessionDir,
@@ -190,6 +235,7 @@ function Get-CandidateArtifacts {
     } else {
         $config = Read-AutotuneConfigLua -Path (Join-Path $candidateDir 'AutoTuneConfig.lua')
     }
+    Ensure-CandidateActionArtifacts -CandidateDir $candidateDir
 
     return [pscustomobject]@{
         CandidateDir = $candidateDir
@@ -198,6 +244,8 @@ function Get-CandidateArtifacts {
         SummaryRows = Import-CsvSafe -Path (Join-Path $candidateDir 'analysis\summary\autorun_log_summary.csv')
         PlayerRows = Import-CsvSafe -Path (Join-Path $candidateDir 'analysis\summary\autorun_player_stats.csv')
         KpiRows = Import-CsvSafe -Path (Join-Path $candidateDir 'analysis\kpis\autorun_kpis.csv')
+        ActionRows = Import-CsvSafe -Path (Join-Path $candidateDir 'analysis\actions\action_events.csv')
+        ActionOutcomeRows = Import-CsvSafe -Path (Join-Path $candidateDir 'analysis\actions\action_outcomes.csv')
     }
 }
 
@@ -245,6 +293,8 @@ function Write-EconomySessionSql {
     $sql = [System.Text.StringBuilder]::new()
     Add-SqlLine -Builder $sql -Line 'begin;'
     Add-SqlLine -Builder $sql -Line ("delete from autotune.champions where session_id = {0};" -f (ConvertTo-AutotuneSqlLiteral $Summary.Session))
+    Add-SqlLine -Builder $sql -Line ("delete from autotune.action_outcomes where session_id = {0};" -f (ConvertTo-AutotuneSqlLiteral $Summary.Session))
+    Add-SqlLine -Builder $sql -Line ("delete from autotune.action_events where session_id = {0};" -f (ConvertTo-AutotuneSqlLiteral $Summary.Session))
     Add-SqlLine -Builder $sql -Line ("delete from autotune.game_kpis where session_id = {0};" -f (ConvertTo-AutotuneSqlLiteral $Summary.Session))
     Add-SqlLine -Builder $sql -Line ("delete from autotune.game_player_stats where session_id = {0};" -f (ConvertTo-AutotuneSqlLiteral $Summary.Session))
     Add-SqlLine -Builder $sql -Line ("delete from autotune.game_results where session_id = {0};" -f (ConvertTo-AutotuneSqlLiteral $Summary.Session))
@@ -374,6 +424,22 @@ insert into autotune.candidate_parameters (session_id, candidate_id, param_name,
             }
             $playerByLog[$logName] += $row
         }
+        $actionByLog = @{}
+        foreach ($row in $artifacts.ActionRows) {
+            $logName = [string]$row.log_name
+            if (-not $actionByLog.ContainsKey($logName)) {
+                $actionByLog[$logName] = @()
+            }
+            $actionByLog[$logName] += $row
+        }
+        $actionOutcomeByLog = @{}
+        foreach ($row in $artifacts.ActionOutcomeRows) {
+            $logName = [string]$row.log_name
+            if (-not $actionOutcomeByLog.ContainsKey($logName)) {
+                $actionOutcomeByLog[$logName] = @()
+            }
+            $actionOutcomeByLog[$logName] += $row
+        }
 
         $runs = @()
         if ($scoreData -and $scoreData.Runs) {
@@ -389,6 +455,8 @@ insert into autotune.candidate_parameters (session_id, candidate_id, param_name,
             $summaryRow = if ($summaryByLog.ContainsKey($logName)) { $summaryByLog[$logName] } else { $null }
             $kpiRow = if ($kpiByLog.ContainsKey($logName)) { $kpiByLog[$logName] } else { $null }
             $playerRows = if ($playerByLog.ContainsKey($logName)) { @($playerByLog[$logName]) } else { @() }
+            $actionRows = if ($actionByLog.ContainsKey($logName)) { @($actionByLog[$logName]) } else { @() }
+            $actionOutcomeRows = if ($actionOutcomeByLog.ContainsKey($logName)) { @($actionOutcomeByLog[$logName]) } else { @() }
             $matchup = if ($summaryRow) { [string]$summaryRow.ai_matchup } else { $runtimeMeta.AiMatchup }
             $summaryRunTag = if ($summaryRow) { $summaryRow.run_tag } else { $null }
             $summaryInstance = if ($summaryRow) { To-NullableInt $summaryRow.instance } else { $null }
@@ -562,6 +630,80 @@ insert into autotune.game_kpis (
     $(ConvertTo-AutotuneSqlJson $kpiRow)
 );
 "@
+
+            foreach ($action in $actionRows) {
+                Add-SqlLine -Builder $sql -Line @"
+insert into autotune.action_events (
+    session_id, candidate_id, log_name, event_index, run_tag, instance, subsystem, action_type,
+    action_key, action_value, event_time, mex_ready, fac_total, reclaim_mass, map_control,
+    idle_factories, engineer_count, force_guard, force_main, force_outer, force_raid,
+    strategy_dir, production_mode, state_json, raw_event
+) values (
+    $(ConvertTo-AutotuneSqlLiteral $Summary.Session),
+    $(ConvertTo-AutotuneSqlLiteral $candidateId),
+    $(ConvertTo-AutotuneSqlLiteral $logName),
+    $(ConvertTo-AutotuneSqlLiteral (To-NullableInt $action.event_index)),
+    $(ConvertTo-AutotuneSqlLiteral $action.run_tag),
+    $(ConvertTo-AutotuneSqlLiteral (To-NullableInt $action.instance)),
+    $(ConvertTo-AutotuneSqlLiteral $action.subsystem),
+    $(ConvertTo-AutotuneSqlLiteral $action.action_type),
+    $(ConvertTo-AutotuneSqlLiteral $action.action_key),
+    $(ConvertTo-AutotuneSqlLiteral $action.action_value),
+    $(ConvertTo-AutotuneSqlLiteral (To-NullableDouble $action.event_time)),
+    $(ConvertTo-AutotuneSqlLiteral (To-NullableInt $action.mex_ready)),
+    $(ConvertTo-AutotuneSqlLiteral (To-NullableInt $action.fac_total)),
+    $(ConvertTo-AutotuneSqlLiteral (To-NullableDouble $action.reclaim_mass)),
+    $(ConvertTo-AutotuneSqlLiteral (To-NullableDouble $action.map_control)),
+    $(ConvertTo-AutotuneSqlLiteral (To-NullableInt $action.idle_factories)),
+    $(ConvertTo-AutotuneSqlLiteral (To-NullableInt $action.engineer_count)),
+    $(ConvertTo-AutotuneSqlLiteral (To-NullableInt $action.force_guard)),
+    $(ConvertTo-AutotuneSqlLiteral (To-NullableInt $action.force_main)),
+    $(ConvertTo-AutotuneSqlLiteral (To-NullableInt $action.force_outer)),
+    $(ConvertTo-AutotuneSqlLiteral (To-NullableInt $action.force_raid)),
+    $(ConvertTo-AutotuneSqlLiteral $action.strategy_dir),
+    $(ConvertTo-AutotuneSqlLiteral $action.production_mode),
+    $(ConvertTo-AutotuneSqlJsonText $action.state_json),
+    $(ConvertTo-AutotuneSqlJsonText $action.raw_event)
+);
+"@
+            }
+
+            foreach ($outcome in $actionOutcomeRows) {
+                Add-SqlLine -Builder $sql -Line @"
+insert into autotune.action_outcomes (
+    session_id, candidate_id, log_name, event_index, window_seconds, subsystem, action_type,
+    action_value, event_time, reward, delta_mex_ready, delta_factory_total, delta_reclaim_mass,
+    delta_map_control, delta_idle_factories, delta_engineer_count, delta_force_guard,
+    delta_force_main, delta_force_outer, delta_force_raid, survived_window,
+    game_ended_within_window, final_mass_ratio, outcome_json
+) values (
+    $(ConvertTo-AutotuneSqlLiteral $Summary.Session),
+    $(ConvertTo-AutotuneSqlLiteral $candidateId),
+    $(ConvertTo-AutotuneSqlLiteral $logName),
+    $(ConvertTo-AutotuneSqlLiteral (To-NullableInt $outcome.event_index)),
+    $(ConvertTo-AutotuneSqlLiteral (To-NullableInt $outcome.window_seconds)),
+    $(ConvertTo-AutotuneSqlLiteral $outcome.subsystem),
+    $(ConvertTo-AutotuneSqlLiteral $outcome.action_type),
+    $(ConvertTo-AutotuneSqlLiteral $outcome.action_value),
+    $(ConvertTo-AutotuneSqlLiteral (To-NullableDouble $outcome.event_time)),
+    $(ConvertTo-AutotuneSqlLiteral (To-NullableDouble $outcome.reward)),
+    $(ConvertTo-AutotuneSqlLiteral (To-NullableDouble $outcome.delta_mex_ready)),
+    $(ConvertTo-AutotuneSqlLiteral (To-NullableDouble $outcome.delta_factory_total)),
+    $(ConvertTo-AutotuneSqlLiteral (To-NullableDouble $outcome.delta_reclaim_mass)),
+    $(ConvertTo-AutotuneSqlLiteral (To-NullableDouble $outcome.delta_map_control)),
+    $(ConvertTo-AutotuneSqlLiteral (To-NullableDouble $outcome.delta_idle_factories)),
+    $(ConvertTo-AutotuneSqlLiteral (To-NullableDouble $outcome.delta_engineer_count)),
+    $(ConvertTo-AutotuneSqlLiteral (To-NullableDouble $outcome.delta_force_guard)),
+    $(ConvertTo-AutotuneSqlLiteral (To-NullableDouble $outcome.delta_force_main)),
+    $(ConvertTo-AutotuneSqlLiteral (To-NullableDouble $outcome.delta_force_outer)),
+    $(ConvertTo-AutotuneSqlLiteral (To-NullableDouble $outcome.delta_force_raid)),
+    $(ConvertTo-AutotuneSqlLiteral (To-NullableBool $outcome.survived_window)),
+    $(ConvertTo-AutotuneSqlLiteral (To-NullableBool $outcome.game_ended_within_window)),
+    $(ConvertTo-AutotuneSqlLiteral (To-NullableDouble $outcome.final_mass_ratio)),
+    $(ConvertTo-AutotuneSqlJsonText $outcome.outcome_json)
+);
+"@
+            }
         }
     }
 

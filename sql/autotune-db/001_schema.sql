@@ -166,6 +166,65 @@ create table if not exists autotune.game_kpis (
     foreign key (session_id, candidate_id, log_name) references autotune.game_results(session_id, candidate_id, log_name) on delete cascade
 );
 
+create table if not exists autotune.action_events (
+    session_id text not null,
+    candidate_id text not null,
+    log_name text not null,
+    event_index integer not null,
+    run_tag text null,
+    instance integer null,
+    subsystem text not null,
+    action_type text not null,
+    action_key text null,
+    action_value text null,
+    event_time numeric not null,
+    mex_ready integer null,
+    fac_total integer null,
+    reclaim_mass numeric null,
+    map_control numeric null,
+    idle_factories integer null,
+    engineer_count integer null,
+    force_guard integer null,
+    force_main integer null,
+    force_outer integer null,
+    force_raid integer null,
+    strategy_dir text null,
+    production_mode text null,
+    state_json jsonb null,
+    raw_event jsonb null,
+    primary key (session_id, candidate_id, log_name, event_index),
+    foreign key (session_id, candidate_id, log_name) references autotune.game_results(session_id, candidate_id, log_name) on delete cascade
+);
+
+create table if not exists autotune.action_outcomes (
+    session_id text not null,
+    candidate_id text not null,
+    log_name text not null,
+    event_index integer not null,
+    window_seconds integer not null,
+    subsystem text not null,
+    action_type text not null,
+    action_value text null,
+    event_time numeric not null,
+    reward numeric null,
+    delta_mex_ready numeric null,
+    delta_factory_total numeric null,
+    delta_reclaim_mass numeric null,
+    delta_map_control numeric null,
+    delta_idle_factories numeric null,
+    delta_engineer_count numeric null,
+    delta_force_guard numeric null,
+    delta_force_main numeric null,
+    delta_force_outer numeric null,
+    delta_force_raid numeric null,
+    survived_window boolean null,
+    game_ended_within_window boolean null,
+    final_mass_ratio numeric null,
+    outcome_json jsonb null,
+    primary key (session_id, candidate_id, log_name, event_index, window_seconds),
+    foreign key (session_id, candidate_id, log_name, event_index) references autotune.action_events(session_id, candidate_id, log_name, event_index) on delete cascade
+);
+
 create table if not exists autotune.champions (
     session_id text not null,
     candidate_id text not null,
@@ -231,4 +290,8 @@ create index if not exists ix_autotune_candidate_results_mass_ratio on autotune.
 create index if not exists ix_autotune_candidate_parameters_name on autotune.candidate_parameters(param_name);
 create index if not exists ix_autotune_game_results_matchup on autotune.game_results(ai_matchup, winner_name);
 create index if not exists ix_autotune_game_kpis_mass_ratio on autotune.game_kpis(overmind_mass_in_ratio desc);
+create index if not exists ix_autotune_action_events_subsystem on autotune.action_events(subsystem, action_type, action_value);
+create index if not exists ix_autotune_action_events_time on autotune.action_events(event_time);
+create index if not exists ix_autotune_action_outcomes_reward on autotune.action_outcomes(window_seconds, reward desc);
+create index if not exists ix_autotune_action_outcomes_subsystem on autotune.action_outcomes(subsystem, action_type, action_value);
 create index if not exists ix_autotune_champions_map_opponent on autotune.champions(map_name, opponent_key, promoted_at desc);
