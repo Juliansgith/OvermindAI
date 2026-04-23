@@ -144,6 +144,10 @@ function UpdatePolicy(aiBrain, now)
     local runtime = aiBrain.OvermindRuntime or {}
     aiBrain.OvermindRuntime = runtime
     local tune = OvermindAutoTune.GetConfig(aiBrain)
+    local reclaimScoreBias = tune.ReclaimScoreBias or 0
+    local function TunedReclaimScore(base)
+        return Clamp(base + reclaimScoreBias, 40, 420)
+    end
 
     local eco = runtime.EcoState or {}
     local opp = runtime.OpponentModel or {}
@@ -226,7 +230,7 @@ function UpdatePolicy(aiBrain, now)
             or structure.OuterMexShare >= 0.34
         )
     local reclaimFieldScore = planner.ReclaimFieldScore or 0
-    local reclaimFieldAvailable = reclaimFieldScore >= 110
+    local reclaimFieldAvailable = reclaimFieldScore >= TunedReclaimScore(110)
     local reclaimUnderPressure = reclaimFieldAvailable or (structure.SafeForwardMexCount or 0) >= 2
     local reclaimPressureMode = (contestMapMode or prioritizeProduction)
         and stableTempoEco
@@ -373,16 +377,16 @@ function UpdatePolicy(aiBrain, now)
         and (eco.MassTrend or 0) >= -0.45
         and (eco.EnergyTrend or 0) >= -24
         and (planner.ReclaimFirst == true or planner.OuterRetentionActive == true or reclaimPressureMode)
-    local reclaimQuotaAllowed = now >= 180
+    local reclaimQuotaAllowed = now >= Clamp(180 + (tune.ReclaimQuotaTimeBias or 0), 90, 420)
         and phase ~= 'bootstrap'
         and (macroCounts.FactoryTotal or 0) >= 1
         and (not acuCrisisActive or reclaimCrisisOverride)
         and pressure.SurvivalCrisis ~= true
     local reclaimQuotaMexReady = (macroCounts.Mex or 0) >= 6
-        or ((macroCounts.Mex or 0) >= 4 and reclaimFieldScore >= 90)
-        or ((macroCounts.Mex or 0) >= 5 and reclaimFieldScore >= 110)
+        or ((macroCounts.Mex or 0) >= 4 and reclaimFieldScore >= TunedReclaimScore(90))
+        or ((macroCounts.Mex or 0) >= 5 and reclaimFieldScore >= TunedReclaimScore(110))
         or ((macroCounts.Mex or 0) >= 5 and reclaimPressureMode)
-        or reclaimFieldScore >= 180
+        or reclaimFieldScore >= TunedReclaimScore(180)
     local lowMexExpansionNeed = now < 1500 and (macroCounts.Mex or 0) < 11 and phase ~= 'bootstrap'
     local reclaimWorkerReady = (macroCounts.Engineers or 0) >= 8
     local reclaimConversionDebt = (velocity.ReclaimStagnationTime or 0) >= 45
@@ -391,25 +395,25 @@ function UpdatePolicy(aiBrain, now)
     if reclaimQuotaAllowed
         and reclaimQuotaMexReady
         and (reclaimPressureMode
-            or reclaimFieldScore >= 160
-            or ((planner.ReclaimFirst == true or planner.OuterRetentionActive == true) and reclaimFieldScore >= 90)) then
+            or reclaimFieldScore >= TunedReclaimScore(160)
+            or ((planner.ReclaimFirst == true or planner.OuterRetentionActive == true) and reclaimFieldScore >= TunedReclaimScore(90))) then
         policy.EngineerReclaimQuota = 1
     end
-    if reclaimQuotaAllowed and reclaimQuotaMexReady and reclaimFieldScore >= 90 and (macroCounts.Engineers or 0) >= 6 then
+    if reclaimQuotaAllowed and reclaimQuotaMexReady and reclaimFieldScore >= TunedReclaimScore(90) and (macroCounts.Engineers or 0) >= 6 then
         policy.EngineerReclaimQuota = math.max(policy.EngineerReclaimQuota, 1)
     end
-    if reclaimQuotaAllowed and reclaimQuotaMexReady and reclaimFieldScore >= 150 and (macroCounts.Engineers or 0) >= 7 then
+    if reclaimQuotaAllowed and reclaimQuotaMexReady and reclaimFieldScore >= TunedReclaimScore(150) and (macroCounts.Engineers or 0) >= 7 then
         policy.EngineerReclaimQuota = math.max(policy.EngineerReclaimQuota, 2)
     end
-    if reclaimQuotaAllowed and reclaimQuotaMexReady and reclaimFieldScore >= 260 and reclaimWorkerReady then
+    if reclaimQuotaAllowed and reclaimQuotaMexReady and reclaimFieldScore >= TunedReclaimScore(260) and reclaimWorkerReady then
         policy.EngineerReclaimQuota = math.max(policy.EngineerReclaimQuota, 3)
     end
-    if reclaimQuotaAllowed and reclaimQuotaMexReady and reclaimWorkerReady and reclaimFieldScore >= 90 and reclaimConversionDebt then
+    if reclaimQuotaAllowed and reclaimQuotaMexReady and reclaimWorkerReady and reclaimFieldScore >= TunedReclaimScore(90) and reclaimConversionDebt then
         policy.EngineerReclaimQuota = math.max(policy.EngineerReclaimQuota, 1)
     end
     if reclaimQuotaAllowed
         and reclaimQuotaMexReady
-        and reclaimFieldScore >= 120
+        and reclaimFieldScore >= TunedReclaimScore(120)
         and (planner.ReclaimFirst == true or planner.OuterRetentionActive == true or reclaimPressureMode)
         and (macroCounts.Engineers or 0) >= 7 then
         policy.EngineerReclaimQuota = math.max(policy.EngineerReclaimQuota, 1)
@@ -417,15 +421,15 @@ function UpdatePolicy(aiBrain, now)
     if reclaimQuotaAllowed and reclaimQuotaMexReady and reclaimFieldAvailable then
         policy.EngineerReclaimQuota = math.max(policy.EngineerReclaimQuota, 1)
     end
-    if reclaimQuotaAllowed and reclaimQuotaMexReady and reclaimFieldScore >= 190 and (velocity.ReclaimStagnationTime or 0) >= 45 and reclaimWorkerReady then
+    if reclaimQuotaAllowed and reclaimQuotaMexReady and reclaimFieldScore >= TunedReclaimScore(190) and (velocity.ReclaimStagnationTime or 0) >= 45 and reclaimWorkerReady then
         policy.EngineerReclaimQuota = 2
     end
-    if reclaimQuotaAllowed and reclaimQuotaMexReady and reclaimFieldScore >= 220 and reclaimWorkerReady then
+    if reclaimQuotaAllowed and reclaimQuotaMexReady and reclaimFieldScore >= TunedReclaimScore(220) and reclaimWorkerReady then
         policy.EngineerReclaimQuota = math.max(policy.EngineerReclaimQuota, 2)
     end
     if reclaimQuotaAllowed
         and reclaimQuotaMexReady
-        and reclaimFieldScore >= 150
+        and reclaimFieldScore >= TunedReclaimScore(150)
         and (velocity.ReclaimStagnationTime or 0) >= 60
         and (velocity.ReclaimRateShort or 0) <= 0.2
         and reclaimWorkerReady then
@@ -435,6 +439,8 @@ function UpdatePolicy(aiBrain, now)
     if lowMexExpansionNeed and (macroCounts.Mex or 0) < 8 then
         policy.EngineerExpansionQuota = 3
     end
+    policy.EngineerReclaimQuota = policy.EngineerReclaimQuota + math.floor(tune.ReclaimQuotaBias or 0)
+    policy.EngineerExpansionQuota = policy.EngineerExpansionQuota + math.floor(tune.ExpansionQuotaBias or 0)
     policy.EngineerBaseQuota = pressure.SurvivalCrisis and 4 or ((phase == 'bootstrap' or phase == 'recover') and 3 or 2)
 
     if now < 420 then
@@ -717,6 +723,24 @@ function UpdatePolicy(aiBrain, now)
         policy.BaseEngineerFloor = math.max(policy.BaseEngineerFloor, 4)
         policy.EngineerFactoryRatio = math.max(policy.EngineerFactoryRatio, 1.02)
     end
+
+    policy.ProductionTempoBias = policy.ProductionTempoBias + (tune.FactoryTempoBias or 0)
+    policy.FactoryMassIncome = policy.FactoryMassIncome + (tune.FactoryMassIncomeBias or 0)
+    policy.FactoryEnergyIncome = policy.FactoryEnergyIncome + (tune.FactoryEnergyIncomeBias or 0)
+    policy.FactoryMassRatio = policy.FactoryMassRatio + (tune.FactoryMassRatioBias or 0)
+    policy.FactoryEnergyRatio = policy.FactoryEnergyRatio + (tune.FactoryEnergyRatioBias or 0)
+    policy.FactoryMassPerFactory = policy.FactoryMassPerFactory + (tune.FactoryMassPerFactoryBias or 0)
+    policy.FactoryToMexCap = policy.FactoryToMexCap + (tune.FactoryToMexCapBias or 0)
+    policy.EngineerFactoryRatio = policy.EngineerFactoryRatio + (tune.EngineerFactoryRatioBias or 0)
+    policy.BaseEngineerFloor = policy.BaseEngineerFloor + math.floor(tune.BaseEngineerFloorBias or 0)
+    policy.SafeExpandDistance = policy.SafeExpandDistance + (tune.SafeExpandDistanceBias or 0)
+    policy.SafeExpandThreatCap = policy.SafeExpandThreatCap + (tune.SafeExpandThreatCapBias or 0)
+    policy.SafeExpandEnemyBuffer = policy.SafeExpandEnemyBuffer + (tune.SafeExpandEnemyBufferBias or 0)
+    policy.T2MexMinTime = policy.T2MexMinTime + (tune.UpgradeTimeBias or 0)
+    policy.AirFactoryMinTime = policy.AirFactoryMinTime + (tune.AirFactoryTimeBias or 0)
+    policy.RadarMinTime = policy.RadarMinTime + (tune.RadarTimeBias or 0)
+    policy.EnergyNeedRatio = policy.EnergyNeedRatio + (tune.PowerNeedRatioBias or 0)
+    policy.SafeEnergyRatio = policy.SafeEnergyRatio + ((tune.PowerNeedRatioBias or 0) * 0.6)
 
     policy.FactoryMassRatio = Clamp(policy.FactoryMassRatio, 0.18, 0.5)
     policy.FactoryEnergyRatio = Clamp(policy.FactoryEnergyRatio, 0.2, 0.6)

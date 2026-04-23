@@ -39,3 +39,6 @@ venv/
 *.log
 *.zip
 *.7z
+
+# Generated economy autotune campaigns
+autotune/runs/
