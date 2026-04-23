@@ -104,9 +104,10 @@ local function GetReclaimFieldTargets(targetPos, radius, minMass)
     local totalMass = 0
     for _, reclaim in reclaimRect do
         local mass = reclaim and reclaim.MaxMassReclaim or 0
-        if mass > (minMass or 10) then
+        local remaining = mass * (reclaim.ReclaimLeft or 1)
+        if remaining >= (minMass or 1) then
             table.insert(targets, reclaim)
-            totalMass = totalMass + (mass * (reclaim.ReclaimLeft or 1))
+            totalMass = totalMass + remaining
         end
     end
     return targets, totalMass
@@ -138,13 +139,13 @@ local function TryReclaimFieldZone(aiBrain, runtime, eng, targetPos, now)
     local taskStrength = outerTask.CurrentStrength or 0
     local supported = math.max(allySupport, taskSupport, math.floor(taskStrength / 7))
     local outerBacked = taskSupport > 0 or taskStrength >= 8 or planner.OuterRetentionActive == true
-    local reclaimTargets, reclaimMass = GetReclaimFieldTargets(targetPos, planner.ReclaimFirst and 22 or 20, planner.ReclaimFirst and 6 or 10)
+    local reclaimTargets, reclaimMass = GetReclaimFieldTargets(targetPos, planner.ReclaimFirst and 46 or 40, planner.ReclaimFirst and 1.5 or 2.5)
     local supportWeightedThreat = math.max(0, localThreat - (supported * 0.18))
-    local threatCap = planner.ReclaimFirst and (outerBacked and 2.35 or 2.0) or (outerBacked and 1.8 or 1.5)
-    local routeRiskCap = planner.ReclaimFirst and (outerBacked and 4.0 or 3.5) or (outerBacked and 3.4 or 3.0)
+    local threatCap = planner.ReclaimFirst and (outerBacked and 2.75 or 2.35) or (outerBacked and 2.15 or 1.85)
+    local routeRiskCap = planner.ReclaimFirst and (outerBacked and 5.2 or 4.5) or (outerBacked and 4.4 or 3.8)
     local minSupport = planner.ReclaimFirst and (outerBacked and 1 or 2) or (outerBacked and 2 or 3)
 
-    if table.getn(reclaimTargets) <= 0 or reclaimMass < (planner.ReclaimFirst and 80 or 120) then
+    if table.getn(reclaimTargets) <= 0 or reclaimMass < (planner.ReclaimFirst and 42 or 58) then
         return false
     end
     if distMain > (((runtime.EcoPolicy or {}).SafeExpandDistance or 680) + 100) then
@@ -184,7 +185,7 @@ local function TryReclaimFieldZone(aiBrain, runtime, eng, targetPos, now)
             if reclaim and (reclaim.MaxMassReclaim or 0) > 0 then
                 IssueReclaim({ eng }, reclaim)
                 issued = issued + 1
-                if issued >= 8 then
+                if issued >= 24 then
                     break
                 end
             end

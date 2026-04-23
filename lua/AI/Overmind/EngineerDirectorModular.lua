@@ -606,10 +606,11 @@ function Update(aiBrain, now)
     activity.PowerRecoveryCount = ctx.powerRecoveryCount
     activity.SurplusSpendCount = ctx.surplusSpendCount
     activity.ReclaimQuota = fieldTaskQuota
-    activity.BlockedReason = severeFactoryStarve and 'factory_starve'
+    local blockedReason = severeFactoryStarve and 'factory_starve'
         or ecoCrash and 'eco_crash'
         or fieldTaskQuota <= 0 and 'no_reclaim_quota'
         or 'none'
+    activity.BlockedReason = blockedReason
     OvermindEconomyLedger.PublishEngineerActivity(aiBrain, runtime, now, activity)
 
     local shouldLog = (ctx.recoverCount + ctx.threatenedCount + ctx.forcedFactoryRecover + ctx.dispatchedExpand + ctx.reclaimEnemyMex + ctx.reclaimField) > 0
@@ -628,7 +629,7 @@ function Update(aiBrain, now)
             sz = structureTask.TargetPos[3] or 0
             structureNearby = aiBrain:GetNumUnitsAroundPoint(categories.ENGINEER * categories.MOBILE, structureTask.TargetPos, 18, 'Ally') or 0
         end
-        LOG(string.format('*OVERMIND ENGDIR A%d t=%.1f recover=%d threat=%d facRec=%d powerRec=%d surp=%d expand=%d field=%d baseNeed=%d facTask=%d:%s frac=%.2f stall=%.1f asn=%d/%d structTask=%d:%s:%s frac=%.2f stall=%.1f asn=%d/%d near=%d pos=%.1f,%.1f',
+        LOG(string.format('*OVERMIND ENGDIR A%d t=%.1f recover=%d threat=%d facRec=%d powerRec=%d surp=%d expand=%d field=%d quota=%d block=%s baseNeed=%d facTask=%d:%s frac=%.2f stall=%.1f asn=%d/%d structTask=%d:%s:%s frac=%.2f stall=%.1f asn=%d/%d near=%d pos=%.1f,%.1f',
             aiBrain:GetArmyIndex(),
             now,
             ctx.recoverCount,
@@ -638,6 +639,8 @@ function Update(aiBrain, now)
             ctx.surplusSpendCount,
             ctx.dispatchedExpand,
             ctx.reclaimField,
+            fieldTaskQuota,
+            blockedReason,
             math.max(0, baseFloor - baseEngineers),
             factoryTask.Active and 1 or 0,
             factoryTask.Domain or 'none',
