@@ -1870,6 +1870,36 @@ local function DecideCapacityPlan(runtime, current, constraints, rolePlan)
         secondLandLatched = true
     end
 
+    local t1LandFactoryRatioFloor = 1
+    if current.Factories.Land.Ready >= 2 and mexReady >= 5 and powerReady >= 1 then
+        local ratioFloor = math.floor(mexReady / 1.35)
+        t1LandFactoryRatioFloor = math.max(t1LandFactoryRatioFloor, math.min(5, ratioFloor))
+        if now >= 420 then
+            t1LandFactoryRatioFloor = math.max(t1LandFactoryRatioFloor, 3)
+        end
+        if now >= 600 and (liveCombatWindow or contestMapMode or prioritizeProduction or landRoleGap >= 18) then
+            t1LandFactoryRatioFloor = math.max(t1LandFactoryRatioFloor, 4)
+        end
+        if now >= 780 and mexReady >= 6 and (liveCombatWindow or landRoleGap >= 24 or constraints.LandPanic or constraints.FrontCollapse) then
+            t1LandFactoryRatioFloor = math.max(t1LandFactoryRatioFloor, 5)
+        end
+    end
+    t1LandFactoryRatioFloor = math.min(landCap, t1LandFactoryRatioFloor)
+    local t1LandFactoryRatioDebt = current.Factories.Land.Ready >= 2
+        and current.Factories.Land.Total < t1LandFactoryRatioFloor
+        and totalUnfinished <= 0
+        and mexReady >= 5
+        and powerReady >= 1
+        and now < 1500
+        and not constraints.EcoCrash
+        and not constraints.CriticalFactory
+        and not constraints.UnitCapPressure
+        and (
+            (eco.MassTrend or 0) > -8
+            or liveCombatWindow
+            or (eco.MassStorageRatio or 0) >= 0.12
+        )
+
     if constraints.EcoWeak or constraints.QueueStarved then
         landTarget = math.min(landTarget, math.max(1, current.Factories.Land.Ready + (current.Factories.Land.Total <= 0 and 1 or 0)))
         airTarget = math.min(airTarget, current.Factories.Air.Ready + ((constraints.AirPanic and current.Factories.Air.Total <= 0) and 1 or 0))
@@ -1910,6 +1940,12 @@ local function DecideCapacityPlan(runtime, current, constraints, rolePlan)
             airTarget = 0
         end
         seaTarget = 0
+    end
+    if t1LandFactoryRatioDebt then
+        landTarget = math.max(landTarget, t1LandFactoryRatioFloor)
+        if not preserveAirWindow then
+            airTarget = math.min(airTarget, current.Factories.Air.Total)
+        end
     end
     if secondLandLatched and not constraints.StarterPhase and not constraints.EconBootstrap then
         landTarget = math.max(landTarget, 2)
@@ -2208,6 +2244,13 @@ local function DecideCapacityPlan(runtime, current, constraints, rolePlan)
         seaTarget = 0
         pauseGrowth = false
     end
+    if t1LandFactoryRatioDebt then
+        landTarget = math.max(landTarget, t1LandFactoryRatioFloor)
+        if not preserveAirWindow then
+            airTarget = math.min(airTarget, current.Factories.Air.Total)
+        end
+        pauseGrowth = false
+    end
 
     if not emergencyAirFactory and not threatenedAirUnlock and not counterAirFactory and current.Factories.Land.Ready < 2 then
         airTarget = 0
@@ -2460,6 +2503,8 @@ local function DecideCapacityPlan(runtime, current, constraints, rolePlan)
         AddAirFactory = nonLandFactoryAllowed and (current.Factories.Air.Total < airTarget),
         AddSeaFactory = nonLandFactoryAllowed and (current.Factories.Navy.Total < seaTarget),
         EarlyFactoryGrowthDebt = singleLandFactoryFloor and true or false,
+        FactoryGrowthDebt = (singleLandFactoryFloor or t1LandFactoryRatioDebt) and true or false,
+        T1LandFactoryRatioFloor = t1LandFactoryRatioFloor,
         PauseFactoryGrowth = pauseGrowth,
         FactoryCompletionLock = completionLock and true or false,
         CriticalFactoryRecovery = constraints.CriticalFactory and true or false,

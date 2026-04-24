@@ -1284,9 +1284,15 @@ local function IsFactoryGrowthHardBlocked(aiBrain, capacity, domain)
     local earlyFactoryGrowthDebt = activeCapacity
         and activeCapacity.EarlyFactoryGrowthDebt == true
         and string.lower(domain or '') == 'land'
+    local factoryGrowthDebt = earlyFactoryGrowthDebt
+        or (
+            activeCapacity
+            and activeCapacity.FactoryGrowthDebt == true
+            and string.lower(domain or '') == 'land'
+        )
     if activeCapacity then
         if activeCapacity.PauseFactoryGrowth == true or activeCapacity.FactoryCompletionLock == true then
-            if not secondLandBootstrapDebt and not earlyFactoryGrowthDebt then
+            if not secondLandBootstrapDebt and not factoryGrowthDebt then
                 return true
             end
         end
@@ -1294,7 +1300,7 @@ local function IsFactoryGrowthHardBlocked(aiBrain, capacity, domain)
 
     local recovery = GetRecovery(aiBrain) or {}
     if recovery.FactoryQueueExpansionBlocked or recovery.ForceFactoryDeadlock then
-        if earlyFactoryGrowthDebt then
+        if factoryGrowthDebt then
             return false
         end
         return true

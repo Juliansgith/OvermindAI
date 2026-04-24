@@ -820,7 +820,7 @@ local function ProcessEngineer(aiBrain, runtime, eng, now, ctx)
         return
     end
 
-    if ctx.earlyFactoryGrowthDebt
+    if ctx.factoryGrowthDebt
         and not ctx.factoryTask.Active
         and not claimedByFactoryTask
         and not claimedByStructureTask

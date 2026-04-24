@@ -496,7 +496,9 @@ function Update(aiBrain, now)
             and (landFactories.Total or 0) <= 1
             and now < 780
         )
+    local factoryGrowthDebt = capacity.FactoryGrowthDebt == true or earlyFactoryGrowthDebt
     engState.EarlyFactoryGrowthDebt = earlyFactoryGrowthDebt and true or false
+    engState.FactoryGrowthDebt = factoryGrowthDebt and true or false
     engState.PeakMexReady = math.max(engState.PeakMexReady or 0, mexReady)
     local mexLossCount = math.max(0, (engState.PeakMexReady or mexReady) - mexReady)
     local mexRebuildUrgent = mexLossCount >= 1
@@ -649,8 +651,8 @@ function Update(aiBrain, now)
     local ecoStructureTargetObject = false
     local defenseStructureTargetObject = false
     local forceFinishEco, forcedEcoTarget, forcedEcoKind = ShouldForceFinishEcoStructure(aiBrain, runtime, mainPos, false, false)
-    local allowStructureDuringFactoryDebt = not earlyFactoryGrowthDebt
-    if earlyFactoryGrowthDebt and forceFinishEco and forcedEcoTarget and not forcedEcoTarget.Dead then
+    local allowStructureDuringFactoryDebt = not factoryGrowthDebt
+    if factoryGrowthDebt and forceFinishEco and forcedEcoTarget and not forcedEcoTarget.Dead then
         local forcedFraction = GetFraction(forcedEcoTarget)
         allowStructureDuringFactoryDebt = (forcedEcoKind == 'Power' and forcedFraction >= 0.74)
             or (forcedEcoKind == 'Mex' and forcedFraction >= 0.82)
@@ -783,7 +785,7 @@ function Update(aiBrain, now)
         reservedDefenseBuilderIds[id] = value
     end
 
-    local allowDefenseStructureLane = not transitionLock and not earlyFactoryGrowthDebt and (
+    local allowDefenseStructureLane = not transitionLock and not factoryGrowthDebt and (
         not factoryTaskCritical
         or radarCritical
         or constraints.RadarCritical == true
@@ -998,6 +1000,7 @@ function Update(aiBrain, now)
         factoryTask = factoryTask,
         forcedFactoryRecover = factoryTask.AssignedBuilders or 0,
         earlyFactoryGrowthDebt = earlyFactoryGrowthDebt,
+        factoryGrowthDebt = factoryGrowthDebt,
         defenseStructureTargetObject = defenseStructureTargetObject,
         defenseStructureTask = defenseStructureTask,
         hqPowerRecoveryWanted = hqPowerRecoveryWanted,
