@@ -444,14 +444,6 @@ function Update(aiBrain, now)
         runtime.LastExpansionInternalGateReason = 'impl_missing'
         return 0
     end)
-    local function CallDispatchExpansionEngineer(...)
-        runtime.LastExpansionInternalGateReason = 'precall'
-        local issued = DispatchExpansionEngineer(...)
-        if runtime.LastExpansionInternalGateReason == 'precall' then
-            runtime.LastExpansionInternalGateReason = 'impl_no_state'
-        end
-        return issued or 0
-    end
 
     if now - (runtime.LastEngineerDirectorTime or -999) < 3 then
         return
@@ -575,7 +567,7 @@ function Update(aiBrain, now)
             earlyThreatCap = earlyThreatCap + 0.2
         end
         expansionGateReason = 'early_called'
-        preclaimedExpand = CallDispatchExpansionEngineer(aiBrain, runtime, now, engineers, mainPos, enemyPos, math.max(520, safeExpandDistance), earlyThreatCap)
+        preclaimedExpand = DispatchExpansionEngineer(aiBrain, runtime, now, engineers, mainPos, enemyPos, math.max(520, safeExpandDistance), earlyThreatCap)
     end
 
     local target, targetPos, fraction, domain, readyFactories = FindBestUnfinishedFactory(aiBrain, runtime, mainPos)
@@ -1085,7 +1077,7 @@ function Update(aiBrain, now)
         end
         expansionGateReason = 'called'
         ctx.dispatchedExpand = (ctx.dispatchedExpand or 0)
-            + CallDispatchExpansionEngineer(aiBrain, runtime, now, engineers, mainPos, enemyPos, math.max(420, safeExpandDistance), threatCap)
+            + DispatchExpansionEngineer(aiBrain, runtime, now, engineers, mainPos, enemyPos, math.max(420, safeExpandDistance), threatCap)
     elseif expansionOverride and expansionGateReason == 'none' then
         expansionGateReason = now < 60 and 'time'
             or severeFactoryStarve and 'factory_starve'
