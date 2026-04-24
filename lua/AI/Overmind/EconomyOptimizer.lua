@@ -359,9 +359,10 @@ function UpdatePolicy(aiBrain, now)
     policy.StrategyCollapseResistanceBias = tune.StrategyCollapseResistanceBias or 0
     policy.StrategyReclaimFieldBias = tune.StrategyReclaimFieldBias or 0
     policy.EarlyAirUnlockBias = tune.EarlyAirUnlockBias or 0
-    policy.AcuOpeningMaxDistance = math.min(tune.ACUOpeningMaxDistance or 20, 16)
-    policy.AcuMidMaxDistance = math.min(tune.ACUMidMaxDistance or 36, 24)
-    policy.AcuLateMaxDistance = math.min(tune.ACULateMaxDistance or 60, 38)
+    policy.AcuOpeningMaxDistance = Clamp((tune.ACUOpeningMaxDistance or 28) + 10, 24, 42)
+    policy.AcuMidMaxDistance = Clamp((tune.ACUMidMaxDistance or 40) + 8, 32, 58)
+    policy.AcuLateMaxDistance = Clamp((tune.ACULateMaxDistance or 60) + 4, 42, 76)
+    policy.AcuOpeningMexDistance = Clamp(260 + ((tune.ACUOpeningMaxDistance or 28) * 2), 240, 340)
 
     policy.ContestMapMode = contestMapMode and true or false
     policy.PrioritizeProduction = prioritizeProduction and true or false
@@ -464,7 +465,7 @@ function UpdatePolicy(aiBrain, now)
     policy.EngineerExpansionQuota = policy.EngineerExpansionQuota + math.floor(tune.ExpansionQuotaBias or 0)
     policy.EngineerLossPressure = OvermindMemory.GetEngineerLossPressure(aiBrain)
     if now >= 300 and policy.EngineerLossPressure >= 0.65 then
-        policy.EngineerReclaimQuota = math.min(policy.EngineerReclaimQuota, policy.EngineerLossPressure >= 1.1 and 0 or 1)
+        policy.EngineerReclaimQuota = math.min(policy.EngineerReclaimQuota, 1)
         policy.EngineerExpansionQuota = math.min(policy.EngineerExpansionQuota, (macroCounts.Mex or 0) < 6 and 2 or 1)
     end
     policy.EngineerBaseQuota = pressure.SurvivalCrisis and 4 or ((phase == 'bootstrap' or phase == 'recover') and 3 or 2)
@@ -481,8 +482,9 @@ function UpdatePolicy(aiBrain, now)
         policy.FarExpandMinControl = 0.24
         policy.FarExpandMinRelativePower = 0.95
         policy.FarExpandMinArmy = 20
-        policy.AcuOpeningMaxDistance = math.min(tune.ACUOpeningMaxDistance or 20, 16)
-        policy.AcuMidMaxDistance = math.min(tune.ACUMidMaxDistance or 36, 24)
+        policy.AcuOpeningMaxDistance = Clamp((tune.ACUOpeningMaxDistance or 28) + 10, 24, 42)
+        policy.AcuMidMaxDistance = Clamp((tune.ACUMidMaxDistance or 40) + 8, 32, 58)
+        policy.AcuOpeningMexDistance = Clamp(280 + ((tune.ACUOpeningMaxDistance or 28) * 2), 260, 350)
     elseif now < 720 then
         policy.EngineerReserveMin = 4
         policy.SafeExpandDistance = 660
@@ -495,8 +497,9 @@ function UpdatePolicy(aiBrain, now)
         policy.FarExpandMinControl = 0.28
         policy.FarExpandMinRelativePower = 0.94
         policy.FarExpandMinArmy = 24
-        policy.AcuOpeningMaxDistance = math.min((tune.ACUOpeningMaxDistance or 20) + 2, 18)
-        policy.AcuMidMaxDistance = math.min((tune.ACUMidMaxDistance or 36) + 4, 28)
+        policy.AcuOpeningMaxDistance = Clamp((tune.ACUOpeningMaxDistance or 28) + 8, 24, 42)
+        policy.AcuMidMaxDistance = Clamp((tune.ACUMidMaxDistance or 40) + 8, 34, 58)
+        policy.AcuOpeningMexDistance = Clamp(260 + ((tune.ACUOpeningMaxDistance or 28) * 2), 240, 340)
     end
 
     if phase == 'bootstrap' then

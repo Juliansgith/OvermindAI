@@ -70,6 +70,10 @@ local function GetQueueLen(unit)
     return q and table.getn(q) or 0
 end
 
+local function Clamp(value, minValue, maxValue)
+    return math.max(minValue, math.min(maxValue, value or minValue))
+end
+
 local function IsBuilderBusy(unit)
     if not unit or unit.Dead then
         return false
@@ -408,6 +412,24 @@ local function TryExecuteStarterTask(aiBrain, runtime, acu, homePos, director, c
         end
     end
 
+    if now < 420
+        and readyLandFactories >= 1
+        and mexReady < math.max(8, mexFloor + 3)
+        and not criticalPowerNeeded
+        and not radarNeeded
+        and IssueBuildMobile
+        and not unfinishedStarterEco then
+        local bp = PickBuildableBlueprint(acu, StarterMexCategory)
+        local maxClaimDistance = (runtime.EcoPolicy and runtime.EcoPolicy.AcuOpeningMexDistance) or 300
+        local mexPos = bp and FindClosestSafeMex(aiBrain, homePos, maxClaimDistance)
+        if bp and mexPos then
+            IssueBuildMobile({ acu }, mexPos, bp, {})
+            runtime.ACUSafetyLockUntil = math.max(runtime.ACUSafetyLockUntil or -999, now + 6)
+            runtime.ACUHardBuildLockUntil = math.max(runtime.ACUHardBuildLockUntil or -999, now + 18)
+            return true
+        end
+    end
+
     return false
 end
 
@@ -537,6 +559,7 @@ function Update(aiBrain, now)
     local underHarass = raid.UnderLandHarass or raid.UnderAirHarass
     local director = runtime.ProductionDirector or {}
     local macro = runtime.MacroController or {}
+    local policy = runtime.EcoPolicy or {}
     local constraints = director.ConstraintState or {}
     local macroObjective = macro.Phase or director.MacroObjective or 'land_factory_floor'
     local transitionAnchor = macro.TransitionLocked == true and macroObjective ~= 'surplus_scale'
@@ -629,8 +652,14 @@ function Update(aiBrain, now)
     runtime.ACURoleState = roleState
     runtime.ACURole = roleState.Current
     runtime.ACURoleMaxDistance = RoleDistance(roleState.Current)
+    local policyAnchorDistance = now < 420
+        and (policy.AcuOpeningMaxDistance or 28)
+        or (now < 900 and (policy.AcuMidMaxDistance or 36) or (policy.AcuLateMaxDistance or 52))
+    if roleState.Current == 'anchor' and not underHarass and healthRatio >= 0.84 then
+        runtime.ACURoleMaxDistance = math.max(runtime.ACURoleMaxDistance, Clamp(policyAnchorDistance, 18, now < 420 and 42 or 58))
+    end
     if transitionAnchor then
-        runtime.ACURoleMaxDistance = math.min(runtime.ACURoleMaxDistance, 10)
+        runtime.ACURoleMaxDistance = math.min(runtime.ACURoleMaxDistance, now < 420 and 30 or 18)
     end
     if strictLeash or retreatEscalated or acuCrisisActive then
         runtime.ACURoleMaxDistance = math.min(runtime.ACURoleMaxDistance, 16)
@@ -661,7 +690,8 @@ function Update(aiBrain, now)
     end
 
     if starterPhaseLock or (transitionAnchor and now < 360 and healthRatio >= 0.80 and not underHarass) then
-        if distance > 14 then
+        local starterAnchorCap = Clamp(policy.AcuOpeningMaxDistance or 28, 18, 34)
+        if distance > starterAnchorCap then
             if GetQueueLen(acu) <= 0 and IssueMove then
                 IssueMove({ acu }, homePos)
             end
@@ -682,7 +712,7 @@ function Update(aiBrain, now)
         if canDoEarlyAnchorWork and TryExecuteStarterTask(aiBrain, runtime, acu, homePos, director, constraints, now) then
             return
         end
-        local anchorMaxDistance = math.min(runtime.ACURoleMaxDistance or 18, 16)
+        local anchorMaxDistance = math.min(runtime.ACURoleMaxDistance or 18, now < 420 and 34 or 24)
         if distance > (anchorMaxDistance + 1.5) then
             local q = acu.GetCommandQueue and acu:GetCommandQueue() or false
             local qLen = q and table.getn(q) or 0

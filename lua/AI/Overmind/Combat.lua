@@ -13,6 +13,10 @@ local function Distance2D(a, b)
     return math.sqrt((dx * dx) + (dz * dz))
 end
 
+local function Clamp(value, minValue, maxValue)
+    return math.max(minValue, math.min(maxValue, value or minValue))
+end
+
 local function LerpPos(a, b, t)
     if not a or not b then
         return b or a
@@ -260,9 +264,9 @@ function EnforceCommanderSafety(aiBrain, now)
 
     local policy = runtime.EcoPolicy or {}
     local openingLockTime = math.max(320, policy.OpeningLockTime or 420)
-    local openingMaxDistance = math.min(policy.AcuOpeningMaxDistance or 20, 14)
-    local midMaxDistance = math.min(policy.AcuMidMaxDistance or 36, 24)
-    local lateMaxDistance = math.min(policy.AcuLateMaxDistance or 62, 42)
+    local openingMaxDistance = Clamp(policy.AcuOpeningMaxDistance or 28, 18, 42)
+    local midMaxDistance = Clamp(policy.AcuMidMaxDistance or 40, openingMaxDistance, 58)
+    local lateMaxDistance = Clamp(policy.AcuLateMaxDistance or 62, midMaxDistance, 76)
 
     local openingLock = now < openingLockTime and (factoryCount < 3 or combatCount < 20)
     local underThreat = localThreat > math.max(3, homeThreat + 1.5)
@@ -306,7 +310,10 @@ function EnforceCommanderSafety(aiBrain, now)
     end
 
     local explicitPush = runtime.ACURole == 'push' and escortCount >= 12 and localThreat < (homeThreat + 1.6)
-    local earlyHardLeash = now < 380 and distance > 16 and escortCount < 8 and not explicitPush
+    local earlyHardLeash = now < 380
+        and distance > math.max(28, openingMaxDistance + 8)
+        and escortCount < 8
+        and not explicitPush
     local strictLeashActive = now < (runtime.ACUStrictLeashUntil or -999)
     local clusterState = runtime.EnemyClusterTracker or {}
     local approachCluster = clusterState.ApproachCluster or {}
@@ -397,9 +404,13 @@ function EnforceCommanderSafety(aiBrain, now)
         and not lowHealth
 
     local catastrophicDistance = math.max(maxDistance + (heavilyEscortedForward and 14 or 8), heavilyEscortedForward and 34 or 24)
+    local unescortedThreatenedForward = distance > math.max(24, maxDistance + 6)
+        and now < 720
+        and escortCount <= 2
+        and (enemyRaiders > 0 or localThreat > (homeThreat + 1.2) or homeThreat > 3.0)
     local hardOverextendDistance = distance > catastrophicDistance
         or (distance > 16 and now < 1200 and escortCount <= 3 and enemyRaiders > 0)
-        or (distance > 14 and now < 720 and escortCount <= 2)
+        or unescortedThreatenedForward
 
     local shouldRecall = distance > maxDistance and (openingLock or underThreat or lowHealth or underEscorted or hardAnchor or raidRecall or enemyContactUnsafe)
     if earlyHardLeash then
