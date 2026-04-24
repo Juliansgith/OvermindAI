@@ -1148,6 +1148,10 @@ function Update(aiBrain, now)
     activity.SurplusSpendCount = ctx.surplusSpendCount
     activity.ACURepairCount = ctx.acuRepairCount
     activity.ReclaimQuota = fieldTaskQuota
+    activity.ExpansionCandidates = runtime.LastExpansionCandidateCount or 0
+    activity.ExpansionBusySkip = runtime.LastExpansionBusySkipCount or 0
+    activity.ExpansionNoTarget = runtime.LastExpansionNoTargetCount or 0
+    activity.ExpansionEscortBlocked = runtime.LastExpansionEscortBlockedCount or 0
     local blockedReason = severeFactoryStarve and 'factory_starve'
         or ecoCrash and 'eco_crash'
         or fieldTaskQuota <= 0 and 'no_reclaim_quota'
@@ -1162,6 +1166,8 @@ function Update(aiBrain, now)
         or factoryTask.Active
         or ecoStructureTask.Active
         or defenseStructureTask.Active
+        or demand.ExpansionWanted > 0
+        or demand.ReclaimWanted > 0
     if shouldLog and (now - (runtime.LastEngineerDirectorLogTime or -999)) >= 20 then
         runtime.LastEngineerDirectorLogTime = now
         local structureTaskMode = structureTask.Active and DescribeStructureTaskTarget(structureTargetObject) or 'none'
@@ -1173,7 +1179,7 @@ function Update(aiBrain, now)
             sz = structureTask.TargetPos[3] or 0
             structureNearby = aiBrain:GetNumUnitsAroundPoint(categories.ENGINEER * categories.MOBILE, structureTask.TargetPos, 18, 'Ally') or 0
         end
-        LOG(string.format('*OVERMIND ENGDIR A%d t=%.1f recover=%d threat=%d facRec=%d powerRec=%d surp=%d expand=%d field=%d quota=%d block=%s baseNeed=%d facTask=%d:%s frac=%.2f stall=%.1f asn=%d/%d structTask=%d:%s:%s frac=%.2f stall=%.1f asn=%d/%d eco=%d:%s asn=%d/%d def=%d:%s asn=%d/%d near=%d pos=%.1f,%.1f acuRep=%d/%d',
+        LOG(string.format('*OVERMIND ENGDIR A%d t=%.1f recover=%d threat=%d facRec=%d powerRec=%d surp=%d expand=%d cand=%d busy=%d noT=%d esc=%d field=%d quota=%d block=%s baseNeed=%d facTask=%d:%s frac=%.2f stall=%.1f asn=%d/%d structTask=%d:%s:%s frac=%.2f stall=%.1f asn=%d/%d eco=%d:%s asn=%d/%d def=%d:%s asn=%d/%d near=%d pos=%.1f,%.1f acuRep=%d/%d',
             aiBrain:GetArmyIndex(),
             now,
             ctx.recoverCount,
@@ -1182,6 +1188,10 @@ function Update(aiBrain, now)
             ctx.powerRecoveryCount,
             ctx.surplusSpendCount,
             ctx.dispatchedExpand,
+            runtime.LastExpansionCandidateCount or 0,
+            runtime.LastExpansionBusySkipCount or 0,
+            runtime.LastExpansionNoTargetCount or 0,
+            runtime.LastExpansionEscortBlockedCount or 0,
             ctx.reclaimField,
             fieldTaskQuota,
             blockedReason,

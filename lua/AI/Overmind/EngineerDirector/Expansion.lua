@@ -387,6 +387,35 @@ local function NeedsCriticalRadar(runtime)
         and (eco.EnergyTrend or 0) > -12
 end
 
+local function IsExpansionCandidateEngineer(eng, mexEmergency, contestDispatch)
+    if not Common.IsReadyBuilder(eng) or Common.IsConstructing(eng) then
+        return false, 0
+    end
+    if eng:IsUnitState('Building')
+        or eng:IsUnitState('Upgrading')
+        or eng:IsUnitState('Reclaiming')
+        or eng:IsUnitState('Repairing')
+        or eng:IsUnitState('Capturing')
+        or eng:IsUnitState('Attached') then
+        return false, Common.GetCommandQueueLength(eng)
+    end
+
+    local qLen = Common.GetCommandQueueLength(eng)
+    if Common.IsIdle(eng) then
+        return true, qLen
+    end
+
+    if eng:IsUnitState('Guarding') then
+        return (mexEmergency or contestDispatch) and qLen <= 3, qLen
+    end
+
+    if eng:IsUnitState('Moving') then
+        return qLen <= (mexEmergency and 3 or 1), qLen
+    end
+
+    return qLen <= (mexEmergency and 2 or 1), qLen
+end
+
 local function GetRadarReservedBuilderIds(runtime, now)
     local reserved = {}
     local radar = runtime and runtime.RadarFallback or false
@@ -528,13 +557,19 @@ local function DispatchExpansionEngineer(aiBrain, runtime, now, engineers, mainP
 
     CleanupExpansionReservations(runtime, now)
     local dispatched = 0
+    local candidates = 0
+    local skippedBusy = 0
+    local noTarget = 0
+    local escortBlocked = 0
     local dispatchLimit = bootstrap and 2 or (contestDispatch and 2 or 1)
     if mexEmergency then
         dispatchLimit = math.max(dispatchLimit, 3)
     end
     local dispatchRadius = mexEmergency and 340 or 220
     for _, eng in engineers do
-        if eng and not eng.Dead and not Common.IsConstructing(eng) and Common.IsIdle(eng) then
+        local canUse, queueLength = IsExpansionCandidateEngineer(eng, mexEmergency, contestDispatch)
+        if eng and not eng.Dead and canUse then
+            candidates = candidates + 1
             local pos = eng:GetPosition()
             if pos and Common.Distance2D(pos, mainPos) <= dispatchRadius then
                 local sourcePos = { pos[1], pos[2] or 0, pos[3], EngineerId = Common.GetEntityId(eng) }
@@ -544,54 +579,68 @@ local function DispatchExpansionEngineer(aiBrain, runtime, now, engineers, mainP
                     target = FindExpansionTarget(aiBrain, runtime, mainPos, enemyPos, safeExpandDistance, relaxedCap, now, sourcePos)
                 end
                 if not target then
-                    break
-                end
-                local targetSupported = HasExpansionEscortSupport(aiBrain, runtime, mainPos, target)
-                local targetNeedsEscort = NeedsExpansionEscort(aiBrain, runtime, mainPos, target, now, mexReady)
-                if targetNeedsEscort and not targetSupported then
-                    runtime.LastExpansionEscortBlockedTime = now
-                    runtime.LastExpansionEscortBlockedPos = target
-                    engState.ExpansionEscortNeeded = true
-                    engState.ExpansionEscortNeededUntil = now + 36
-                    engState.ExpansionEscortTargetPos = target
-                    break
-                end
-                local bp = PickMexBlueprint(eng)
-                if bp and IssueBuildMobile then
-                    local engineerId = Common.GetEntityId(eng)
-                    ReserveExpansionTarget(runtime, now, target, engineerId, mainPos)
-                    IssueBuildMobile({ eng }, target, bp, {})
-                    local landReady = ((((runtime.ProductionDirector or {}).Current or {}).Factories or {}).Land or {}).Ready or 0
-                    if targetSupported or ((now < 300 or landReady <= 1) and Common.Distance2D(mainPos, target) <= 165) then
-                        local followup = FindFollowupExpansionTarget(
-                            aiBrain,
-                            runtime,
-                            mainPos,
-                            enemyPos,
-                            target,
-                            safeExpandDistance,
-                            threatCap,
-                            now,
-                            engineerId)
-                        if followup then
-                            ReserveExpansionTarget(runtime, now, followup, engineerId, mainPos)
-                            IssueBuildMobile({ eng }, followup, bp, {})
+                    noTarget = noTarget + 1
+                else
+                    local targetSupported = HasExpansionEscortSupport(aiBrain, runtime, mainPos, target)
+                    local targetNeedsEscort = NeedsExpansionEscort(aiBrain, runtime, mainPos, target, now, mexReady)
+                    if targetNeedsEscort and not targetSupported then
+                        local targetDist = Common.Distance2D(mainPos, target)
+                        if not (mexEmergency and targetDist <= 220 and (aiBrain:GetThreatAtPosition(target, 1, true, 'AntiSurface') or 0) <= (threatCap + 0.2)) then
+                            runtime.LastExpansionEscortBlockedTime = now
+                            runtime.LastExpansionEscortBlockedPos = target
+                            engState.ExpansionEscortNeeded = true
+                            engState.ExpansionEscortNeededUntil = now + 36
+                            engState.ExpansionEscortTargetPos = target
+                            escortBlocked = escortBlocked + 1
+                            break
                         end
                     end
-                    if targetSupported or not targetNeedsEscort then
-                        engState.ExpansionEscortNeeded = false
-                    end
-                    runtime.LastExpansionDispatchTime = now
-                    runtime.LastExpansionTargetPos = target
-                    dispatched = dispatched + 1
-                    if dispatched >= dispatchLimit then
-                        break
+                    local bp = PickMexBlueprint(eng)
+                    if bp and IssueBuildMobile then
+                        local engineerId = Common.GetEntityId(eng)
+                        ReserveExpansionTarget(runtime, now, target, engineerId, mainPos)
+                        if queueLength > 0 and IssueClearCommands then
+                            IssueClearCommands({ eng })
+                        end
+                        IssueBuildMobile({ eng }, target, bp, {})
+                        local landReady = ((((runtime.ProductionDirector or {}).Current or {}).Factories or {}).Land or {}).Ready or 0
+                        if targetSupported or ((now < 300 or landReady <= 1) and Common.Distance2D(mainPos, target) <= 165) then
+                            local followup = FindFollowupExpansionTarget(
+                                aiBrain,
+                                runtime,
+                                mainPos,
+                                enemyPos,
+                                target,
+                                safeExpandDistance,
+                                threatCap,
+                                now,
+                                engineerId)
+                            if followup then
+                                ReserveExpansionTarget(runtime, now, followup, engineerId, mainPos)
+                                IssueBuildMobile({ eng }, followup, bp, {})
+                            end
+                        end
+                        if targetSupported or not targetNeedsEscort then
+                            engState.ExpansionEscortNeeded = false
+                        end
+                        runtime.LastExpansionDispatchTime = now
+                        runtime.LastExpansionTargetPos = target
+                        dispatched = dispatched + 1
+                        if dispatched >= dispatchLimit then
+                            break
+                        end
                     end
                 end
             end
+        elseif eng and not eng.Dead then
+            skippedBusy = skippedBusy + 1
         end
     end
 
+    runtime.LastExpansionCandidateCount = candidates
+    runtime.LastExpansionBusySkipCount = skippedBusy
+    runtime.LastExpansionNoTargetCount = noTarget
+    runtime.LastExpansionEscortBlockedCount = escortBlocked
     return dispatched
 end
 
