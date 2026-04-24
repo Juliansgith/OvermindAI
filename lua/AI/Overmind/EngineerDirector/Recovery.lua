@@ -854,7 +854,7 @@ local function TryOpenSurplusExpansionBuild(aiBrain, runtime, eng, mainPos, enem
         and (lossPressure >= 0.65 or mapControl < 0.42 or routeRisk > 1.35 or targetThreat > 0.22)
     if needsEscort and support < (lossPressure >= 1.0 and 3 or 2) then
         engState.ExpansionEscortNeeded = true
-        engState.ExpansionEscortNeededUntil = now + 36
+        engState.ExpansionEscortNeededUntil = now + 84
         engState.ExpansionEscortTargetPos = target
         return false
     end

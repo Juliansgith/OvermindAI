@@ -967,10 +967,16 @@ function Module.Update(aiBrain, now)
         local need = outerContestNeed
         need = need - ShiftNamedUnits(raiders, outerContest, reclaimFirst and 0 or 1, need)
         if need > 0 then
-            need = need - ShiftNamedUnits(mainline, outerContest, math.max(6, minimumMainlineCommit), need)
+            local keepMainline = expansionEscortWanted
+                and math.max(2, math.floor(minimumMainlineCommit * 0.5))
+                or math.max(6, minimumMainlineCommit)
+            need = need - ShiftNamedUnits(mainline, outerContest, keepMainline, need)
         end
         if need > 0 then
-            need = need - ShiftNamedUnits(baseGuardDirect, outerContest, math.max(1, (homeThreat >= 4) and 2 or 1), need)
+            local keepBaseGuard = expansionEscortWanted
+                and ((homeThreat >= 7) and 2 or 1)
+                or math.max(1, (homeThreat >= 4) and 2 or 1)
+            need = need - ShiftNamedUnits(baseGuardDirect, outerContest, keepBaseGuard, need)
         end
     end
     if table.getn(raiders) > 0 then

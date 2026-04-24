@@ -564,6 +564,8 @@ local function DispatchExpansionEngineer(aiBrain, runtime, now, engineers, mainP
     local engState = runtime and runtime.EngineerState or {}
     local mexEmergency = engState and engState.MexEmergencyActive == true
     local mexReady = (((director.Current or {}).Eco or {}).Mex or {}).Ready or 0
+    local containmentFloor = policy.ContainmentExpansionFloor or 8
+    local lowMexContainment = policy.ContainmentCrisis == true and mexReady < containmentFloor
     local bootstrap = constraints and constraints.EconBootstrap == true
     local starterPhase = constraints and constraints.StarterPhase == true
     local contestDispatch = policy.ForwardContestBias == true
@@ -641,7 +643,7 @@ local function DispatchExpansionEngineer(aiBrain, runtime, now, engineers, mainP
                             runtime.LastExpansionEscortBlockedTime = now
                             runtime.LastExpansionEscortBlockedPos = target
                             engState.ExpansionEscortNeeded = true
-                            engState.ExpansionEscortNeededUntil = now + 36
+                            engState.ExpansionEscortNeededUntil = now + 84
                             engState.ExpansionEscortTargetPos = target
                             escortBlocked = escortBlocked + 1
                             break
@@ -672,7 +674,11 @@ local function DispatchExpansionEngineer(aiBrain, runtime, now, engineers, mainP
                                 IssueBuildMobile({ eng }, followup, bp, {})
                             end
                         end
-                        if targetSupported or not targetNeedsEscort then
+                        if mexEmergency or lowMexContainment then
+                            engState.ExpansionEscortNeeded = true
+                            engState.ExpansionEscortNeededUntil = now + 84
+                            engState.ExpansionEscortTargetPos = target
+                        elseif targetSupported or not targetNeedsEscort then
                             engState.ExpansionEscortNeeded = false
                         end
                         runtime.LastExpansionDispatchTime = now
