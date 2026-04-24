@@ -988,6 +988,7 @@ function Update(aiBrain, now)
         and baseEngineers >= math.max(baseFloor + 1, 4)
         and (planner.ReclaimFirst == true or planner.OuterRetentionActive == true)
 
+    local containmentCrisis = policy.ContainmentCrisis == true
     local ctx = {
         bomberPanic = bomberPanic,
         constraints = constraints,
@@ -1067,7 +1068,6 @@ function Update(aiBrain, now)
         and radarOrderActive
         and table.getn(engineers or {}) >= math.max(baseFloor + 3, 6)
 
-    local containmentCrisis = policy.ContainmentCrisis == true
     local expansionOverride = engState.MexEmergencyActive == true
         or (policy.ForwardContestBias == true and mexReady < 12)
         or (planner.OuterRetentionActive == true and mexReady < 14)
