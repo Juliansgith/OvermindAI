@@ -820,6 +820,18 @@ local function ProcessEngineer(aiBrain, runtime, eng, now, ctx)
         return
     end
 
+    if ctx.earlyFactoryGrowthDebt
+        and not ctx.factoryTask.Active
+        and not claimedByFactoryTask
+        and not claimedByStructureTask
+        and not claimedByRadarOrder
+        and isIdle
+        and not constructing then
+        -- Leave at least one idle builder for the high-priority factory builder instead of
+        -- immediately consuming it on reclaim, power, radar, or surplus tasks.
+        return
+    end
+
     if Common.IsReadyBuilder(eng)
         and EntityCategoryContains(categories.ENGINEER * categories.MOBILE * (categories.TECH2 + categories.TECH3), eng)
         and Recovery.TryOpenFirstT2PowerBuild(aiBrain, runtime, eng, ctx.mainPos, now) then

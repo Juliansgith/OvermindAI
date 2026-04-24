@@ -484,7 +484,19 @@ function Update(aiBrain, now)
     local raid = runtime.RaidDefense or {}
     local constraints = ((runtime.ProductionDirector or {}).ConstraintState or {})
     local current = ((runtime.ProductionDirector or {}).Current or {})
+    local capacity = ((runtime.ProductionDirector or {}).CapacityPlan or {})
+    local currentFactories = current.Factories or {}
+    local landFactories = currentFactories.Land or {}
     local mexReady = (((current.Eco or {}).Mex or {}).Ready) or 0
+    local earlyFactoryGrowthDebt = capacity.EarlyFactoryGrowthDebt == true
+        or (
+            capacity.AddLandFactory == true
+            and (capacity.LandTarget or 0) >= 2
+            and (landFactories.Ready or 0) >= 1
+            and (landFactories.Total or 0) <= 1
+            and now < 780
+        )
+    engState.EarlyFactoryGrowthDebt = earlyFactoryGrowthDebt and true or false
     engState.PeakMexReady = math.max(engState.PeakMexReady or 0, mexReady)
     local mexLossCount = math.max(0, (engState.PeakMexReady or mexReady) - mexReady)
     local mexRebuildUrgent = mexLossCount >= 1
@@ -637,7 +649,13 @@ function Update(aiBrain, now)
     local ecoStructureTargetObject = false
     local defenseStructureTargetObject = false
     local forceFinishEco, forcedEcoTarget, forcedEcoKind = ShouldForceFinishEcoStructure(aiBrain, runtime, mainPos, false, false)
-    local allowEcoStructureLane = (not factoryTaskCritical) or forceFinishEco
+    local allowStructureDuringFactoryDebt = not earlyFactoryGrowthDebt
+    if earlyFactoryGrowthDebt and forceFinishEco and forcedEcoTarget and not forcedEcoTarget.Dead then
+        local forcedFraction = GetFraction(forcedEcoTarget)
+        allowStructureDuringFactoryDebt = (forcedEcoKind == 'Power' and forcedFraction >= 0.74)
+            or (forcedEcoKind == 'Mex' and forcedFraction >= 0.82)
+    end
+    local allowEcoStructureLane = ((not factoryTaskCritical) or forceFinishEco) and allowStructureDuringFactoryDebt
     if allowEcoStructureLane then
         local trackedStructure, trackedPos, trackedFraction, trackedKind, trackedPriority = FindTrackedUnfinishedStructure(aiBrain, ecoStructureTask)
         local structure, structurePos, structureFraction, structureKind, structurePriority = FindBestUnfinishedStructureForLane(
@@ -765,7 +783,7 @@ function Update(aiBrain, now)
         reservedDefenseBuilderIds[id] = value
     end
 
-    local allowDefenseStructureLane = not transitionLock and (
+    local allowDefenseStructureLane = not transitionLock and not earlyFactoryGrowthDebt and (
         not factoryTaskCritical
         or radarCritical
         or constraints.RadarCritical == true
@@ -979,6 +997,7 @@ function Update(aiBrain, now)
         factoryTargetObject = factoryTargetObject,
         factoryTask = factoryTask,
         forcedFactoryRecover = factoryTask.AssignedBuilders or 0,
+        earlyFactoryGrowthDebt = earlyFactoryGrowthDebt,
         defenseStructureTargetObject = defenseStructureTargetObject,
         defenseStructureTask = defenseStructureTask,
         hqPowerRecoveryWanted = hqPowerRecoveryWanted,

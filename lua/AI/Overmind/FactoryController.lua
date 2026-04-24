@@ -153,8 +153,36 @@ local function GetDiscipline(runtime)
     return cap.QueueDiscipline or (emerg.QueueStarved and 'tight' or 'normal')
 end
 
+local function IsSingleLandFactoryCrisis(runtime)
+    local plan = (runtime and runtime.ProductionDirector) or {}
+    local current = plan.Current or {}
+    local factories = current.Factories or {}
+    local landFactories = factories.Land or {}
+    if (landFactories.Ready or 0) ~= 1 or (landFactories.Total or 0) > 1 then
+        return false
+    end
+
+    local now = plan.Time or GetGameTimeSeconds()
+    if now >= 780 then
+        return false
+    end
+
+    local constraints = plan.ConstraintState or {}
+    local emerg = plan.EmergencyOverrides or {}
+    local capacity = plan.CapacityPlan or {}
+    return capacity.EarlyFactoryGrowthDebt == true
+        or emerg.LandPanic == true
+        or emerg.FrontCollapse == true
+        or constraints.ApproachReal == true
+        or (constraints.BasePressure or 0) >= 0.24
+        or (constraints.FrontPressure or 0) >= 0.24
+end
+
 local function DesiredQueueDepth(runtime, eco)
     local discipline = GetDiscipline(runtime)
+    if IsSingleLandFactoryCrisis(runtime) then
+        return 1
+    end
     if discipline == 'tight' then
         return 1
     end
@@ -360,6 +388,12 @@ local function SelectEarlyLandScreenRole(kind, plan, rolePlan)
         screenFloor = math.max(screenFloor, now < 660 and 18 or 20)
     end
 
+    if severeLandCrisis
+        and (landFactories.Ready or 0) <= 1
+        and engineerUnits >= 2
+        and landScreenUnits < screenFloor then
+        return 'LandDirect', 995
+    end
     if screenFloor > 0 and engineerUnits >= 3 and landScreenUnits < screenFloor then
         return 'LandDirect', 965
     end
