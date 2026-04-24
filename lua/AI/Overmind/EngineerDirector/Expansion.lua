@@ -202,8 +202,8 @@ local function GetContestExpansionBias(runtime, pos, mainPos, enemyPos)
         elseif node.Classification == 'enemy_side' then
             bias = bias - 24
         end
-        bias = bias + Clamp((node.ExpansionValue or 0) * 0.18, -8, 34)
-        bias = bias + Clamp((node.RaidValue or 0) * 0.08, -6, 18)
+        bias = bias + Common.Clamp((node.ExpansionValue or 0) * 0.18, -8, 34)
+        bias = bias + Common.Clamp((node.RaidValue or 0) * 0.08, -6, 18)
         if (node.EnemyMex or 0) > 0 then
             bias = bias + 10
         end
