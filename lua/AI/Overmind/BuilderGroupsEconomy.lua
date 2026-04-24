@@ -1342,7 +1342,7 @@ BuilderGroup {
         BuilderData = {
             DesiresAssist = false,
             Construction = {
-                BuildStructures = { 'T2Resource' },
+                BuildStructures = { 'T1Resource' },
             },
         },
     },
@@ -1360,7 +1360,7 @@ BuilderGroup {
         BuilderData = {
             DesiresAssist = false,
             Construction = {
-                BuildStructures = { 'T3Resource' },
+                BuildStructures = { 'T1Resource' },
             },
         },
     },
@@ -1429,7 +1429,7 @@ BuilderGroup {
         BuilderData = {
             DesiresAssist = false,
             Construction = {
-                BuildStructures = { 'T2Resource' },
+                BuildStructures = { 'T1Resource' },
             },
         },
     },

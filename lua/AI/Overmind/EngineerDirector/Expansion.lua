@@ -340,10 +340,12 @@ local function NeedsExpansionEscort(aiBrain, runtime, mainPos, targetPos, now, m
     local routeRisk = OvermindMemory.GetRouteRisk(aiBrain, mainPos, targetPos, 4, 48)
     local targetThreat = aiBrain:GetThreatAtPosition(targetPos, 1, true, 'AntiSurface') or 0
     local mapControl = ((runtime and runtime.ZoneModel) and runtime.ZoneModel.MapControl) or 0.5
+    local policy = runtime and runtime.EcoPolicy or {}
     local mexEmergency = ((runtime and runtime.EngineerState) and runtime.EngineerState.MexEmergencyActive == true) or false
     local engineerLossRisk = OvermindMemory.GetEngineerLossRisk(aiBrain, targetPos, 52)
-    return mexEmergency
-        or (mexReady or 0) < 8
+    local contestMode = policy.ForwardContestBias == true or policy.ContestMapMode == true or policy.ReclaimPressureMode == true
+    return (mexEmergency and distMain > 230 and (routeRisk > 1.55 or targetThreat > 0.35 or mapControl < 0.34))
+        or ((mexReady or 0) < 8 and distMain > (contestMode and 220 or 185) and (routeRisk > 1.15 or targetThreat > 0.18 or mapControl < 0.42))
         or ((now or 0) >= 240 and distMain > 130 and mapControl < 0.42)
         or mapControl < 0.34
         or routeRisk > 1.45

@@ -259,6 +259,12 @@ local function TryReclaimFieldZone(aiBrain, runtime, eng, targetPos, now)
     if table.getn(reclaimTargets) <= 0 or reclaimMass < requiredMass then
         return false
     end
+    local highValueField = reclaimMass >= math.max(110, requiredMass * 1.45)
+    if planner.ReclaimFirst == true and highValueField then
+        threatCap = threatCap + 0.45
+        routeRiskCap = routeRiskCap + 0.75
+        minSupport = math.max(0, minSupport - 1)
+    end
     if distMain > (((runtime.EcoPolicy or {}).SafeExpandDistance or 680) + 100) then
         return false
     end

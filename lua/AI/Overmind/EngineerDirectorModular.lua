@@ -514,6 +514,9 @@ function Update(aiBrain, now)
     local outerContestUnits = ((((runtime.ForceDirector or {}).Stats or {}).OuterContest) or 0)
     local reclaimFieldPos = planner.ReclaimFieldPos
     local reclaimFieldScore = planner.ReclaimFieldScore or 0
+    local reclaimSignalMode = reclaimFieldPos
+        and reclaimFieldScore >= 90
+        and (planner.ReclaimFirst == true or planner.OuterRetentionActive == true or policy.ReclaimPressureMode == true)
     local currentRadar = ((((runtime.ProductionDirector or {}).Current or {}).Structures or {}).Radar) or 0
     local bomberWatch = constraints.BomberWatch == true
     local bomberPanic = ((raid.BomberPanicUntil or -999) > now) or ((raid.LastBomberEnemyCount or 0) >= 1 and raid.UnderAirHarass)
@@ -857,6 +860,11 @@ function Update(aiBrain, now)
     local desiredReclaimQuota = policy.EngineerReclaimQuota or 0
     local firstReclaimBaseReady = baseEngineers >= math.max(2, baseFloor - 1)
     local fieldBaseReady = baseEngineers >= math.max(3, baseFloor)
+    local fieldPriorityOverride = reclaimSignalMode
+        and reclaimFieldScore >= 130
+        and firstReclaimBaseReady
+        and mexReady >= math.max(4, starterMexFloor - 1)
+        and not mexRebuildUrgent
     local reclaimStarveOverride = desiredReclaimQuota > 0
         and reclaimFieldScore >= 140
         and table.getn(engineers or {}) >= 7
@@ -864,13 +872,13 @@ function Update(aiBrain, now)
     engState.ReclaimFieldStickyQuota = engState.ReclaimFieldStickyQuota or 0
     local fieldStickyActive = now < (engState.ReclaimFieldStickyUntil or -999)
     local fieldTaskQuota = 0
-    if (contestFieldMode or desiredReclaimQuota > 0)
+    if (contestFieldMode or reclaimSignalMode or desiredReclaimQuota > 0)
         and reclaimFieldPos
-        and (fieldBaseReady or (desiredReclaimQuota > 0 and firstReclaimBaseReady))
+        and (fieldBaseReady or fieldPriorityOverride or (desiredReclaimQuota > 0 and firstReclaimBaseReady))
         and not ecoCrash
         and (not severeFactoryStarve or reclaimStarveOverride)
-        and (factoryTaskStable or desiredReclaimQuota > 0)
-        and (structureTaskStable or desiredReclaimQuota > 0) then
+        and (factoryTaskStable or fieldPriorityOverride or desiredReclaimQuota > 0)
+        and (structureTaskStable or fieldPriorityOverride or desiredReclaimQuota > 0) then
         if ((planner.ReclaimFirst == true or planner.OuterRetentionActive == true or outerContestUnits > 0) or desiredReclaimQuota > 0)
             and reclaimFieldScore >= 90 then
             fieldTaskQuota = math.max(1, desiredReclaimQuota)
@@ -890,13 +898,13 @@ function Update(aiBrain, now)
         engState.ReclaimFieldStickyQuota = math.max(engState.ReclaimFieldStickyQuota or 0, fieldTaskQuota)
         fieldStickyActive = true
     elseif fieldStickyActive
-        and (contestFieldMode or desiredReclaimQuota > 0)
+        and (contestFieldMode or reclaimSignalMode or desiredReclaimQuota > 0)
         and reclaimFieldPos
-        and (fieldBaseReady or (desiredReclaimQuota > 0 and firstReclaimBaseReady))
+        and (fieldBaseReady or fieldPriorityOverride or (desiredReclaimQuota > 0 and firstReclaimBaseReady))
         and not ecoCrash
         and (not severeFactoryStarve or reclaimStarveOverride)
-        and (factoryTaskStable or desiredReclaimQuota > 0)
-        and (structureTaskStable or desiredReclaimQuota > 0) then
+        and (factoryTaskStable or fieldPriorityOverride or desiredReclaimQuota > 0)
+        and (structureTaskStable or fieldPriorityOverride or desiredReclaimQuota > 0) then
         fieldTaskQuota = math.max(1, engState.ReclaimFieldStickyQuota or 1)
     else
         engState.ReclaimFieldStickyUntil = -999
@@ -913,7 +921,7 @@ function Update(aiBrain, now)
     local ctx = {
         bomberPanic = bomberPanic,
         constraints = constraints,
-        contestFieldMode = (contestFieldMode or desiredReclaimQuota > 0) and true or false,
+        contestFieldMode = (contestFieldMode or reclaimSignalMode or desiredReclaimQuota > 0) and true or false,
         coreEcoCritical = coreEcoCritical,
         dispatchedExpand = 0,
         ecoStructureTargetObject = ecoStructureTargetObject,
@@ -958,6 +966,7 @@ function Update(aiBrain, now)
         transitionLock = transitionLock,
         fieldTaskQuota = fieldTaskQuota,
         allowTechBuilderReclaim = allowTechBuilderReclaim,
+        fieldPriorityOverride = fieldPriorityOverride,
         mexReady = mexReady,
         mexRebuildUrgent = mexRebuildUrgent,
         starterMexFloor = starterMexFloor,
@@ -968,12 +977,12 @@ function Update(aiBrain, now)
             and (factoryTask.StallTime or 0) < 16
         )
     local structureTaskCovered = IsStructureTaskCovered(ecoStructureTask) and IsStructureTaskCovered(defenseStructureTask)
-    ctx.fieldTaskWindow = (contestFieldMode or desiredReclaimQuota > 0)
+    ctx.fieldTaskWindow = (contestFieldMode or reclaimSignalMode or desiredReclaimQuota > 0)
         and (not severeFactoryStarve or reclaimStarveOverride)
         and not ecoCrash
-        and (factoryTaskStable or desiredReclaimQuota > 0)
-        and (structureTaskStable or desiredReclaimQuota > 0)
-        and (fieldBaseReady or (desiredReclaimQuota > 0 and firstReclaimBaseReady))
+        and (factoryTaskStable or fieldPriorityOverride or desiredReclaimQuota > 0)
+        and (structureTaskStable or fieldPriorityOverride or desiredReclaimQuota > 0)
+        and (fieldBaseReady or fieldPriorityOverride or (desiredReclaimQuota > 0 and firstReclaimBaseReady))
         and fieldTaskQuota > 0
     for _, eng in engineers do
         ProcessEngineer(aiBrain, runtime, eng, now, ctx)
@@ -985,12 +994,16 @@ function Update(aiBrain, now)
         and radarOrderActive
         and table.getn(engineers or {}) >= math.max(baseFloor + 3, 6)
 
+    local expansionOverride = engState.MexEmergencyActive == true
+        or (policy.ForwardContestBias == true and mexReady < 12)
+        or (planner.OuterRetentionActive == true and mexReady < 14)
+        or (policy.EngineerExpansionQuota or 0) >= 2
     local canDispatchExpand = now >= 60
         and not severeFactoryStarve
         and not ecoCrash
-        and not recovery.ForceBaseEngineerRecovery
-        and not factoryTask.Active
-        and not structureTask.Active
+        and (not recovery.ForceBaseEngineerRecovery or expansionOverride)
+        and (not factoryTask.Active or expansionOverride)
+        and (not structureTask.Active or expansionOverride)
         and (not radarCritical or allowExpandWhileRadarPending)
         and (not (bomberWatch and currentRadar <= 0) or allowExpandWhileRadarPending)
         and not raid.ExposedMexUnderAirRaid
@@ -1008,6 +1021,9 @@ function Update(aiBrain, now)
         end
         if (policy.ForwardContestBias == true) or hqPressureEscape then
             threatCap = threatCap + 0.15
+        end
+        if expansionOverride then
+            threatCap = threatCap + 0.25
         end
         ctx.dispatchedExpand = DispatchExpansionEngineer(aiBrain, runtime, now, engineers, mainPos, enemyPos, math.max(420, safeExpandDistance), threatCap)
     end
