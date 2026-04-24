@@ -49,4 +49,9 @@ end
 M.NeedsBootstrapPower = NeedsBootstrapPower
 M.NeedsCriticalRadar = NeedsCriticalRadar
 M.GetRadarReservedBuilderIds = GetRadarReservedBuilderIds
+
+local ModuleEnv = getfenv(1)
+rawset(ModuleEnv, 'NeedsBootstrapPower', NeedsBootstrapPower)
+rawset(ModuleEnv, 'NeedsCriticalRadar', NeedsCriticalRadar)
+rawset(ModuleEnv, 'GetRadarReservedBuilderIds', GetRadarReservedBuilderIds)
 return M

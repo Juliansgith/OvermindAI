@@ -386,5 +386,11 @@ M.GetReclaimFieldTargets = GetReclaimFieldTargets
 M.TryReclaimFieldZone = TryReclaimFieldZone
 M.TryReclaimNearby = TryReclaimNearby
 M.ReclaimSegmentKey = ReclaimSegmentKey
-return M
 
+local ModuleEnv = getfenv(1)
+rawset(ModuleEnv, 'TryReclaimEnemyMex', TryReclaimEnemyMex)
+rawset(ModuleEnv, 'GetReclaimFieldTargets', GetReclaimFieldTargets)
+rawset(ModuleEnv, 'TryReclaimFieldZone', TryReclaimFieldZone)
+rawset(ModuleEnv, 'TryReclaimNearby', TryReclaimNearby)
+rawset(ModuleEnv, 'ReclaimSegmentKey', ReclaimSegmentKey)
+return M

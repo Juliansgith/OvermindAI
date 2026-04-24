@@ -1246,6 +1246,18 @@ M.GetPriorityBuildAssistTarget = GetPriorityBuildAssistTarget
 M.TryAssignAssistOrRepair = TryAssignAssistOrRepair
 M.DescribeStructureTaskTarget = DescribeStructureTaskTarget
 M.ProcessEngineer = ProcessEngineer
+
+local ModuleEnv = getfenv(1)
+rawset(ModuleEnv, 'ScoreFactoryBuilder', ScoreFactoryBuilder)
+rawset(ModuleEnv, 'ScoreStructureBuilder', ScoreStructureBuilder)
+rawset(ModuleEnv, 'AssignBuildersToUnfinishedFactory', AssignBuildersToUnfinishedFactory)
+rawset(ModuleEnv, 'AssignBuildersToUnfinishedStructure', AssignBuildersToUnfinishedStructure)
+rawset(ModuleEnv, 'GetPriorityUpgradeAssistTarget', GetPriorityUpgradeAssistTarget)
+rawset(ModuleEnv, 'GetPriorityRepairTarget', GetPriorityRepairTarget)
+rawset(ModuleEnv, 'GetPriorityBuildAssistTarget', GetPriorityBuildAssistTarget)
+rawset(ModuleEnv, 'TryAssignAssistOrRepair', TryAssignAssistOrRepair)
+rawset(ModuleEnv, 'DescribeStructureTaskTarget', DescribeStructureTaskTarget)
+rawset(ModuleEnv, 'ProcessEngineer', ProcessEngineer)
 return M
 
 

@@ -24,4 +24,8 @@ end
 
 M.ComputeAirThreatFlags = ComputeAirThreatFlags
 M.HasEnemyCombatNear = HasEnemyCombatNear
+
+local ModuleEnv = getfenv(1)
+rawset(ModuleEnv, 'ComputeAirThreatFlags', ComputeAirThreatFlags)
+rawset(ModuleEnv, 'HasEnemyCombatNear', HasEnemyCombatNear)
 return M

@@ -670,5 +670,19 @@ M.HasFriendlyMexAtPos = HasFriendlyMexAtPos
 M.FindExpansionTarget = FindExpansionTarget
 M.FindFollowupExpansionTarget = FindFollowupExpansionTarget
 M.DispatchExpansionEngineer = DispatchExpansionEngineer
-return M
 
+local ModuleEnv = getfenv(1)
+rawset(ModuleEnv, 'PickMexBlueprint', PickMexBlueprint)
+rawset(ModuleEnv, 'IsSafeExpansionTarget', IsSafeExpansionTarget)
+rawset(ModuleEnv, 'ExpansionReservationKey', ExpansionReservationKey)
+rawset(ModuleEnv, 'FindNearestZoneNode', FindNearestZoneNode)
+rawset(ModuleEnv, 'ExpansionPathKey', ExpansionPathKey)
+rawset(ModuleEnv, 'GetContestExpansionBias', GetContestExpansionBias)
+rawset(ModuleEnv, 'CleanupExpansionReservations', CleanupExpansionReservations)
+rawset(ModuleEnv, 'ReserveExpansionTarget', ReserveExpansionTarget)
+rawset(ModuleEnv, 'IsReservedExpansionTarget', IsReservedExpansionTarget)
+rawset(ModuleEnv, 'HasFriendlyMexAtPos', HasFriendlyMexAtPos)
+rawset(ModuleEnv, 'FindExpansionTarget', FindExpansionTarget)
+rawset(ModuleEnv, 'FindFollowupExpansionTarget', FindFollowupExpansionTarget)
+rawset(ModuleEnv, 'DispatchExpansionEngineer', DispatchExpansionEngineer)
+return M

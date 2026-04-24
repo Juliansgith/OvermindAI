@@ -1076,5 +1076,34 @@ M.ShouldKeepTrackedStructureTask = ShouldKeepTrackedStructureTask
 M.NeedsBootstrapPower = RecoveryNeedsBootstrapPower
 M.NeedsCriticalRadar = RecoveryNeedsCriticalRadar
 M.GetRadarReservedBuilderIds = RecoveryGetRadarReservedBuilderIds
-return M
 
+local ModuleEnv = getfenv(1)
+rawset(ModuleEnv, 'GetFactoryDomain', GetFactoryDomain)
+rawset(ModuleEnv, 'GetStructureKind', GetStructureKind)
+rawset(ModuleEnv, 'CountReadyFactories', CountReadyFactories)
+rawset(ModuleEnv, 'ScoreStructureTarget', ScoreStructureTarget)
+rawset(ModuleEnv, 'FindBestUnfinishedStructure', FindBestUnfinishedStructure)
+rawset(ModuleEnv, 'FindBestUnfinishedFactory', FindBestUnfinishedFactory)
+rawset(ModuleEnv, 'ResetFactoryTask', ResetFactoryTask)
+rawset(ModuleEnv, 'ResetStructureTask', ResetStructureTask)
+rawset(ModuleEnv, 'ComputeFactoryTaskRequirements', ComputeFactoryTaskRequirements)
+rawset(ModuleEnv, 'PickPowerBlueprint', PickPowerBlueprint)
+rawset(ModuleEnv, 'GetFactoryAnchor', GetFactoryAnchor)
+rawset(ModuleEnv, 'FindPowerBuildPos', FindPowerBuildPos)
+rawset(ModuleEnv, 'CountNearbyUnfinishedPower', CountNearbyUnfinishedPower)
+rawset(ModuleEnv, 'GetPriorityPowerRecoveryTarget', GetPriorityPowerRecoveryTarget)
+rawset(ModuleEnv, 'GetPriorityMexRecoveryTarget', GetPriorityMexRecoveryTarget)
+rawset(ModuleEnv, 'ShouldForceFinishEcoStructure', ShouldForceFinishEcoStructure)
+rawset(ModuleEnv, 'TryOpenPowerRecoveryBuild', TryOpenPowerRecoveryBuild)
+rawset(ModuleEnv, 'TryOpenFirstT2PowerBuild', TryOpenFirstT2PowerBuild)
+rawset(ModuleEnv, 'ShouldScaleBaseEco', ShouldScaleBaseEco)
+rawset(ModuleEnv, 'CountUnfinishedMexes', CountUnfinishedMexes)
+rawset(ModuleEnv, 'ShouldPersistentSurplusSpend', ShouldPersistentSurplusSpend)
+rawset(ModuleEnv, 'TryOpenSurplusExpansionBuild', TryOpenSurplusExpansionBuild)
+rawset(ModuleEnv, 'ComputeStructureTaskRequirements', ComputeStructureTaskRequirements)
+rawset(ModuleEnv, 'FindTrackedUnfinishedStructure', FindTrackedUnfinishedStructure)
+rawset(ModuleEnv, 'ShouldKeepTrackedStructureTask', ShouldKeepTrackedStructureTask)
+rawset(ModuleEnv, 'NeedsBootstrapPower', RecoveryNeedsBootstrapPower)
+rawset(ModuleEnv, 'NeedsCriticalRadar', RecoveryNeedsCriticalRadar)
+rawset(ModuleEnv, 'GetRadarReservedBuilderIds', RecoveryGetRadarReservedBuilderIds)
+return M

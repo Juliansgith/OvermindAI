@@ -123,4 +123,17 @@ M.IsReadyBuilder = IsReadyBuilder
 M.IsConstructing = IsConstructing
 M.ShouldThrottle = ShouldThrottle
 M.RecallEngineer = RecallEngineer
+
+local ModuleEnv = getfenv(1)
+rawset(ModuleEnv, 'Distance2D', Distance2D)
+rawset(ModuleEnv, 'Clamp', Clamp)
+rawset(ModuleEnv, 'GetMainPos', GetMainPos)
+rawset(ModuleEnv, 'GetFraction', GetFraction)
+rawset(ModuleEnv, 'GetEntityId', GetEntityId)
+rawset(ModuleEnv, 'IsIdle', IsIdle)
+rawset(ModuleEnv, 'GetCommandQueueLength', GetCommandQueueLength)
+rawset(ModuleEnv, 'IsReadyBuilder', IsReadyBuilder)
+rawset(ModuleEnv, 'IsConstructing', IsConstructing)
+rawset(ModuleEnv, 'ShouldThrottle', ShouldThrottle)
+rawset(ModuleEnv, 'RecallEngineer', RecallEngineer)
 return M
