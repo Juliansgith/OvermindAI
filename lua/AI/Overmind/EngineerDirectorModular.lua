@@ -523,16 +523,35 @@ function Update(aiBrain, now)
     local radarReservedBuilderIds = GetRadarReservedBuilderIds(runtime, now)
     local hqPowerRecoveryWanted = ((((runtime.UpgradeDirector or {}).Factory) or {}).PowerRecoveryWanted) == true
     local preclaimedExpand = 0
+    local massTrend = eco.MassTrend or 0
+    local energyTrend = eco.EnergyTrend or 0
+    local expansionTrendOk = true
+    if not mexExpansionUrgent then
+        expansionTrendOk = massTrend > -0.7 and energyTrend > -35
+    else
+        expansionTrendOk = energyTrend > -70 and (massTrend > -6 or mexReady < 8 or (eco.MassStorageRatio or 0) > 0.02)
+    end
+    local expansionGateReason = 'none'
     local earlyExpansionSlice = now >= 60
         and mexExpansionUrgent
-        and baseEngineers >= math.max(2, baseFloor - 1)
+        and (baseEngineers >= math.max(2, baseFloor - 1) or mexReady < 8)
         and table.getn(engineers or {}) >= math.max(4, baseFloor)
         and not severeFactoryStarve
         and not ecoCrash
         and not radarCritical
         and not raid.ExposedMexUnderAirRaid
-        and (eco.MassTrend or 0) > -0.7
-        and (eco.EnergyTrend or 0) > -35
+        and expansionTrendOk
+    if not earlyExpansionSlice and mexExpansionUrgent then
+        expansionGateReason = now < 60 and 'early_time'
+            or (baseEngineers < math.max(2, baseFloor - 1) and mexReady >= 8) and 'base_floor'
+            or table.getn(engineers or {}) < math.max(4, baseFloor) and 'eng_floor'
+            or severeFactoryStarve and 'factory_starve'
+            or ecoCrash and 'eco_crash'
+            or radarCritical and 'radar'
+            or raid.ExposedMexUnderAirRaid and 'air_raid'
+            or not expansionTrendOk and 'trend'
+            or 'early_blocked'
+    end
     if earlyExpansionSlice then
         local earlyThreatCap = 1.65
         if policy.ForwardContestBias == true or policy.ContestMapMode == true then
@@ -541,6 +560,7 @@ function Update(aiBrain, now)
         if planner.OuterRetentionActive == true or reclaimSignalMode then
             earlyThreatCap = earlyThreatCap + 0.2
         end
+        expansionGateReason = 'early_called'
         preclaimedExpand = DispatchExpansionEngineer(aiBrain, runtime, now, engineers, mainPos, enemyPos, math.max(520, safeExpandDistance), earlyThreatCap)
     end
 
@@ -1019,6 +1039,10 @@ function Update(aiBrain, now)
         or (policy.ForwardContestBias == true and mexReady < 12)
         or (planner.OuterRetentionActive == true and mexReady < 14)
         or (policy.EngineerExpansionQuota or 0) >= 2
+    local canDispatchEconOk = expansionOverride
+        or ((eco.MassTrend or 0) > -0.55 and (eco.EnergyTrend or 0) > -28)
+    local canDispatchBaseOk = baseEngineers >= math.max(2, baseFloor - 2)
+        or expansionOverride
     local canDispatchExpand = now >= 60
         and not severeFactoryStarve
         and not ecoCrash
@@ -1029,9 +1053,8 @@ function Update(aiBrain, now)
         and (not (bomberWatch and currentRadar <= 0) or allowExpandWhileRadarPending)
         and not raid.ExposedMexUnderAirRaid
         and not (bomberPanic and table.getn(engineers or {}) <= math.max(4, baseFloor + 1))
-        and baseEngineers >= math.max(2, baseFloor - 2)
-        and (eco.MassTrend or 0) > -0.55
-        and (eco.EnergyTrend or 0) > -28
+        and canDispatchBaseOk
+        and canDispatchEconOk
     if canDispatchExpand then
         local threatCap = 1.2
         if now >= 240 then
@@ -1046,9 +1069,25 @@ function Update(aiBrain, now)
         if expansionOverride then
             threatCap = threatCap + 0.25
         end
+        expansionGateReason = 'called'
         ctx.dispatchedExpand = (ctx.dispatchedExpand or 0)
             + DispatchExpansionEngineer(aiBrain, runtime, now, engineers, mainPos, enemyPos, math.max(420, safeExpandDistance), threatCap)
+    elseif expansionOverride and expansionGateReason == 'none' then
+        expansionGateReason = now < 60 and 'time'
+            or severeFactoryStarve and 'factory_starve'
+            or ecoCrash and 'eco_crash'
+            or (recovery.ForceBaseEngineerRecovery and not expansionOverride) and 'base_recovery'
+            or (factoryTask.Active and not expansionOverride) and 'factory_task'
+            or (structureTask.Active and not expansionOverride) and 'structure_task'
+            or (radarCritical and not allowExpandWhileRadarPending) and 'radar'
+            or ((bomberWatch and currentRadar <= 0) and not allowExpandWhileRadarPending) and 'bomber_watch'
+            or raid.ExposedMexUnderAirRaid and 'air_raid'
+            or (bomberPanic and table.getn(engineers or {}) <= math.max(4, baseFloor + 1)) and 'bomber_panic'
+            or not canDispatchBaseOk and 'base_floor'
+            or not canDispatchEconOk and 'trend'
+            or 'blocked'
     end
+    runtime.LastExpansionGateReason = expansionGateReason
 
     local factoryCounts = current.Factories or {}
     local readyFactories = factoryCounts.Ready
@@ -1152,6 +1191,7 @@ function Update(aiBrain, now)
     activity.ExpansionBusySkip = runtime.LastExpansionBusySkipCount or 0
     activity.ExpansionNoTarget = runtime.LastExpansionNoTargetCount or 0
     activity.ExpansionEscortBlocked = runtime.LastExpansionEscortBlockedCount or 0
+    activity.ExpansionGateReason = runtime.LastExpansionGateReason or 'none'
     local blockedReason = severeFactoryStarve and 'factory_starve'
         or ecoCrash and 'eco_crash'
         or fieldTaskQuota <= 0 and 'no_reclaim_quota'
@@ -1179,7 +1219,7 @@ function Update(aiBrain, now)
             sz = structureTask.TargetPos[3] or 0
             structureNearby = aiBrain:GetNumUnitsAroundPoint(categories.ENGINEER * categories.MOBILE, structureTask.TargetPos, 18, 'Ally') or 0
         end
-        LOG(string.format('*OVERMIND ENGDIR A%d t=%.1f recover=%d threat=%d facRec=%d powerRec=%d surp=%d expand=%d cand=%d busy=%d noT=%d esc=%d field=%d quota=%d block=%s baseNeed=%d facTask=%d:%s frac=%.2f stall=%.1f asn=%d/%d structTask=%d:%s:%s frac=%.2f stall=%.1f asn=%d/%d eco=%d:%s asn=%d/%d def=%d:%s asn=%d/%d near=%d pos=%.1f,%.1f acuRep=%d/%d',
+        LOG(string.format('*OVERMIND ENGDIR A%d t=%.1f recover=%d threat=%d facRec=%d powerRec=%d surp=%d expand=%d gate=%s cand=%d busy=%d noT=%d esc=%d field=%d quota=%d block=%s baseNeed=%d facTask=%d:%s frac=%.2f stall=%.1f asn=%d/%d structTask=%d:%s:%s frac=%.2f stall=%.1f asn=%d/%d eco=%d:%s asn=%d/%d def=%d:%s asn=%d/%d near=%d pos=%.1f,%.1f acuRep=%d/%d',
             aiBrain:GetArmyIndex(),
             now,
             ctx.recoverCount,
@@ -1188,6 +1228,7 @@ function Update(aiBrain, now)
             ctx.powerRecoveryCount,
             ctx.surplusSpendCount,
             ctx.dispatchedExpand,
+            runtime.LastExpansionGateReason or 'none',
             runtime.LastExpansionCandidateCount or 0,
             runtime.LastExpansionBusySkipCount or 0,
             runtime.LastExpansionNoTargetCount or 0,

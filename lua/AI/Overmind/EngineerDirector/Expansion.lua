@@ -565,7 +565,7 @@ local function DispatchExpansionEngineer(aiBrain, runtime, now, engineers, mainP
     if mexEmergency then
         dispatchLimit = math.max(dispatchLimit, 3)
     end
-    local dispatchRadius = mexEmergency and 340 or 220
+    local dispatchRadius = mexEmergency and 560 or (contestDispatch and 420 or 260)
     for _, eng in engineers do
         local canUse, queueLength = IsExpansionCandidateEngineer(eng, mexEmergency, contestDispatch)
         if eng and not eng.Dead and canUse then
