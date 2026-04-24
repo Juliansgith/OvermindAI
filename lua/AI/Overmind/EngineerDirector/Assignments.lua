@@ -897,7 +897,20 @@ local function ProcessEngineer(aiBrain, runtime, eng, now, ctx)
     end
 
     if isIdle and not constructing and not acted then
-        if ecoStructureAssistTask
+        if (ctx.mapCollapse or (ctx.mexReady or 0) <= 7 or ctx.contestFieldMode)
+            and not isTechBuilder
+            and ctx.needBase <= 0
+            and localThreat < 2.0
+            and Reclaim.TryReclaimNearby(aiBrain, runtime, eng, now, now < 660 and 72 or 84, 0.75, {
+                MaxThreat = now < 660 and 2.05 or 2.35,
+                EnemyRadius = now < 660 and 22 or 26,
+                MinEscort = 0,
+                MinTotalMass = now < 660 and 5 or 8,
+                MaxTargets = now < 660 and 28 or 36,
+            }) then
+            ctx.reclaimField = ctx.reclaimField + 1
+            acted = true
+        elseif ecoStructureAssistTask
             and ecoStructureAssistTarget
             and (ecoStructureAssistTask.Kind == 'Power' or ecoStructureAssistTask.Kind == 'Mex')
             and (ctx.macroPhase ~= 'starter_mex_claim' or ecoStructureAssistTask.Kind == 'Power')

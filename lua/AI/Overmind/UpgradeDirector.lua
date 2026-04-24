@@ -60,6 +60,19 @@ local function IsReadyStructure(unit)
     return true
 end
 
+local function GetFraction(unit)
+    if not unit or unit.Dead or not unit.GetFractionComplete then
+        return 1
+    end
+    local ok, fraction = pcall(function()
+        return unit:GetFractionComplete()
+    end)
+    if ok and type(fraction) == 'number' then
+        return fraction
+    end
+    return 1
+end
+
 local function GetUpgradeBlueprintId(unit)
     if not unit or unit.Dead or not unit.GetBlueprint then
         return false
@@ -746,6 +759,23 @@ local function PickFactoryTarget(aiBrain, runtime, state, now)
     local factoryTask = current.FactoryTask or {}
     local hqTimingBias = policy.FactoryHQTimingBias or 0
     local hqEcoBias = policy.FactoryHQEcoBias or 0
+    local needsFirstHQOverall = t2LandFactories <= 0
+    local acuCrisisActive = now < (runtime.ACUCrisisUntil or -999)
+        or now < (runtime.ACUCrisisEscalatedUntil or -999)
+        or now < (runtime.ACUProtectUntil or -999)
+    local firstHQAbortActive = now < (runtime.FirstHQAbortUntil or -999)
+    local liveLandPressure = constraints.LandPanic == true
+        or constraints.FrontCollapse == true
+        or constraints.ApproachReal == true
+        or (constraints.BasePressure or 0) >= 0.18
+        or (constraints.FrontPressure or 0) >= 0.28
+    local t1CombatHold = needsFirstHQOverall
+        and (
+            macro.HQPressureEscape == true
+            or firstHQAbortActive
+            or acuCrisisActive
+            or (liveLandPressure and (mexReady <= 7 or readyLand <= 3 or mapControl <= 0.32))
+        )
 
     state.Managed = true
     state.TargetUnit = false
@@ -759,10 +789,52 @@ local function PickFactoryTarget(aiBrain, runtime, state, now)
     state.NeedsFirstLandHQ = false
     state.Mandatory = false
 
-    local needsFirstHQOverall = t2LandFactories <= 0
     state.NeedsFirstLandHQ = needsFirstHQOverall and true or false
     state.Mandatory = needsFirstHQOverall and true or false
     state.PowerRecoveryWanted = constraints.PowerBufferLow and needsFirstHQOverall
+
+    if t1CombatHold then
+        if upgradeCount > 0 then
+            local allFactories = aiBrain:GetListOfUnits(categories.FACTORY * categories.LAND * categories.STRUCTURE, false, true) or {}
+            for _, fac in allFactories do
+                if fac and not fac.Dead and fac:IsUnitState('Upgrading') then
+                    local fraction = GetFraction(fac)
+                    local abortUnsafeHQ = firstHQAbortActive
+                        or acuCrisisActive
+                        or readyLand <= 3
+                        or mexReady <= 6
+                        or (mapControl <= 0.3 and liveLandPressure)
+                    if abortUnsafeHQ and fraction < 0.82 and now >= ((runtime.LastFirstHQAbortTime or -999) + 28) then
+                        if IssueClearCommands then
+                            IssueClearCommands({ fac })
+                        end
+                        runtime.LastFirstHQAbortTime = now
+                        runtime.FirstHQAbortUntil = now + 135
+                        state.TargetUnit = fac
+                        state.TargetId = GetEntityId(fac)
+                        state.Enabled = false
+                        state.NeedsFirstLandHQ = false
+                        state.Mandatory = false
+                        state.PowerRecoveryWanted = false
+                        state.Reason = 'aborted_first_hq_under_pressure'
+                        LOG(string.format('*OVERMIND UPGDIR FACTORY A%d t=%.1f abort_first_hq=1 frac=%.2f land=%d mex=%d map=%.2f',
+                            aiBrain:GetArmyIndex(),
+                            now,
+                            fraction,
+                            readyLand,
+                            mexReady,
+                            mapControl or 0))
+                        return
+                    end
+                end
+            end
+        end
+        state.Reason = firstHQAbortActive and 'first_hq_abort_hold' or 't1_combat_hold'
+        state.NeedsFirstLandHQ = false
+        state.Mandatory = false
+        state.PowerRecoveryWanted = false
+        return
+    end
 
     local firstHQEscapeFloorReady = readyLand >= (collapseRecovery and 2 or 3)
         and mexReady >= (collapseRecovery and 4 or 5)

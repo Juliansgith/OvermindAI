@@ -1690,6 +1690,7 @@ local function DecideCapacityPlan(runtime, current, constraints, rolePlan)
     local relaxedFactoryTempo = policy.RelaxedFactoryTempo == true
     local suppressEarlyAir = policy.SuppressEarlyAir == true and earlyAirUnlockBias < 0.6
     local hqPressureEscape = (runtime.MacroController or {}).HQPressureEscape == true
+        or now < (runtime.FirstHQAbortUntil or -999)
     local outerRetentionActive = planner.OuterRetentionActive == true
     local reclaimFirst = planner.ReclaimFirst == true
     local frontSecure = policy.FrontSecure == true
@@ -2288,7 +2289,16 @@ local function DecideCapacityPlan(runtime, current, constraints, rolePlan)
     local preHQFactoryCap = ((macroFacts.T2LandFactories or 0) <= 0)
         and (mexReady or 0) < 8
         and (now or 0) < 1200
-    if preHQFactoryCap and current.Factories.Land.Total >= 4 then
+    local t1CombatFactoryCap = (hqPressureEscape or constraints.LandPanic or constraints.FrontCollapse or constraints.ApproachReal)
+        and not constraints.EcoCrash
+        and (mexReady or 0) >= 5
+    if preHQFactoryCap and t1CombatFactoryCap then
+        local combatCap = 5
+        if (mexReady or 0) >= 7 or (reclaimRateShort or 0) >= 0.35 then
+            combatCap = 6
+        end
+        landTarget = math.min(math.max(landTarget, math.min(landCap, combatCap)), combatCap)
+    elseif preHQFactoryCap and current.Factories.Land.Total >= 4 then
         landTarget = math.min(landTarget, current.Factories.Land.Total)
     elseif preHQFactoryCap then
         landTarget = math.min(landTarget, 4)

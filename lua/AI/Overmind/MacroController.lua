@@ -161,6 +161,9 @@ local function DetermineDesiredPhase(aiBrain, runtime, now)
     local approachReal = constraints.ApproachReal == true
     local landPanic = constraints.LandPanic == true
     local acuCrisisActive = now < (runtime.ACUCrisisUntil or -999)
+        or now < (runtime.ACUCrisisEscalatedUntil or -999)
+        or now < (runtime.ACUProtectUntil or -999)
+    local firstHQAbortActive = now < (runtime.FirstHQAbortUntil or -999)
     local structure = OvermindEconomySignals.GetStructure(aiBrain, runtime, now)
     local contestTempoMap = structure.StructuralContestMap
         and (contestedZones >= 2 or structure.ContestableZoneCount >= 3)
@@ -180,19 +183,31 @@ local function DetermineDesiredPhase(aiBrain, runtime, now)
         and readyPower >= 5
         and not ecoCrash
     local pressureEscapeExpired = firstHQFloorReady
+        and not acuCrisisActive
+        and not firstHQAbortActive
+        and not (landPanic and readyMex <= 8)
         and (
             now >= 660
             or (readyLand >= 5 and massBudget >= 4.8)
             or (readyLand >= 6 and now >= 540)
         )
-    local hqPressureEscape = t2LandFactories <= 0
-        and activeLandFactoryUpgrades <= 0
+    local t1CombatPressure = t2LandFactories <= 0
         and readyLand >= 2
         and not pressureEscapeExpired
         and (
-            acuCrisisActive
+            firstHQAbortActive
+            or acuCrisisActive
             or ((landPanic or underHarass or approachReal) and (frontPressure >= 0.18 or basePressure >= 0.14))
             or (frontPressure >= 0.26 and basePressure >= 0.18)
+            or (landPanic and readyMex <= 7)
+        )
+    local hqPressureEscape = t1CombatPressure
+        and (
+            activeLandFactoryUpgrades <= 0
+            or firstHQAbortActive
+            or acuCrisisActive
+            or readyMex <= 7
+            or readyLand < 5
         )
 
     local facts = {
@@ -219,6 +234,8 @@ local function DetermineDesiredPhase(aiBrain, runtime, now)
         FrontPressure = frontPressure,
         BasePressure = basePressure,
         HQPressureEscape = hqPressureEscape and true or false,
+        T1CombatPressure = t1CombatPressure and true or false,
+        FirstHQAbortActive = firstHQAbortActive and true or false,
         FocusOnT1Spam = focusOnT1Spam and true or false,
         ACUCrisisActive = acuCrisisActive and true or false,
         AirHarass = raid.UnderAirHarass == true,
@@ -239,7 +256,7 @@ local function DetermineDesiredPhase(aiBrain, runtime, now)
 
     if t2LandFactories <= 0 then
         if hqPressureEscape then
-            return 'mass_consolidation', 'hq_pressure_escape', facts
+            return 'mass_consolidation', firstHQAbortActive and 'first_hq_abort_hold' or 't1_combat_hold', facts
         end
         if focusOnT1Spam then
             if firstHQFloorReady and now >= 660 then
@@ -326,15 +343,17 @@ local function ApplyLatch(state, desiredPhase, desiredReason, facts, now)
     end
 
     if current == 'first_land_hq'
-        and facts.HQPressureEscape
+        and (facts.HQPressureEscape or facts.T1CombatPressure or facts.FirstHQAbortActive)
         and (now - (state.PhaseStartedAt or now)) >= 10 then
-        return 'mass_consolidation', 'hq_pressure_escape'
+        return 'mass_consolidation', facts.FirstHQAbortActive and 'first_hq_abort_hold' or 't1_combat_hold'
     end
 
     if current == 'first_land_hq'
         and facts.T2LandFactories <= 0
         and (facts.ActiveLandFactoryUpgrades > 0 or (facts.ReadyLandFactories >= 2 and facts.ReadyMexes >= 4))
-        and not facts.EcoCrash then
+        and not facts.EcoCrash
+        and not facts.T1CombatPressure
+        and not facts.FirstHQAbortActive then
         return current, 'latched_first_land_hq'
     end
 
@@ -379,7 +398,7 @@ function Module.Update(aiBrain, now)
     state.Reason = reason
 
     state.TransitionLocked = TransitionPhases[phase] == true
-    state.HQPressureEscape = (facts.HQPressureEscape and phase ~= 'first_land_hq') and true or false
+    state.HQPressureEscape = ((facts.HQPressureEscape or facts.T1CombatPressure or facts.FirstHQAbortActive) and phase ~= 'first_land_hq') and true or false
     state.SuppressAirExpansion = state.TransitionLocked and phase ~= 'surplus_scale'
     state.SuppressDefenseDrift = phase == 'bootstrap_factory'
         or phase == 'starter_mex_claim'

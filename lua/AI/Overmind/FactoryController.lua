@@ -307,6 +307,7 @@ local function SelectEarlyLandScreenRole(kind, plan, rolePlan)
     local severeLandCrisis = emerg.LandPanic
         or emerg.FrontCollapse
         or ((constraints.BasePressure or 0) >= 0.35)
+        or ((constraints.FrontPressure or 0) >= 0.32)
     local bomberDefenseFloor = 0
     if emerg.BomberPanic or emerg.ExposedMexAirRaid or emerg.AirPanic then
         bomberDefenseFloor = 4
@@ -342,6 +343,21 @@ local function SelectEarlyLandScreenRole(kind, plan, rolePlan)
         screenFloor = 7
     elseif now < 660 then
         screenFloor = 12
+    elseif now < 900 then
+        screenFloor = 14
+    end
+    if severeLandCrisis then
+        if now < 420 then
+            screenFloor = math.max(screenFloor, 12)
+        elseif now < 660 then
+            screenFloor = math.max(screenFloor, 22)
+        elseif now < 900 then
+            screenFloor = math.max(screenFloor, 28)
+        else
+            screenFloor = math.max(screenFloor, 24)
+        end
+    elseif constraints.ApproachReal or (constraints.BasePressure or 0) >= 0.14 or (constraints.FrontPressure or 0) >= 0.22 then
+        screenFloor = math.max(screenFloor, now < 660 and 18 or 20)
     end
 
     if screenFloor > 0 and engineerUnits >= 3 and landScreenUnits < screenFloor then
@@ -599,10 +615,21 @@ end
 
 local function NeedsFirstLandHQ(runtime)
     local macroObjective = GetMacroObjective(runtime)
+    local now = GetGameTimeSeconds()
+    local macro = (runtime and runtime.MacroController) or {}
+    if now < ((runtime or {}).FirstHQAbortUntil or -999) or macro.HQPressureEscape == true then
+        return false
+    end
     if macroObjective == 'first_land_hq' or macroObjective == 'first_t2_engineer' or macroObjective == 'first_t2_power' then
         return true
     end
     local factoryUpgrade = (((runtime or {}).UpgradeDirector or {}).Factory) or {}
+    if factoryUpgrade.Reason == 'pressure_escape'
+        or factoryUpgrade.Reason == 't1_combat_hold'
+        or factoryUpgrade.Reason == 'first_hq_abort_hold'
+        or factoryUpgrade.Reason == 'aborted_first_hq_under_pressure' then
+        return false
+    end
     return factoryUpgrade.NeedsFirstLandHQ == true and factoryUpgrade.Enabled ~= true
 end
 
