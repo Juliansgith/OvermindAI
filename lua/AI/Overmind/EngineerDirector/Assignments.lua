@@ -827,9 +827,13 @@ local function ProcessEngineer(aiBrain, runtime, eng, now, ctx)
         and not claimedByRadarOrder
         and isIdle
         and not constructing then
-        -- Leave at least one idle builder for the high-priority factory builder instead of
-        -- immediately consuming it on reclaim, power, radar, or surplus tasks.
-        return
+        ctx.factoryGrowthIdleReserve = ctx.factoryGrowthIdleReserve or 0
+        if ctx.factoryGrowthIdleReserve < 2 then
+            -- Keep a small reserve for high-priority factory builders without freezing
+            -- every idle engineer out of reclaim and expansion work.
+            ctx.factoryGrowthIdleReserve = ctx.factoryGrowthIdleReserve + 1
+            return
+        end
     end
 
     if Common.IsReadyBuilder(eng)
