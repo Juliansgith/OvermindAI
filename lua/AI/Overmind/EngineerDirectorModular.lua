@@ -511,6 +511,7 @@ function Update(aiBrain, now)
         and mexReady < math.max(12, (constraints.StarterMexFloor or 5) + 5)
         and not severeFactoryStarve
     local starterMexFloor = constraints.StarterMexFloor or 5
+    local containmentExpansionFloor = math.max(policy.ContainmentExpansionFloor or 8, starterMexFloor + 2)
     local coreEcoCritical = mexRebuildUrgent
         or mexReady < starterMexFloor
         or (now < 600 and mexReady < math.max(6, starterMexFloor + 1))
@@ -554,9 +555,12 @@ function Update(aiBrain, now)
         expansionTrendOk = energyTrend > -70 and (massTrend > -6 or mexReady < 8 or (eco.MassStorageRatio or 0) > 0.02)
     end
     local expansionGateReason = 'none'
+    local containmentAllowsExpansion = policy.ContainmentCrisis ~= true
+        or mexReady < containmentExpansionFloor
+        or mexRebuildUrgent
     local earlyExpansionSlice = now >= 60
         and mexExpansionUrgent
-        and (not (policy.ContainmentCrisis == true) or mexReady < 4)
+        and containmentAllowsExpansion
         and (baseEngineers >= math.max(2, baseFloor - 1) or mexReady < 8)
         and table.getn(engineers or {}) >= math.max(4, baseFloor)
         and not severeFactoryStarve
@@ -993,6 +997,7 @@ function Update(aiBrain, now)
         bomberPanic = bomberPanic,
         constraints = constraints,
         containmentCrisis = containmentCrisis,
+        containmentExpansionFloor = containmentExpansionFloor,
         contestFieldMode = (contestFieldMode or reclaimSignalMode or desiredReclaimQuota > 0) and true or false,
         coreEcoCritical = coreEcoCritical,
         dispatchedExpand = preclaimedExpand,
@@ -1072,7 +1077,7 @@ function Update(aiBrain, now)
         or (policy.ForwardContestBias == true and mexReady < 12)
         or (planner.OuterRetentionActive == true and mexReady < 14)
         or (policy.EngineerExpansionQuota or 0) >= 2
-    if containmentCrisis and mexReady >= 4 then
+    if containmentCrisis and not containmentAllowsExpansion then
         expansionOverride = false
     end
     local canDispatchEconOk = expansionOverride
@@ -1089,7 +1094,7 @@ function Update(aiBrain, now)
         and (not (bomberWatch and currentRadar <= 0) or allowExpandWhileRadarPending)
         and not raid.ExposedMexUnderAirRaid
         and not (bomberPanic and table.getn(engineers or {}) <= math.max(4, baseFloor + 1))
-        and (not containmentCrisis or mexReady < 4)
+        and containmentAllowsExpansion
         and canDispatchBaseOk
         and canDispatchEconOk
     if canDispatchExpand then

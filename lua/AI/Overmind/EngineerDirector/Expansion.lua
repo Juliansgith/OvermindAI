@@ -53,9 +53,14 @@ local function IsSafeExpansionTarget(aiBrain, runtime, pos, mainPos, enemyPos, m
         return false
     end
     local policy = runtime and runtime.EcoPolicy or {}
+    local current = ((runtime and runtime.ProductionDirector or {}).Current or {})
+    local mexReady = (((current.Eco or {}).Mex or {}).Ready) or 0
+    local containmentFloor = policy.ContainmentExpansionFloor or 8
+    local lowMexContainment = policy.ContainmentCrisis == true and mexReady < containmentFloor
     if policy.ContainmentCrisis == true then
         local nearbySupport = aiBrain:GetNumUnitsAroundPoint(LandCombatCategory, pos, 48, 'Ally') or 0
-        if distMain > 175 and nearbySupport < 2 then
+        local unsupportedDistance = lowMexContainment and 260 or 175
+        if distMain > unsupportedDistance and nearbySupport < 2 then
             return false
         end
         if localThreat > 0.35 and nearbySupport < 3 then
@@ -359,6 +364,15 @@ local function NeedsExpansionEscort(aiBrain, runtime, mainPos, targetPos, now, m
     local engineerLossRisk = OvermindMemory.GetEngineerLossRisk(aiBrain, targetPos, 52)
     local lossPressure = OvermindMemory.GetEngineerLossPressure(aiBrain)
     local contestMode = policy.ForwardContestBias == true or policy.ContestMapMode == true or policy.ReclaimPressureMode == true
+    local containmentFloor = policy.ContainmentExpansionFloor or 8
+    if policy.ContainmentCrisis == true
+        and (mexReady or 0) < containmentFloor
+        and distMain <= 260
+        and routeRisk <= 0.85
+        and targetThreat <= 0.08
+        and engineerLossRisk < 0.35 then
+        return false
+    end
     return (lossPressure >= 0.65 and distMain > 115)
         or (mexEmergency and distMain > 230 and (routeRisk > 1.55 or targetThreat > 0.35 or mapControl < 0.34))
         or ((mexReady or 0) < 8 and distMain > (contestMode and 220 or 185) and (routeRisk > 1.15 or targetThreat > 0.18 or mapControl < 0.42))

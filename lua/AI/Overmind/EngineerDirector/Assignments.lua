@@ -903,7 +903,7 @@ local function ProcessEngineer(aiBrain, runtime, eng, now, ctx)
                 acted = true
             end
         elseif ctx.coreEcoCritical
-            and (not ctx.containmentCrisis or (ctx.mexReady or 0) < 4)
+            and (not ctx.containmentCrisis or (ctx.mexReady or 0) < (ctx.containmentExpansionFloor or 8))
             and not factoryBootstrapCritical
             and localThreat < 2.1
             and dist <= 520
@@ -968,21 +968,21 @@ local function ProcessEngineer(aiBrain, runtime, eng, now, ctx)
             ctx.reclaimField = ctx.reclaimField + 1
             acted = true
         elseif ctx.macroPhase == 'starter_mex_claim'
-            and (not ctx.containmentCrisis or (ctx.mexReady or 0) < 4)
+            and (not ctx.containmentCrisis or (ctx.mexReady or 0) < (ctx.containmentExpansionFloor or 8))
             and localThreat < 2.05
             and dist <= 420
             and Recovery.TryOpenSurplusExpansionBuild(aiBrain, runtime, eng, ctx.mainPos, ctx.enemyPos, ctx.safeExpandDistance, now) then
             ctx.dispatchedExpand = ctx.dispatchedExpand + 1
             acted = true
         elseif ctx.mexRebuildUrgent
-            and (not ctx.containmentCrisis or (ctx.mexReady or 0) < 4)
+            and (not ctx.containmentCrisis or (ctx.mexReady or 0) < (ctx.containmentExpansionFloor or 8))
             and localThreat < 2.0
             and dist <= 460
             and Recovery.TryOpenSurplusExpansionBuild(aiBrain, runtime, eng, ctx.mainPos, ctx.enemyPos, ctx.safeExpandDistance, now) then
             ctx.dispatchedExpand = ctx.dispatchedExpand + 1
             acted = true
         elseif ctx.coreEcoCritical
-            and (not ctx.containmentCrisis or (ctx.mexReady or 0) < 4)
+            and (not ctx.containmentCrisis or (ctx.mexReady or 0) < (ctx.containmentExpansionFloor or 8))
             and not factoryBootstrapCritical
             and localThreat < 2.05
             and dist <= 520
@@ -1062,7 +1062,7 @@ local function ProcessEngineer(aiBrain, runtime, eng, now, ctx)
         elseif ctx.contestFieldMode
             and ctx.fieldTaskWindow
             and ctx.reclaimField < ctx.fieldTaskQuota
-            and not ctx.containmentCrisis
+            and (not ctx.containmentCrisis or (ctx.mexReady or 0) < (ctx.containmentExpansionFloor or 8))
             and ctx.needBase <= 0
             and localThreat < 1.8
             and dist <= 380
@@ -1212,7 +1212,7 @@ local function ProcessEngineer(aiBrain, runtime, eng, now, ctx)
         and isIdle
         and not constructing
         and Recovery.ShouldPersistentSurplusSpend(runtime, now)
-        and (not ctx.containmentCrisis or (ctx.mexReady or 0) < 4)
+            and (not ctx.containmentCrisis or (ctx.mexReady or 0) < (ctx.containmentExpansionFloor or 8))
         and localThreat < 1.8
         and dist <= 260 then
         if Recovery.TryOpenSurplusExpansionBuild(aiBrain, runtime, eng, ctx.mainPos, ctx.enemyPos, ctx.safeExpandDistance, now) then

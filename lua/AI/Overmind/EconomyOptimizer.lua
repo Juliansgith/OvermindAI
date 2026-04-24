@@ -424,6 +424,8 @@ function UpdatePolicy(aiBrain, now)
             or (opp.RelativeLand or 1) < 0.55
             or (pressure.HomePressure or 0) >= 6.0
         )
+    local containmentExpansionFloor = 8
+    policy.ContainmentExpansionFloor = containmentExpansionFloor
     policy.EngineerReclaimQuota = 0
     if reclaimQuotaAllowed
         and reclaimQuotaMexReady
@@ -476,6 +478,8 @@ function UpdatePolicy(aiBrain, now)
         policy.ContainmentCrisis = true
         if (macroCounts.Mex or 0) <= 3 then
             policy.EngineerExpansionQuota = math.min(policy.EngineerExpansionQuota, 1)
+        elseif (macroCounts.Mex or 0) < containmentExpansionFloor then
+            policy.EngineerExpansionQuota = math.min(math.max(policy.EngineerExpansionQuota, 1), 2)
         else
             policy.EngineerExpansionQuota = 0
         end
