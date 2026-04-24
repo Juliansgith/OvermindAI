@@ -437,7 +437,13 @@ function Update(aiBrain, now)
     local AssignBuildersToUnfinishedStructure = OptionalMethod(Assignments, 'AssignBuildersToUnfinishedStructure', function() return 0, {}, false, { Total = 0, Safe = 0, Reachable = 0, Interruptible = 0 } end)
     local ProcessEngineer = OptionalMethod(Assignments, 'ProcessEngineer', function() end)
     local DescribeStructureTaskTarget = OptionalMethod(Assignments, 'DescribeStructureTaskTarget', function() return 'none' end)
-    local DispatchExpansionEngineer = ResolveMethod(Expansion, 'DispatchExpansionEngineer', 'Expansion')
+    local expansionDispatchAvailable = type(Expansion) == 'table'
+        and type(rawget(Expansion, 'DispatchExpansionEngineer')) == 'function'
+    runtime.EngineerDirectorExpansionDispatchAvailable = expansionDispatchAvailable
+    local DispatchExpansionEngineer = OptionalMethod(Expansion, 'DispatchExpansionEngineer', function()
+        runtime.LastExpansionInternalGateReason = 'impl_missing'
+        return 0
+    end)
     local function CallDispatchExpansionEngineer(...)
         runtime.LastExpansionInternalGateReason = 'precall'
         local issued = DispatchExpansionEngineer(...)
@@ -1201,6 +1207,7 @@ function Update(aiBrain, now)
     activity.ExpansionEscortBlocked = runtime.LastExpansionEscortBlockedCount or 0
     activity.ExpansionGateReason = runtime.LastExpansionGateReason or 'none'
     activity.ExpansionInternalGate = runtime.LastExpansionInternalGateReason or 'none'
+    activity.ExpansionDispatchAvailable = runtime.EngineerDirectorExpansionDispatchAvailable == true
     local blockedReason = severeFactoryStarve and 'factory_starve'
         or ecoCrash and 'eco_crash'
         or fieldTaskQuota <= 0 and 'no_reclaim_quota'
@@ -1228,7 +1235,7 @@ function Update(aiBrain, now)
             sz = structureTask.TargetPos[3] or 0
             structureNearby = aiBrain:GetNumUnitsAroundPoint(categories.ENGINEER * categories.MOBILE, structureTask.TargetPos, 18, 'Ally') or 0
         end
-        LOG(string.format('*OVERMIND ENGDIR A%d t=%.1f recover=%d threat=%d facRec=%d powerRec=%d surp=%d expand=%d gate=%s inner=%s cand=%d busy=%d noT=%d esc=%d field=%d quota=%d block=%s baseNeed=%d facTask=%d:%s frac=%.2f stall=%.1f asn=%d/%d structTask=%d:%s:%s frac=%.2f stall=%.1f asn=%d/%d eco=%d:%s asn=%d/%d def=%d:%s asn=%d/%d near=%d pos=%.1f,%.1f acuRep=%d/%d',
+        LOG(string.format('*OVERMIND ENGDIR A%d t=%.1f recover=%d threat=%d facRec=%d powerRec=%d surp=%d expand=%d gate=%s inner=%s expAvail=%d cand=%d busy=%d noT=%d esc=%d field=%d quota=%d block=%s baseNeed=%d facTask=%d:%s frac=%.2f stall=%.1f asn=%d/%d structTask=%d:%s:%s frac=%.2f stall=%.1f asn=%d/%d eco=%d:%s asn=%d/%d def=%d:%s asn=%d/%d near=%d pos=%.1f,%.1f acuRep=%d/%d',
             aiBrain:GetArmyIndex(),
             now,
             ctx.recoverCount,
@@ -1239,6 +1246,7 @@ function Update(aiBrain, now)
             ctx.dispatchedExpand,
             runtime.LastExpansionGateReason or 'none',
             runtime.LastExpansionInternalGateReason or 'none',
+            runtime.EngineerDirectorExpansionDispatchAvailable and 1 or 0,
             runtime.LastExpansionCandidateCount or 0,
             runtime.LastExpansionBusySkipCount or 0,
             runtime.LastExpansionNoTargetCount or 0,
