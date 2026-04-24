@@ -477,9 +477,9 @@ function UpdatePolicy(aiBrain, now)
     if containmentCrisis then
         policy.ContainmentCrisis = true
         if (macroCounts.Mex or 0) <= 3 then
-            policy.EngineerExpansionQuota = math.min(policy.EngineerExpansionQuota, 1)
+            policy.EngineerExpansionQuota = math.min(math.max(policy.EngineerExpansionQuota, 2), 2)
         elseif (macroCounts.Mex or 0) < containmentExpansionFloor then
-            policy.EngineerExpansionQuota = math.min(math.max(policy.EngineerExpansionQuota, 1), 2)
+            policy.EngineerExpansionQuota = math.min(math.max(policy.EngineerExpansionQuota, 2), 3)
         else
             policy.EngineerExpansionQuota = 0
         end

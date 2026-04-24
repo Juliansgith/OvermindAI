@@ -6,6 +6,7 @@ local OvermindMechanicTune = import('/mods/OvermindAI/lua/AI/Overmind/MechanicTu
 local OvermindMemory = import('/mods/OvermindAI/lua/AI/Overmind/Memory.lua')
 
 local BuilderCategory = categories.ENGINEER * categories.MOBILE + categories.COMMAND
+local LandCombatCategory = categories.MOBILE * categories.LAND - categories.ENGINEER - categories.SCOUT
 
 
 local M = {}
@@ -869,6 +870,33 @@ local function ProcessEngineer(aiBrain, runtime, eng, now, ctx)
     end
 
     if claimedByFactoryTask or claimedByStructureTask or claimedByRadarOrder then
+        local claimedEscort = aiBrain:GetNumUnitsAroundPoint(categories.MOBILE * (categories.LAND + categories.AIR) - categories.ENGINEER - categories.SCOUT - categories.COMMAND, pos, 28, 'Ally') or 0
+        local enemyClose = aiBrain:GetNumUnitsAroundPoint(LandCombatCategory, pos, 24, 'Enemy') or 0
+        local shouldEvacuateClaimed = not acuRepairHard
+            and not EntityCategoryContains(categories.COMMAND, eng)
+            and (
+                (enemyClose > claimedEscort and localThreat >= 3.2)
+                or (localThreat >= 6.0 and claimedEscort < 3)
+            )
+        if shouldEvacuateClaimed and Common.RecallEngineer(runtime, eng, ctx.mainPos, now, 'claimed_threat') then
+            if claimedByFactoryTask and ctx.factoryTask.BuilderIds and entityId then
+                ctx.factoryTask.BuilderIds[entityId] = nil
+                ctx.factoryTask.AssignedBuilders = math.max(0, (ctx.factoryTask.AssignedBuilders or 1) - 1)
+            end
+            if claimedByEcoStructureTask and ctx.ecoStructureTask and ctx.ecoStructureTask.BuilderIds and entityId then
+                ctx.ecoStructureTask.BuilderIds[entityId] = nil
+                ctx.ecoStructureTask.AssignedBuilders = math.max(0, (ctx.ecoStructureTask.AssignedBuilders or 1) - 1)
+            end
+            if claimedByDefenseStructureTask and ctx.defenseStructureTask and ctx.defenseStructureTask.BuilderIds and entityId then
+                ctx.defenseStructureTask.BuilderIds[entityId] = nil
+                ctx.defenseStructureTask.AssignedBuilders = math.max(0, (ctx.defenseStructureTask.AssignedBuilders or 1) - 1)
+            end
+            if ctx.structureTask and ctx.structureTask.BuilderIds and entityId then
+                ctx.structureTask.BuilderIds[entityId] = nil
+                ctx.structureTask.AssignedBuilders = math.max(0, (ctx.structureTask.AssignedBuilders or 1) - 1)
+            end
+            ctx.threatenedCount = (ctx.threatenedCount or 0) + 1
+        end
         return
     end
 

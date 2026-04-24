@@ -314,6 +314,70 @@ local function HasFriendlyMexAtPos(aiBrain, pos, radius)
     return (aiBrain:GetNumUnitsAroundPoint(categories.STRUCTURE * categories.MASSEXTRACTION, pos, radius or 8, 'Ally') or 0) > 0
 end
 
+local function FindUrgentLocalMexTarget(aiBrain, runtime, mainPos, enemyPos, maxDistance, threatCap, now, sourcePos)
+    local director = (runtime and runtime.ProductionDirector) or {}
+    local current = director.Current or {}
+    local mexReady = (((current.Eco or {}).Mex or {}).Ready) or 0
+    local engState = (runtime and runtime.EngineerState) or {}
+    if not (engState.MexEmergencyActive == true or mexReady < 8 or (now or 0) < 360) then
+        return false
+    end
+
+    local markers = AIUtils.AIGetMarkerLocations(aiBrain, 'Mass')
+    if not markers or table.getn(markers) <= 0 then
+        return false
+    end
+
+    local localRadius = math.min(maxDistance or 420, mexReady <= 5 and 360 or 300)
+    local source = sourcePos or mainPos
+    local relaxedThreatCap = math.max((threatCap or 1.2) + 0.75, mexReady <= 5 and 2.35 or 2.05)
+    local bestPos = false
+    local bestScore = -999999
+    local engineerId = sourcePos and sourcePos.EngineerId or false
+    local allowSharedPath = engState.MexEmergencyActive == true
+
+    for _, marker in markers do
+        local pos = marker and marker.Position
+        if pos
+            and not HasFriendlyMexAtPos(aiBrain, pos, 8)
+            and not IsReservedExpansionTarget(runtime, now, pos, engineerId, mainPos, allowSharedPath) then
+            local distMain = Common.Distance2D(pos, mainPos)
+            if distMain >= 28 and distMain <= localRadius then
+                local localThreat = aiBrain:GetThreatAtPosition(pos, 1, true, 'AntiSurface') or 0
+                local enemyRaiders = aiBrain:GetNumUnitsAroundPoint(
+                    categories.MOBILE * categories.LAND - categories.ENGINEER - categories.SCOUT,
+                    pos,
+                    24,
+                    'Enemy') or 0
+                local enemySide = false
+                if enemyPos then
+                    local distEnemy = Common.Distance2D(pos, enemyPos)
+                    enemySide = distEnemy + 24 < distMain
+                end
+                if localThreat <= relaxedThreatCap
+                    and enemyRaiders <= 0
+                    and not enemySide
+                    and not Threat.HasEnemyCombatNear(aiBrain, pos, 24) then
+                    local distSource = Common.Distance2D(pos, source)
+                    local score = 520 - (distMain * 1.25) - (distSource * 0.65) - (localThreat * 34)
+                    if mexReady <= 5 then
+                        score = score + 55
+                    end
+                    if distMain <= 190 then
+                        score = score + 30
+                    end
+                    if score > bestScore then
+                        bestScore = score
+                        bestPos = pos
+                    end
+                end
+            end
+        end
+    end
+
+    return bestPos
+end
+
 local function LerpPos(a, b, alpha)
     local t = alpha or 0.5
     return {
@@ -510,7 +574,11 @@ local function FindExpansionTarget(aiBrain, runtime, mainPos, enemyPos, maxDista
         end
     end
 
-    return bestPos
+    if bestPos then
+        return bestPos
+    end
+
+    return FindUrgentLocalMexTarget(aiBrain, runtime, mainPos, enemyPos, maxDistance, threatCap, now, sourcePos)
 end
 
 local function FindFollowupExpansionTarget(aiBrain, runtime, mainPos, enemyPos, anchorPos, maxDistance, threatCap, now, engineerId)
@@ -700,6 +768,7 @@ end
 
 M.PickMexBlueprint = PickMexBlueprint
 M.IsSafeExpansionTarget = IsSafeExpansionTarget
+M.FindUrgentLocalMexTarget = FindUrgentLocalMexTarget
 M.ExpansionReservationKey = ExpansionReservationKey
 M.FindNearestZoneNode = FindNearestZoneNode
 M.ExpansionPathKey = ExpansionPathKey
@@ -715,6 +784,7 @@ M.DispatchExpansionEngineer = DispatchExpansionEngineer
 local ModuleEnv = getfenv(1)
 rawset(ModuleEnv, 'PickMexBlueprint', PickMexBlueprint)
 rawset(ModuleEnv, 'IsSafeExpansionTarget', IsSafeExpansionTarget)
+rawset(ModuleEnv, 'FindUrgentLocalMexTarget', FindUrgentLocalMexTarget)
 rawset(ModuleEnv, 'ExpansionReservationKey', ExpansionReservationKey)
 rawset(ModuleEnv, 'FindNearestZoneNode', FindNearestZoneNode)
 rawset(ModuleEnv, 'ExpansionPathKey', ExpansionPathKey)
