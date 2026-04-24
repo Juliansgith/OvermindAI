@@ -1,5 +1,6 @@
 local OvermindAutoTune = import('/mods/OvermindAI/lua/AI/Overmind/AutoTune.lua')
 local OvermindEconomySignals = import('/mods/OvermindAI/lua/AI/Overmind/EconomySignals.lua')
+local OvermindMemory = import('/mods/OvermindAI/lua/AI/Overmind/Memory.lua')
 
 local function Clamp(v, minV, maxV)
     if v < minV then
@@ -461,6 +462,11 @@ function UpdatePolicy(aiBrain, now)
     end
     policy.EngineerReclaimQuota = policy.EngineerReclaimQuota + math.floor(tune.ReclaimQuotaBias or 0)
     policy.EngineerExpansionQuota = policy.EngineerExpansionQuota + math.floor(tune.ExpansionQuotaBias or 0)
+    policy.EngineerLossPressure = OvermindMemory.GetEngineerLossPressure(aiBrain)
+    if now >= 300 and policy.EngineerLossPressure >= 0.65 then
+        policy.EngineerReclaimQuota = math.min(policy.EngineerReclaimQuota, policy.EngineerLossPressure >= 1.1 and 0 or 1)
+        policy.EngineerExpansionQuota = math.min(policy.EngineerExpansionQuota, (macroCounts.Mex or 0) < 6 and 2 or 1)
+    end
     policy.EngineerBaseQuota = pressure.SurvivalCrisis and 4 or ((phase == 'bootstrap' or phase == 'recover') and 3 or 2)
 
     if now < 420 then

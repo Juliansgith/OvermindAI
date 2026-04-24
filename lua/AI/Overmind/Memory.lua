@@ -151,6 +151,10 @@ local function EnsureMemory(aiBrain)
         LossMassRecent = 0,
         BuildMassRecent = 0,
         ReclaimMassRecent = 0,
+        EngineerLossRecent = 0,
+        EngineerBuiltRecent = 0,
+        EngineerLossLifetime = 0,
+        EngineerBuiltLifetime = 0,
         EngineerLossHotspots = {},
         RiskHotspots = {},
         RouteBlackspots = {},
@@ -176,6 +180,8 @@ local function ApplyDecay(memory, now)
     memory.LossMassRecent = (memory.LossMassRecent or 0) * keepFactor
     memory.BuildMassRecent = (memory.BuildMassRecent or 0) * keepFactor
     memory.ReclaimMassRecent = (memory.ReclaimMassRecent or 0) * keepFactor
+    memory.EngineerLossRecent = (memory.EngineerLossRecent or 0) * keepFactor
+    memory.EngineerBuiltRecent = (memory.EngineerBuiltRecent or 0) * keepFactor
 
     if memory.EngineerLossHotspots then
         local newHotspots = {}
@@ -282,6 +288,8 @@ function RecordLoss(aiBrain, lostUnit, instigator)
     memory.LastCombatEventTime = now
 
     if EntityCategoryContains(categories.ENGINEER * categories.MOBILE, lostUnit) then
+        memory.EngineerLossRecent = (memory.EngineerLossRecent or 0) + 1
+        memory.EngineerLossLifetime = (memory.EngineerLossLifetime or 0) + 1
         local pos = false
         if lostUnit.GetPosition then
             pos = lostUnit:GetPosition()
@@ -314,6 +322,10 @@ function RecordBuildComplete(aiBrain, builder, completedUnit)
     local mass = GetUnitMassValue(completedUnit)
     memory.BuildMassLifetime = (memory.BuildMassLifetime or 0) + mass
     memory.BuildMassRecent = (memory.BuildMassRecent or 0) + mass
+    if EntityCategoryContains(categories.ENGINEER * categories.MOBILE, completedUnit) then
+        memory.EngineerBuiltRecent = (memory.EngineerBuiltRecent or 0) + 1
+        memory.EngineerBuiltLifetime = (memory.EngineerBuiltLifetime or 0) + 1
+    end
     memory.LastEcoEventTime = now
 end
 
@@ -379,6 +391,22 @@ function GetEngineerLossRisk(aiBrain, position, radius)
     end
 
     return risk
+end
+
+function GetEngineerLossPressure(aiBrain)
+    if not aiBrain then
+        return 0
+    end
+
+    local now = GetGameTimeSeconds()
+    local memory = EnsureMemory(aiBrain)
+    ApplyDecay(memory, now)
+
+    local currentEngineers = aiBrain:GetCurrentUnits(categories.ENGINEER * categories.MOBILE) or 0
+    local recentBuilt = memory.EngineerBuiltRecent or 0
+    local recentLoss = memory.EngineerLossRecent or 0
+    local denominator = math.max(2, (recentBuilt * 0.55) + (currentEngineers * 0.35))
+    return Clamp(recentLoss / denominator, 0, 3)
 end
 
 function GetExpansionRisk(aiBrain, position, radius)

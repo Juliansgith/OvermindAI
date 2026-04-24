@@ -46,12 +46,15 @@ local function IsSafeExpansionTarget(aiBrain, runtime, pos, mainPos, enemyPos, m
         return false
     end
 
+    local lossPressure = OvermindMemory.GetEngineerLossPressure(aiBrain)
+    local mapControl = (((runtime or {}).ZoneModel or {}).MapControl) or 0.5
     local localThreat = aiBrain:GetThreatAtPosition(pos, 1, true, 'AntiSurface') or 0
     if localThreat > threatCap then
         return false
     end
     local expansionRisk = OvermindMemory.GetExpansionRisk(aiBrain, pos, 56)
-    if expansionRisk > 3.2 then
+    local expansionRiskCap = (lossPressure >= 0.75 or mapControl < 0.36) and 1.55 or 3.2
+    if expansionRisk > expansionRiskCap then
         return false
     end
 
@@ -79,7 +82,8 @@ local function IsSafeExpansionTarget(aiBrain, runtime, pos, mainPos, enemyPos, m
         return false
     end
     local routeRisk = OvermindMemory.GetRouteRisk(aiBrain, mainPos, pos, 5, 54)
-    if routeRisk > 3.4 then
+    local routeRiskCap = (lossPressure >= 0.75 or mapControl < 0.36) and 2.25 or 3.4
+    if routeRisk > routeRiskCap then
         return false
     end
 
@@ -343,8 +347,10 @@ local function NeedsExpansionEscort(aiBrain, runtime, mainPos, targetPos, now, m
     local policy = runtime and runtime.EcoPolicy or {}
     local mexEmergency = ((runtime and runtime.EngineerState) and runtime.EngineerState.MexEmergencyActive == true) or false
     local engineerLossRisk = OvermindMemory.GetEngineerLossRisk(aiBrain, targetPos, 52)
+    local lossPressure = OvermindMemory.GetEngineerLossPressure(aiBrain)
     local contestMode = policy.ForwardContestBias == true or policy.ContestMapMode == true or policy.ReclaimPressureMode == true
-    return (mexEmergency and distMain > 230 and (routeRisk > 1.55 or targetThreat > 0.35 or mapControl < 0.34))
+    return (lossPressure >= 0.65 and distMain > 115)
+        or (mexEmergency and distMain > 230 and (routeRisk > 1.55 or targetThreat > 0.35 or mapControl < 0.34))
         or ((mexReady or 0) < 8 and distMain > (contestMode and 220 or 185) and (routeRisk > 1.15 or targetThreat > 0.18 or mapControl < 0.42))
         or ((now or 0) >= 240 and distMain > 130 and mapControl < 0.42)
         or mapControl < 0.34
@@ -539,6 +545,8 @@ local function DispatchExpansionEngineer(aiBrain, runtime, now, engineers, mainP
     local contestDispatch = policy.ForwardContestBias == true
         or policy.ReclaimPressureMode == true
         or macro.HQPressureEscape == true
+    local lossPressure = OvermindMemory.GetEngineerLossPressure(aiBrain)
+    local attritionGuard = now >= 300 and lossPressure >= 0.65
     runtime.LastExpansionCandidateCount = 0
     runtime.LastExpansionBusySkipCount = 0
     runtime.LastExpansionNoTargetCount = 0
@@ -576,7 +584,16 @@ local function DispatchExpansionEngineer(aiBrain, runtime, now, engineers, mainP
     if mexEmergency then
         dispatchLimit = math.max(dispatchLimit, 3)
     end
+    if attritionGuard then
+        dispatchLimit = 1
+        if not mexEmergency then
+            safeExpandDistance = math.min(safeExpandDistance or 420, 420)
+        end
+    end
     local dispatchRadius = mexEmergency and 560 or (contestDispatch and 420 or 260)
+    if attritionGuard then
+        dispatchRadius = math.min(dispatchRadius, 300)
+    end
     for _, eng in engineers do
         local canUse, queueLength = IsExpansionCandidateEngineer(eng, mexEmergency, contestDispatch)
         if eng and not eng.Dead and canUse then
@@ -594,8 +611,8 @@ local function DispatchExpansionEngineer(aiBrain, runtime, now, engineers, mainP
                 else
                     local targetSupported = HasExpansionEscortSupport(aiBrain, runtime, mainPos, target)
                     local targetNeedsEscort = NeedsExpansionEscort(aiBrain, runtime, mainPos, target, now, mexReady)
-                    if targetNeedsEscort and not targetSupported then
-                        local targetDist = Common.Distance2D(mainPos, target)
+                    local targetDist = Common.Distance2D(mainPos, target)
+                    if (targetNeedsEscort or (attritionGuard and targetDist > 115)) and not targetSupported then
                         if not (mexEmergency and targetDist <= 220 and (aiBrain:GetThreatAtPosition(target, 1, true, 'AntiSurface') or 0) <= (threatCap + 0.2)) then
                             runtime.LastExpansionEscortBlockedTime = now
                             runtime.LastExpansionEscortBlockedPos = target
@@ -615,7 +632,7 @@ local function DispatchExpansionEngineer(aiBrain, runtime, now, engineers, mainP
                         end
                         IssueBuildMobile({ eng }, target, bp, {})
                         local landReady = ((((runtime.ProductionDirector or {}).Current or {}).Factories or {}).Land or {}).Ready or 0
-                        if targetSupported or ((now < 300 or landReady <= 1) and Common.Distance2D(mainPos, target) <= 165) then
+                        if (not attritionGuard) and (targetSupported or ((now < 300 or landReady <= 1) and Common.Distance2D(mainPos, target) <= 165)) then
                             local followup = FindFollowupExpansionTarget(
                                 aiBrain,
                                 runtime,
@@ -652,7 +669,7 @@ local function DispatchExpansionEngineer(aiBrain, runtime, now, engineers, mainP
     runtime.LastExpansionBusySkipCount = skippedBusy
     runtime.LastExpansionNoTargetCount = noTarget
     runtime.LastExpansionEscortBlockedCount = escortBlocked
-    runtime.LastExpansionInternalGateReason = dispatched > 0 and 'issued' or 'scanned'
+    runtime.LastExpansionInternalGateReason = dispatched > 0 and 'issued' or (escortBlocked > 0 and 'escort_blocked' or 'scanned')
     return dispatched
 end
 

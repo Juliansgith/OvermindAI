@@ -12,6 +12,7 @@ local Tech2PowerCategory = categories.STRUCTURE * categories.ENERGYPRODUCTION * 
 local RadarCategory = categories.STRUCTURE * categories.RADAR
 local AADefenseCategory = categories.STRUCTURE * categories.DEFENSE * categories.ANTIAIR
 local DefenseCategory = categories.STRUCTURE * categories.DEFENSE
+local LandCombatCategory = categories.MOBILE * categories.LAND - categories.ENGINEER - categories.SCOUT - categories.COMMAND
 
 
 local M = {}
@@ -833,12 +834,28 @@ local function TryOpenSurplusExpansionBuild(aiBrain, runtime, eng, mainPos, enem
     local searchFallback = math.max(rebuildUrgent and 760 or 600, safeExpandDistance + ((macroPhase == 'starter_mex_claim' or rebuildUrgent) and 220 or 80))
     local threatPrimary = (macroPhase == 'starter_mex_claim') and 1.9 or (rebuildUrgent and 1.95 or 1.7)
     local threatFallback = threatPrimary + 0.25
+    local lossPressure = OvermindMemory.GetEngineerLossPressure(aiBrain)
+    local mapControl = (((runtime or {}).ZoneModel or {}).MapControl) or 0.5
 
     local target = Expansion.FindExpansionTarget(aiBrain, runtime, mainPos, enemyPos, searchPrimary, threatPrimary, now, sourcePos)
     if not target then
         target = Expansion.FindExpansionTarget(aiBrain, runtime, mainPos, enemyPos, searchFallback, threatFallback, now, sourcePos)
     end
     if not target then
+        return false
+    end
+
+    local targetDist = Common.Distance2D(mainPos, target)
+    local routeRisk = pos and OvermindMemory.GetRouteRisk(aiBrain, pos, target, 4, 48) or 999
+    local targetThreat = aiBrain:GetThreatAtPosition(target, 1, true, 'AntiSurface') or 0
+    local support = aiBrain:GetNumUnitsAroundPoint(LandCombatCategory, target, 54, 'Ally') or 0
+    local needsEscort = now >= 210
+        and targetDist > (lossPressure >= 0.65 and 115 or 165)
+        and (lossPressure >= 0.65 or mapControl < 0.42 or routeRisk > 1.35 or targetThreat > 0.22)
+    if needsEscort and support < (lossPressure >= 1.0 and 3 or 2) then
+        engState.ExpansionEscortNeeded = true
+        engState.ExpansionEscortNeededUntil = now + 36
+        engState.ExpansionEscortTargetPos = target
         return false
     end
 
@@ -851,6 +868,11 @@ local function TryOpenSurplusExpansionBuild(aiBrain, runtime, eng, mainPos, enem
     IssueBuildMobile({ eng }, target, bp, {})
 
     local followupBudget = (macroPhase == 'starter_mex_claim') and 3 or (((rebuildUrgent or mexExpansionUrgent) or mexReady <= 5) and 2 or 0)
+    if lossPressure >= 0.65 or mapControl < 0.42 then
+        followupBudget = 0
+    elseif lossPressure >= 0.35 then
+        followupBudget = math.min(followupBudget, 1)
+    end
     if followupBudget > 0 then
         local anchorPos = target
         local followupDistance = math.max(searchPrimary, safeExpandDistance + 140)

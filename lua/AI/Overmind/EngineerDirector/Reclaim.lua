@@ -220,6 +220,13 @@ local function TryReclaimFieldZone(aiBrain, runtime, eng, targetPos, now)
     local outerBacked = taskSupport > 0 or taskStrength >= 8 or planner.OuterRetentionActive == true
     local segment = GetReclaimSegment(runtime, targetPos, now)
     local engineerLossRisk = OvermindMemory.GetEngineerLossRisk(aiBrain, targetPos, 44)
+    local lossPressure = OvermindMemory.GetEngineerLossPressure(aiBrain)
+    if lossPressure >= 0.75 and supported < 2 then
+        return false
+    end
+    if lossPressure >= 1.1 and supported < 3 then
+        return false
+    end
     if segment then
         segment.LastMassEstimate = 0
         segment.LastSupport = supported
@@ -245,6 +252,9 @@ local function TryReclaimFieldZone(aiBrain, runtime, eng, targetPos, now)
     local threatCap = (planner.ReclaimFirst and (outerBacked and 2.75 or 2.35) or (outerBacked and 2.15 or 1.85)) + riskBias + (routeRiskBias * 0.2)
     local routeRiskCap = (planner.ReclaimFirst and (outerBacked and 5.2 or 4.5) or (outerBacked and 4.4 or 3.8)) + (riskBias * 1.4) + routeRiskBias
     local minSupport = math.max(0, (planner.ReclaimFirst and (outerBacked and 1 or 2) or (outerBacked and 2 or 3)) - math.floor(supportBias))
+    threatCap = threatCap - math.min(0.9, lossPressure * 0.35)
+    routeRiskCap = routeRiskCap - math.min(1.4, lossPressure * 0.7)
+    minSupport = minSupport + math.floor(math.min(2, lossPressure + 0.25))
     if quotaForced then
         threatCap = threatCap + 0.35
         routeRiskCap = routeRiskCap + 0.55
@@ -339,7 +349,11 @@ local function TryReclaimNearby(aiBrain, runtime, eng, now, radius, minMass, opt
     local routeRiskBias = policy.ReclaimRouteRiskBias or 0
     local escort = aiBrain:GetNumUnitsAroundPoint(LandCombatCategory, pos, 28, 'Ally') or 0
     local localThreat = aiBrain:GetThreatAtPosition(pos, 1, true, 'AntiSurface') or 0
-    local maxThreat = (options.MaxThreat or (escort >= 2 and 2.4 or 1.4)) + riskBias + (routeRiskBias * 0.15)
+    local lossPressure = OvermindMemory.GetEngineerLossPressure(aiBrain)
+    if lossPressure >= 0.9 and escort < 2 then
+        return false
+    end
+    local maxThreat = (options.MaxThreat or (escort >= 2 and 2.4 or 1.4)) + riskBias + (routeRiskBias * 0.15) - math.min(0.8, lossPressure * 0.35)
     if localThreat > maxThreat then
         return false
     end
