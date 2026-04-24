@@ -522,6 +522,27 @@ function Update(aiBrain, now)
     local bomberPanic = ((raid.BomberPanicUntil or -999) > now) or ((raid.LastBomberEnemyCount or 0) >= 1 and raid.UnderAirHarass)
     local radarReservedBuilderIds = GetRadarReservedBuilderIds(runtime, now)
     local hqPowerRecoveryWanted = ((((runtime.UpgradeDirector or {}).Factory) or {}).PowerRecoveryWanted) == true
+    local preclaimedExpand = 0
+    local earlyExpansionSlice = now >= 60
+        and mexExpansionUrgent
+        and baseEngineers >= math.max(2, baseFloor - 1)
+        and table.getn(engineers or {}) >= math.max(4, baseFloor)
+        and not severeFactoryStarve
+        and not ecoCrash
+        and not radarCritical
+        and not raid.ExposedMexUnderAirRaid
+        and (eco.MassTrend or 0) > -0.7
+        and (eco.EnergyTrend or 0) > -35
+    if earlyExpansionSlice then
+        local earlyThreatCap = 1.65
+        if policy.ForwardContestBias == true or policy.ContestMapMode == true then
+            earlyThreatCap = 1.95
+        end
+        if planner.OuterRetentionActive == true or reclaimSignalMode then
+            earlyThreatCap = earlyThreatCap + 0.2
+        end
+        preclaimedExpand = DispatchExpansionEngineer(aiBrain, runtime, now, engineers, mainPos, enemyPos, math.max(520, safeExpandDistance), earlyThreatCap)
+    end
 
     local target, targetPos, fraction, domain, readyFactories = FindBestUnfinishedFactory(aiBrain, runtime, mainPos)
     local factoryTargetObject = target
@@ -923,7 +944,7 @@ function Update(aiBrain, now)
         constraints = constraints,
         contestFieldMode = (contestFieldMode or reclaimSignalMode or desiredReclaimQuota > 0) and true or false,
         coreEcoCritical = coreEcoCritical,
-        dispatchedExpand = 0,
+        dispatchedExpand = preclaimedExpand,
         ecoStructureTargetObject = ecoStructureTargetObject,
         ecoStructureTask = ecoStructureTask,
         enemyPos = enemyPos,
@@ -1025,7 +1046,8 @@ function Update(aiBrain, now)
         if expansionOverride then
             threatCap = threatCap + 0.25
         end
-        ctx.dispatchedExpand = DispatchExpansionEngineer(aiBrain, runtime, now, engineers, mainPos, enemyPos, math.max(420, safeExpandDistance), threatCap)
+        ctx.dispatchedExpand = (ctx.dispatchedExpand or 0)
+            + DispatchExpansionEngineer(aiBrain, runtime, now, engineers, mainPos, enemyPos, math.max(420, safeExpandDistance), threatCap)
     end
 
     local factoryCounts = current.Factories or {}

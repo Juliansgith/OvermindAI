@@ -1287,6 +1287,7 @@ BuilderGroup {
         InstanceCount = 1,
         BuilderConditions = {
             { OMBC, 'IsOvermindBrain', {} },
+            { OMBC, 'ShouldUseLegacyEngineerExpansion', {} },
             { OMBC, 'HasSafeEnergy', { 0.05, -8 } },
             { OMBC, 'HasEngineerReserve', { 'LocationType', 4 } },
             { OMBC, 'HasBaseEngineerCoverage', { 'LocationType', 3, 85 } },
@@ -1310,6 +1311,7 @@ BuilderGroup {
         InstanceCount = 1,
         BuilderConditions = {
             { OMBC, 'IsOvermindBrain', {} },
+            { OMBC, 'ShouldUseLegacyEngineerExpansion', {} },
             { OMBC, 'HasSafeEnergy', { 0.05, -8 } },
             { OMBC, 'HasEngineerReserve', { 'LocationType', 5 } },
             { OMBC, 'HasBaseEngineerCoverage', { 'LocationType', 4, 90 } },
@@ -1333,6 +1335,7 @@ BuilderGroup {
         InstanceCount = 2,
         BuilderConditions = {
             { OMBC, 'IsOvermindBrain', {} },
+            { OMBC, 'ShouldUseLegacyEngineerExpansion', {} },
             { OMBC, 'HasSafeEnergy', { 0.1, -4 } },
             { OMBC, 'HasBaseEngineerCoverage', { 'LocationType', 2, 80 } },
             { OMBC, 'CanSafelyExpand', { 'LocationType', 850, 1.1, 85, 8 } },
@@ -1352,6 +1355,7 @@ BuilderGroup {
         Priority = 1010,
         BuilderConditions = {
             { OMBC, 'IsOvermindBrain', {} },
+            { OMBC, 'ShouldUseLegacyEngineerExpansion', {} },
             { OMBC, 'HasSafeEnergy', { 0.25, 5 } },
             { OMBC, 'CanSafelyExpand', { 'LocationType', 920, 1.25, 85, 9 } },
             { MABC, 'CanBuildOnMassLessThanDistance', { 'LocationType', 950, -500, 1.4, 0, 'AntiSurface', 1 } },
@@ -1399,6 +1403,7 @@ BuilderGroup {
         InstanceCount = 1,
         BuilderConditions = {
             { OMBC, 'IsOvermindBrain', {} },
+            { OMBC, 'ShouldUseLegacyEngineerExpansion', {} },
             { OMBC, 'HasSafeEnergy', { 0.12, -2 } },
             { OMBC, 'ShouldDoFarExpansion', { 'LocationType', 330, 0.24, 0.95, 20, 3 } },
             { OMBC, 'CanSafelyExpand', { 'LocationType', 760, 0.95, 95, 8 } },
@@ -1420,6 +1425,7 @@ BuilderGroup {
         InstanceCount = 1,
         BuilderConditions = {
             { OMBC, 'IsOvermindBrain', {} },
+            { OMBC, 'ShouldUseLegacyEngineerExpansion', {} },
             { OMBC, 'HasSafeEnergy', { 0.25, 0 } },
             { OMBC, 'ShouldDoFarExpansion', { 'LocationType', 420, 0.3, 0.98, 24, 3 } },
             { OMBC, 'CanSafelyExpand', { 'LocationType', 920, 1.15, 95, 9 } },

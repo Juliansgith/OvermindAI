@@ -1204,6 +1204,14 @@ function ShouldUseLegacyPowerProduction(aiBrain)
     return not IsEngineerDirectorHealthy(aiBrain)
 end
 
+function ShouldUseLegacyEngineerExpansion(aiBrain)
+    if not IsOvermindBrain(aiBrain) then
+        return false
+    end
+
+    return not IsEngineerDirectorHealthy(aiBrain)
+end
+
 local function IsFactoryExpansionEcoBlocked(aiBrain, landFactories, airFactories, seaFactories)
     local econ = GetEcon(aiBrain)
     local recovery = GetRecovery(aiBrain) or {}
