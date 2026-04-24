@@ -437,7 +437,15 @@ function Update(aiBrain, now)
     local AssignBuildersToUnfinishedStructure = OptionalMethod(Assignments, 'AssignBuildersToUnfinishedStructure', function() return 0, {}, false, { Total = 0, Safe = 0, Reachable = 0, Interruptible = 0 } end)
     local ProcessEngineer = OptionalMethod(Assignments, 'ProcessEngineer', function() end)
     local DescribeStructureTaskTarget = OptionalMethod(Assignments, 'DescribeStructureTaskTarget', function() return 'none' end)
-    local DispatchExpansionEngineer = OptionalMethod(Expansion, 'DispatchExpansionEngineer', function() return 0 end)
+    local DispatchExpansionEngineer = ResolveMethod(Expansion, 'DispatchExpansionEngineer', 'Expansion')
+    local function CallDispatchExpansionEngineer(...)
+        runtime.LastExpansionInternalGateReason = 'precall'
+        local issued = DispatchExpansionEngineer(...)
+        if runtime.LastExpansionInternalGateReason == 'precall' then
+            runtime.LastExpansionInternalGateReason = 'impl_no_state'
+        end
+        return issued or 0
+    end
 
     if now - (runtime.LastEngineerDirectorTime or -999) < 3 then
         return
@@ -561,7 +569,7 @@ function Update(aiBrain, now)
             earlyThreatCap = earlyThreatCap + 0.2
         end
         expansionGateReason = 'early_called'
-        preclaimedExpand = DispatchExpansionEngineer(aiBrain, runtime, now, engineers, mainPos, enemyPos, math.max(520, safeExpandDistance), earlyThreatCap)
+        preclaimedExpand = CallDispatchExpansionEngineer(aiBrain, runtime, now, engineers, mainPos, enemyPos, math.max(520, safeExpandDistance), earlyThreatCap)
     end
 
     local target, targetPos, fraction, domain, readyFactories = FindBestUnfinishedFactory(aiBrain, runtime, mainPos)
@@ -1071,7 +1079,7 @@ function Update(aiBrain, now)
         end
         expansionGateReason = 'called'
         ctx.dispatchedExpand = (ctx.dispatchedExpand or 0)
-            + DispatchExpansionEngineer(aiBrain, runtime, now, engineers, mainPos, enemyPos, math.max(420, safeExpandDistance), threatCap)
+            + CallDispatchExpansionEngineer(aiBrain, runtime, now, engineers, mainPos, enemyPos, math.max(420, safeExpandDistance), threatCap)
     elseif expansionOverride and expansionGateReason == 'none' then
         expansionGateReason = now < 60 and 'time'
             or severeFactoryStarve and 'factory_starve'
