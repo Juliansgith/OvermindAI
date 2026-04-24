@@ -303,9 +303,24 @@ local function SelectEarlyLandScreenRole(kind, plan, rolePlan)
     local engineerFloor = math.max(6, math.min(18, desiredEngineers))
     local landScreenUnits = CountLandScreenUnits(rolePlan)
     local scoutUnits = ((rolePlan.LandScout or {}).CurrentUnits) or 0
+    local landAA = rolePlan.LandAA or {}
     local severeLandCrisis = emerg.LandPanic
         or emerg.FrontCollapse
         or ((constraints.BasePressure or 0) >= 0.35)
+    local bomberDefenseFloor = 0
+    if emerg.BomberPanic or emerg.ExposedMexAirRaid or emerg.AirPanic then
+        bomberDefenseFloor = 4
+    elseif emerg.BomberWatch or (constraints.AirThreatZones or 0) > 0 then
+        bomberDefenseFloor = 2
+    elseif now >= 390 and landScreenUnits >= 8 then
+        bomberDefenseFloor = 2
+    end
+    if bomberDefenseFloor > 0
+        and engineerUnits >= 4
+        and (landAA.CurrentUnits or 0) < bomberDefenseFloor
+        and (landAA.UnitGap or 0) >= 0 then
+        return 'LandAA', (bomberDefenseFloor >= 4) and 1230 or 1015
+    end
     if now < 720
         and not severeLandCrisis
         and engineerUnits < engineerFloor
@@ -339,6 +354,49 @@ local function SelectEarlyLandScreenRole(kind, plan, rolePlan)
         and engineerUnits >= 2
         and landScreenUnits < 14 then
         return 'LandDirect', 975
+    end
+
+    return false, 0
+end
+
+local function SelectLiveAirDefenseRole(kind, runtime, rolePlan)
+    local now = GetGameTimeSeconds()
+    local raid = runtime.RaidDefense or {}
+    local activeAirRaid = raid.UnderAirHarass == true
+        or now < (raid.AirHarassUntil or -999)
+        or now < (raid.BomberPanicUntil or -999)
+        or ((raid.LastConfirmedBomberRaidTime or -999) >= (now - 45))
+    if not activeAirRaid then
+        return false, 0
+    end
+
+    local airThreat = math.max(raid.LastAirEnemyCount or 0, 0)
+    local bombers = math.max(raid.LastBomberEnemyCount or 0, 0)
+    local label = raid.LastThreatLabel or raid.LastAirHarassTargetLabel or 'none'
+    local baseOrAcuThreat = label == 'acu' or label == 'main' or label == 'asset'
+
+    if kind == 'land' and rolePlan.LandAA then
+        local entry = rolePlan.LandAA
+        local floor = 2
+        if baseOrAcuThreat then
+            floor = floor + 1
+        end
+        if bombers >= 1 then
+            floor = floor + 2
+        end
+        if airThreat >= 6 then
+            floor = floor + 1
+        end
+        floor = Clamp(floor, 2, 8)
+        if (entry.CurrentUnits or 0) < floor then
+            return 'LandAA', 1320 + (floor * 16), entry
+        end
+    elseif kind == 'air' and rolePlan.AirFighter then
+        local entry = rolePlan.AirFighter
+        local floor = Clamp(2 + math.floor(airThreat / 3) + math.min(2, bombers), 2, 10)
+        if (entry.CurrentUnits or 0) < floor then
+            return 'AirFighter', 1300 + (floor * 14), entry
+        end
     end
 
     return false, 0
@@ -435,6 +493,11 @@ local function PickPlannedRole(factory, runtime, eco)
     local roleNames = GetFactoryRoleNames(kind)
     local bestRole = false
     local bestUtility = -999999
+
+    local liveRole, liveUtility, liveEntry = SelectLiveAirDefenseRole(kind, runtime, rolePlan)
+    if liveRole and liveEntry then
+        return liveRole, liveUtility, liveEntry
+    end
 
     local forcedRole, forcedUtility = SelectEarlyLandScreenRole(kind, plan, rolePlan)
     if forcedRole and rolePlan[forcedRole] then

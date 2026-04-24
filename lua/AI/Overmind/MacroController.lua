@@ -221,6 +221,8 @@ local function DetermineDesiredPhase(aiBrain, runtime, now)
         HQPressureEscape = hqPressureEscape and true or false,
         FocusOnT1Spam = focusOnT1Spam and true or false,
         ACUCrisisActive = acuCrisisActive and true or false,
+        AirHarass = raid.UnderAirHarass == true,
+        BomberPanic = now < (raid.BomberPanicUntil or -999),
     }
 
     if readyLand <= 0 and totalLand <= 0 then
@@ -283,8 +285,16 @@ local function DetermineDesiredPhase(aiBrain, runtime, now)
         return 'first_t2_engineer', 'missing_t2_engineer', facts
     end
 
-    if techPower <= 0 and (readyPower < 5 or (eco.EnergyIncome or 0) < 90 or (eco.EnergyTrend or 0) < 4) then
+    local combatPowerDeferral = (underHarass or acuCrisisActive or basePressure >= 0.18 or frontPressure >= 0.26)
+        and readyPower >= 4
+        and readyLand >= 3
+        and readyMex <= 7
+    if techPower <= 0 and (readyPower < 5 or (eco.EnergyIncome or 0) < 90 or (eco.EnergyTrend or 0) < 4) and not combatPowerDeferral then
         return 'first_t2_power', 'missing_t2_power', facts
+    end
+
+    if combatPowerDeferral and techPower <= 0 then
+        return 'mass_consolidation', 'defer_t2_power_under_pressure', facts
     end
 
     return 'surplus_scale', 'post_t2_scale', facts
@@ -333,6 +343,14 @@ local function ApplyLatch(state, desiredPhase, desiredReason, facts, now)
     end
 
     if current == 'first_t2_power' and facts.TechPower <= 0 then
+        local pressureEscape = facts.ACUCrisisActive
+            or facts.AirHarass
+            or facts.BomberPanic
+            or (facts.BasePressure or 0) >= 0.18
+            or ((facts.FrontPressure or 0) >= 0.26 and (facts.ReadyMexes or 0) <= 7)
+        if pressureEscape and (now - (state.PhaseStartedAt or now)) >= 20 then
+            return 'mass_consolidation', 'escape_t2_power_pressure'
+        end
         return current, 'latched_first_t2_power'
     end
 

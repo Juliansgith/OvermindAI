@@ -1140,7 +1140,7 @@ local function DecideRolePlan(runtime, current, constraints, demand, budget, con
     local landAAShare = 0.14 + math.min(0.16, (demand.AirRisk / 100)) + (constraints.AirPanic and 0.08 or 0)
         + ((constraints.BomberWatch or constraints.BomberPanic or constraints.ExposedMexAirRaid) and 0.08 or 0)
     if constraints.SevereBomberRaid then
-        landAAShare = landAAShare + 0.05
+        landAAShare = landAAShare + 0.1
     end
     local landIndirectShare = 0.08 + ((mode == 'pressure') and 0.06 or 0) + math.min(0.08, constraints.ContestedZones * 0.02)
     if indirectCounterWindow then
@@ -1149,7 +1149,7 @@ local function DecideRolePlan(runtime, current, constraints, demand, budget, con
     if constraints.LandPanic then
         landIndirectShare = landIndirectShare - 0.03
     end
-    landAAShare = Clamp(landAAShare, 0.12, 0.34)
+    landAAShare = Clamp(landAAShare, 0.12, 0.42)
     landIndirectShare = Clamp(landIndirectShare, 0.05, 0.22)
 
     local landAADesired = Clamp(math.floor(landTotal * landAAShare), (constraints.AirPanic and 2 or 1), 22)
@@ -1164,11 +1164,14 @@ local function DecideRolePlan(runtime, current, constraints, demand, budget, con
     if constraints.BomberWatch then
         landAADesired = math.max(landAADesired, constraints.StarterPhase and 1 or 2)
     end
+    if now >= 420 and current.Factories.Land.Ready >= 2 and not constraints.EconBootstrap and not constraints.EcoCrash then
+        landAADesired = math.max(landAADesired, 2)
+    end
     if constraints.BomberPanic or constraints.ExposedMexAirRaid then
-        landAADesired = math.max(landAADesired, constraints.StarterPhase and 2 or 4)
+        landAADesired = math.max(landAADesired, constraints.StarterPhase and 3 or 5)
     end
     if constraints.SevereBomberRaid then
-        local severeAAFloor = (constraints.StarterPhase and 3 or 5) + math.min(1, math.floor((constraints.BomberRaidSeverity or 0) / 4))
+        local severeAAFloor = (constraints.StarterPhase and 4 or 7) + math.min(2, math.floor((constraints.BomberRaidSeverity or 0) / 3))
         landAADesired = math.max(landAADesired, severeAAFloor)
     end
     if indirectCounterWindow then
