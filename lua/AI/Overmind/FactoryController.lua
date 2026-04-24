@@ -306,6 +306,56 @@ local function GetOutstandingEngineerDemand(runtime, now)
     return math.max(0, (demand.TotalWanted or 0) - (demand.PendingFactoryOrders or 0)), demand
 end
 
+local function GetEngineerLifeline(kind, runtime, rolePlan, now)
+    if kind ~= 'land' or not rolePlan or not rolePlan.Engineer then
+        return false, 0, false
+    end
+
+    local plan = (runtime and runtime.ProductionDirector) or {}
+    local current = plan.Current or {}
+    local factories = current.Factories or {}
+    local landFactories = factories.Land or {}
+    if (landFactories.Ready or 0) <= 0 then
+        return false, 0, false
+    end
+
+    local engineer = rolePlan.Engineer or {}
+    local engineerUnits = engineer.CurrentUnits or 0
+    local desiredEngineers = engineer.DesiredUnits or 0
+    local engineerGap = engineer.UnitGap or 0
+    local outstandingDemand, demand = GetOutstandingEngineerDemand(runtime, now)
+    local pendingOrders = demand.PendingFactoryOrders or 0
+    local effectiveEngineers = engineerUnits + pendingOrders
+    local urgentDemand = (demand.InitialMexBuildersWanted or 0)
+        + (demand.BaseWanted or 0)
+        + (demand.FactoryFinishWanted or 0)
+        + (demand.StructureFinishWanted or 0)
+        + (demand.PowerWanted or 0)
+
+    local earlyFloor = now < 420 and 5 or now < 900 and 8 or 10
+    local collapseFloor = now < 420 and 3 or now < 900 and 4 or 5
+    local restoreFloor = math.max(collapseFloor, math.min(earlyFloor, desiredEngineers))
+    local mustReplenish = effectiveEngineers < collapseFloor
+        or (urgentDemand >= 2 and effectiveEngineers < restoreFloor)
+        or (outstandingDemand >= 5 and effectiveEngineers < restoreFloor)
+        or (engineerGap >= 6 and effectiveEngineers < restoreFloor)
+
+    if not mustReplenish then
+        return false, 0, false
+    end
+
+    local deficit = math.max(0, restoreFloor - effectiveEngineers)
+    local utility = 1360
+        + (deficit * 42)
+        + (outstandingDemand * 20)
+        + (urgentDemand * 18)
+    local shouldClearQueue = engineerUnits <= 2
+        and pendingOrders <= 0
+        and urgentDemand > 0
+        and now < 720
+    return true, utility, shouldClearQueue
+end
+
 local function SelectEarlyLandScreenRole(kind, plan, rolePlan)
     if kind ~= 'land' then
         return false, 0
@@ -543,6 +593,12 @@ local function PickPlannedRole(factory, runtime, eco)
     local roleNames = GetFactoryRoleNames(kind)
     local bestRole = false
     local bestUtility = -999999
+    local now = plan.Time or GetGameTimeSeconds()
+
+    local lifelineRole, lifelineUtility = GetEngineerLifeline(kind, runtime, rolePlan, now)
+    if lifelineRole then
+        return 'Engineer', lifelineUtility, rolePlan.Engineer
+    end
 
     local liveRole, liveUtility, liveEntry = SelectLiveAirDefenseRole(kind, runtime, rolePlan)
     if liveRole and liveEntry then
@@ -554,7 +610,6 @@ local function PickPlannedRole(factory, runtime, eco)
         return forcedRole, forcedUtility, rolePlan[forcedRole]
     end
 
-    local now = plan.Time or GetGameTimeSeconds()
     local engineerDemand, demand = GetOutstandingEngineerDemand(runtime, now)
     if kind == 'land' and engineerDemand > 0 and rolePlan.Engineer then
         local emerg = plan.EmergencyOverrides or {}
@@ -812,7 +867,7 @@ local function ShouldUpgradeFactory(aiBrain, factory, runtime, eco, qLen)
     return true, upgradeBp
 end
 
-local function TryIssuePlannedBuild(aiBrain, factory, runtime, now, state, queueLen, forceTopoff, forceFirstTechEngineer)
+local function TryIssuePlannedBuild(aiBrain, factory, runtime, now, state, queueLen, forceTopoff, forceFirstTechEngineer, forceEngineerLifeline)
     if not IsFactoryReady(factory) then
         return false, 'not-ready'
     end
@@ -822,10 +877,10 @@ local function TryIssuePlannedBuild(aiBrain, factory, runtime, now, state, queue
         local q = factory.GetCommandQueue and factory:GetCommandQueue() or false
         qLen = q and table.getn(q) or 0
     end
-    if qLen > 0 and not forceTopoff then
+    if qLen > 0 and not forceTopoff and not forceEngineerLifeline then
         return false, 'has-queue'
     end
-    if factory:IsUnitState('Building') and not forceTopoff then
+    if factory:IsUnitState('Building') and not forceTopoff and not forceEngineerLifeline then
         return false, 'building'
     end
     if IsNearUnitCap(aiBrain) then
@@ -848,6 +903,34 @@ local function TryIssuePlannedBuild(aiBrain, factory, runtime, now, state, queue
             state.LastBlueprint = bp
             state.NextIssueTime = now + 0.6
             return true, 'FirstTechEngineer'
+        end
+    end
+
+    if forceEngineerLifeline and ClassifyFactory(factory) == 'land' then
+        local plan = runtime.ProductionDirector or {}
+        local rolePlan = plan.RolePlan or {}
+        local shouldForce, utility, shouldClearQueue = GetEngineerLifeline('land', runtime, rolePlan, now)
+        if shouldForce then
+            if state.LastRole == 'EngineerLifeline' and now - (state.LastIssuedTime or -999) < 18 then
+                return false, 'engineer-lifeline-pending'
+            end
+            if shouldClearQueue and state.LastRole ~= 'EngineerLifeline' and (qLen > 0 or factory:IsUnitState('Building')) and IssueClearCommands then
+                IssueClearCommands({ factory })
+                qLen = 0
+            end
+            local bp = PickBlueprintForRole(factory, 'Engineer', rolePlan.Engineer or {}, runtime, eco)
+            if bp and IssueBuildFactory then
+                IssueBuildFactory({ factory }, bp, 1)
+                if runtime.EngineerDemand then
+                    runtime.EngineerDemand.PendingFactoryOrders = (runtime.EngineerDemand.PendingFactoryOrders or 0) + 1
+                end
+                state.LastIssuedTime = now
+                state.LastRole = 'EngineerLifeline'
+                state.LastUtility = utility
+                state.LastBlueprint = bp
+                state.NextIssueTime = now + (qLen > 0 and 0.15 or 0.45)
+                return true, 'EngineerLifeline'
+            end
         end
     end
 
@@ -953,11 +1036,12 @@ function Module.Update(aiBrain, now)
                     domainIdle[domain] = (domainIdle[domain] or 0) + 1
                 end
                 local forceFirstTechEngineer = ShouldForceFirstTechEngineer(aiBrain, factory, runtime, eco, now)
-                if forceFirstTechEngineer or qLen < queueDepthTarget or (firstHQReserve and kind == 'land' and qLen <= 0) then
+                local forceEngineerLifeline = GetEngineerLifeline(kind, runtime, (runtime.ProductionDirector or {}).RolePlan or {}, now)
+                if forceFirstTechEngineer or forceEngineerLifeline or qLen < queueDepthTarget or (firstHQReserve and kind == 'land' and qLen <= 0) then
                     if qLen <= 0 and not factory:IsUnitState('Building') then
                         idleFactories = idleFactories + 1
                     end
-                    local ok = TryIssuePlannedBuild(aiBrain, factory, runtime, now, state, qLen, qLen > 0, forceFirstTechEngineer)
+                    local ok = TryIssuePlannedBuild(aiBrain, factory, runtime, now, state, qLen, qLen > 0 or forceEngineerLifeline, forceFirstTechEngineer, forceEngineerLifeline)
                     if ok then
                         issued = issued + 1
                         if qLen > 0 then
