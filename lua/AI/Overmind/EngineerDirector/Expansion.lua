@@ -539,19 +539,30 @@ local function DispatchExpansionEngineer(aiBrain, runtime, now, engineers, mainP
     local contestDispatch = policy.ForwardContestBias == true
         or policy.ReclaimPressureMode == true
         or macro.HQPressureEscape == true
-    if (bootstrap or starterPhase) and NeedsBootstrapPower(aiBrain, runtime) then
+    runtime.LastExpansionCandidateCount = 0
+    runtime.LastExpansionBusySkipCount = 0
+    runtime.LastExpansionNoTargetCount = 0
+    runtime.LastExpansionEscortBlockedCount = 0
+    runtime.LastExpansionInternalGateReason = 'scan'
+
+    if (bootstrap or starterPhase) and NeedsBootstrapPower(aiBrain, runtime) and not mexEmergency then
+        runtime.LastExpansionInternalGateReason = 'bootstrap_power'
         return 0
     end
-    if starterPhase and NeedsCriticalRadar(runtime) then
+    if starterPhase and NeedsCriticalRadar(runtime) and not mexEmergency then
+        runtime.LastExpansionInternalGateReason = 'critical_radar'
         return 0
     end
     if raid.ExposedMexUnderAirRaid == true then
+        runtime.LastExpansionInternalGateReason = 'air_raid'
         return 0
     end
     if ((raid.BomberPanicUntil or -999) > now) and table.getn(engineers or {}) <= math.max(4, ((constraints and constraints.StarterEngineerFloor) or 6) - 1) then
+        runtime.LastExpansionInternalGateReason = 'bomber_panic'
         return 0
     end
     if now < (runtime.LastExpansionDispatchTime or -999) + (bootstrap and 1.2 or (mexEmergency and 1.4 or 2.2)) then
+        runtime.LastExpansionInternalGateReason = 'cooldown'
         return 0
     end
 
@@ -641,6 +652,7 @@ local function DispatchExpansionEngineer(aiBrain, runtime, now, engineers, mainP
     runtime.LastExpansionBusySkipCount = skippedBusy
     runtime.LastExpansionNoTargetCount = noTarget
     runtime.LastExpansionEscortBlockedCount = escortBlocked
+    runtime.LastExpansionInternalGateReason = dispatched > 0 and 'issued' or 'scanned'
     return dispatched
 end
 
