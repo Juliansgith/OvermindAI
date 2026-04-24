@@ -807,14 +807,18 @@ local function ProcessEngineer(aiBrain, runtime, eng, now, ctx)
         acuRepairHealthRatio = math.max(0, math.min(1, (acuRepairTarget:GetHealth() or maxHealth) / maxHealth))
     end
     local acuRepairHard = acuRepairTarget and (acuRepairUrgent or acuRepairHealthRatio < 0.84)
+    local acuRepairEmergency = acuRepairTarget and (acuRepairUrgent or acuRepairHealthRatio < 0.78)
     local acuRepairSlotsOpen = (ctx.acuRepairWanted or 0) > (ctx.acuRepairCount or 0)
+    local acuRepairQueueCap = (acuRepairHealthRatio < 0.72) and 12 or (acuRepairEmergency and 7 or 3)
+    local acuRepairThreatCap = (acuRepairHealthRatio < 0.72) and 12 or (acuRepairEmergency and 6.5 or 3.2)
+    local acuRepairDistanceCap = (acuRepairHealthRatio < 0.72) and 640 or (acuRepairEmergency and 580 or 460)
 
     if acuRepairHard
         and acuRepairSlotsOpen
-        and not constructing
-        and (isIdle or Common.GetCommandQueueLength(eng) <= (acuRepairHealthRatio < 0.72 and 5 or 3))
-        and localThreat < ((acuRepairHealthRatio < 0.72 or acuRepairUrgent) and 4.2 or 3.2)
-        and dist <= ((acuRepairHealthRatio < 0.72 or acuRepairUrgent) and 560 or 460)
+        and (not constructing or acuRepairEmergency)
+        and (isIdle or acuRepairEmergency or Common.GetCommandQueueLength(eng) <= acuRepairQueueCap)
+        and localThreat < acuRepairThreatCap
+        and dist <= acuRepairDistanceCap
         and TryAssignAssistOrRepair(aiBrain, runtime, eng, acuRepairTarget, false, now) then
         if claimedByFactoryTask and ctx.factoryTask.BuilderIds and entityId then
             ctx.factoryTask.BuilderIds[entityId] = nil
