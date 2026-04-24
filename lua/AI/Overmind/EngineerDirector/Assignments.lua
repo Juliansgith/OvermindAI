@@ -632,6 +632,11 @@ local function TryAssignAssistOrRepair(aiBrain, runtime, eng, target, isUpgrade,
         local localThreatCap = 2.2 + (mechanic.EngineerRepairThreatBias or 0)
         local routeRiskCap = (nearMain and 3.0 or 1.9) + (mechanic.EngineerRepairRouteRiskBias or 0)
         if isACUTarget then
+            local acuHealthRatio = 1
+            if target.GetHealth and target.GetMaxHealth then
+                local maxHealth = math.max(1, target:GetMaxHealth() or 1)
+                acuHealthRatio = math.max(0, math.min(1, (target:GetHealth() or maxHealth) / maxHealth))
+            end
             targetThreatCap = targetThreatCap + 0.7 + (mechanic.EngineerACURepairThreatBias or 0)
             localThreatCap = localThreatCap + 0.55 + (mechanic.EngineerACURepairThreatBias or 0)
             routeRiskCap = routeRiskCap + 0.7 + (mechanic.EngineerRepairRouteRiskBias or 0)
@@ -643,9 +648,19 @@ local function TryAssignAssistOrRepair(aiBrain, runtime, eng, target, isUpgrade,
                     or (runtime.LastAcuDamageTime or -999) >= (now - 28)
                 )
             if acuCrisisRepair then
-                targetThreatCap = targetThreatCap + 1.4
-                localThreatCap = localThreatCap + 1.0
-                routeRiskCap = routeRiskCap + 1.8
+                if acuHealthRatio < 0.72 then
+                    targetThreatCap = math.max(targetThreatCap, 120)
+                    localThreatCap = math.max(localThreatCap, 12)
+                    routeRiskCap = math.max(routeRiskCap, 9)
+                elseif acuHealthRatio < 0.84 then
+                    targetThreatCap = math.max(targetThreatCap, 28)
+                    localThreatCap = math.max(localThreatCap, 6)
+                    routeRiskCap = math.max(routeRiskCap, 5.5)
+                else
+                    targetThreatCap = targetThreatCap + 1.4
+                    localThreatCap = localThreatCap + 1.0
+                    routeRiskCap = routeRiskCap + 1.8
+                end
             end
         end
         if (targetEnemyCombat and not nearMain and not isACUTarget)
@@ -792,8 +807,10 @@ local function ProcessEngineer(aiBrain, runtime, eng, now, ctx)
         acuRepairHealthRatio = math.max(0, math.min(1, (acuRepairTarget:GetHealth() or maxHealth) / maxHealth))
     end
     local acuRepairHard = acuRepairTarget and (acuRepairUrgent or acuRepairHealthRatio < 0.84)
+    local acuRepairSlotsOpen = (ctx.acuRepairWanted or 0) > (ctx.acuRepairCount or 0)
 
     if acuRepairHard
+        and acuRepairSlotsOpen
         and not constructing
         and (isIdle or Common.GetCommandQueueLength(eng) <= (acuRepairHealthRatio < 0.72 and 5 or 3))
         and localThreat < ((acuRepairHealthRatio < 0.72 or acuRepairUrgent) and 4.2 or 3.2)
@@ -1194,7 +1211,11 @@ local function ProcessEngineer(aiBrain, runtime, eng, now, ctx)
     end
 
     if (not acted) and isIdle and not constructing then
-        if acuRepairTarget and localThreat < 3.3 and dist <= 500 and TryAssignAssistOrRepair(aiBrain, runtime, eng, acuRepairTarget, false, now) then
+        if acuRepairTarget
+            and (ctx.acuRepairWanted or 0) > (ctx.acuRepairCount or 0)
+            and localThreat < 3.3
+            and dist <= 500
+            and TryAssignAssistOrRepair(aiBrain, runtime, eng, acuRepairTarget, false, now) then
             runtime.LastEngineerACURepairTime = now
             ctx.acuRepairCount = (ctx.acuRepairCount or 0) + 1
             acted = true

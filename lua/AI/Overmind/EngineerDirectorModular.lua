@@ -993,6 +993,7 @@ function Update(aiBrain, now)
         and (planner.ReclaimFirst == true or planner.OuterRetentionActive == true)
 
     local containmentCrisis = policy.ContainmentCrisis == true
+    local acuRepairWanted = GetACURepairNeed(aiBrain, runtime, mainPos, now)
     local ctx = {
         bomberPanic = bomberPanic,
         constraints = constraints,
@@ -1025,6 +1026,7 @@ function Update(aiBrain, now)
         needBase = needBase,
         powerRecoveryCount = 0,
         acuRepairCount = 0,
+        acuRepairWanted = acuRepairWanted,
         radarReservedBuilderIds = radarReservedBuilderIds,
         radarCritical = radarCritical,
         raid = raid,
@@ -1160,7 +1162,6 @@ function Update(aiBrain, now)
 
     local demand = runtime.EngineerDemand or {}
     runtime.EngineerDemand = demand
-    local acuRepairWanted = GetACURepairNeed(aiBrain, runtime, mainPos, now)
     demand.LastUpdate = now
     demand.PendingFactoryOrders = 0
     demand.InitialMexBuildersWanted = (now < 420 and mexReady < math.max(4, constraints.StarterMexFloor or 4))
