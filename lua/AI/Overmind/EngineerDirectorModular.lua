@@ -58,11 +58,13 @@ local function GetACURepairNeed(aiBrain, runtime, mainPos, now)
     local ratio = health / maxHealth
     local crisisActive = now < (runtime.ACUCrisisUntil or -999)
         or now < (runtime.ACUCrisisEscalatedUntil or -999)
-    local recentDamage = (runtime.LastAcuDamageTime or -999) >= (now - 18)
+        or now < (runtime.ACUProtectUntil or -999)
+    local recentDamage = (runtime.LastAcuDamageTime or -999) >= (now - 28)
     if not crisisActive and not recentDamage and ratio >= 0.92 then
         return 0
     end
-    if SafeDistance2D(acuPos, mainPos) > 240 then
+    local distanceCap = (crisisActive or recentDamage or ratio < 0.82) and 380 or 260
+    if SafeDistance2D(acuPos, mainPos) > distanceCap then
         return 0
     end
 

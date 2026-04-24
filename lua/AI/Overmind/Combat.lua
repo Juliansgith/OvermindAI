@@ -411,6 +411,16 @@ function EnforceCommanderSafety(aiBrain, now)
     local hardOverextendDistance = distance > catastrophicDistance
         or (distance > 16 and now < 1200 and escortCount <= 3 and enemyRaiders > 0)
         or unescortedThreatenedForward
+    local safeOpeningExtension = now < 420
+        and not confirmedLocalContact
+        and not raidRecall
+        and not enemyContactUnsafe
+        and healthRatio >= 0.96
+        and localThreat <= (homeThreat + 0.5)
+        and distance <= math.max(42, openingMaxDistance + 14)
+    if safeOpeningExtension then
+        hardOverextendDistance = false
+    end
 
     local shouldRecall = distance > maxDistance and (openingLock or underThreat or lowHealth or underEscorted or hardAnchor or raidRecall or enemyContactUnsafe)
     if earlyHardLeash then

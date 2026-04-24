@@ -655,6 +655,55 @@ local function CanStageSideCohort(aiBrain, ownPos, targetPos, units, comp, mecha
     return true
 end
 
+local function IssueACUProtectOrders(aiBrain, acuPos, enemyPos, allUnits, hardProtect)
+    if not allUnits or table.getn(allUnits) <= 0 or not acuPos then
+        return false
+    end
+
+    local targetPos = enemyPos or acuPos
+    local direct, aa, indirect, other = PartitionLandUnits(allUnits)
+    local distToEnemy = math.max(1, Distance2D(acuPos, targetPos))
+    local screenDistance = hardProtect and math.min(18, math.max(7, distToEnemy * 0.45)) or math.min(22, math.max(9, distToEnemy * 0.35))
+    local screenT = math.min(0.88, screenDistance / distToEnemy)
+    local screenPos = LerpPos(acuPos, targetPos, screenT)
+    local rearPos = MoveAwayFromEnemy(acuPos, targetPos, hardProtect and 8 or 13)
+    local supportPos = LerpPos(rearPos, screenPos, 0.48)
+    local attackPos = (hardProtect or distToEnemy <= 34) and targetPos or screenPos
+
+    if table.getn(direct) > 0 then
+        if IssueMove then
+            IssueMove(direct, screenPos)
+        end
+        if IssueAggressiveMove then
+            IssueAggressiveMove(direct, attackPos)
+        end
+    end
+
+    if table.getn(aa) > 0 then
+        if IssueMove then
+            IssueMove(aa, supportPos)
+        end
+        if hardProtect and IssueAggressiveMove then
+            IssueAggressiveMove(aa, screenPos)
+        end
+    end
+
+    if table.getn(indirect) > 0 then
+        if IssueMove then
+            IssueMove(indirect, rearPos)
+        end
+        if IssueAggressiveMove and distToEnemy <= 54 then
+            IssueAggressiveMove(indirect, targetPos)
+        end
+    end
+
+    if table.getn(other) > 0 and IssueMove then
+        IssueMove(other, supportPos)
+    end
+
+    return true
+end
+
 local function RegroupIsolatedLand(aiBrain, ownPos, targetPos, maxCount, inRecovery)
     local units = aiBrain:GetListOfUnits(LandPressureCategory, false, true)
     if not units or table.getn(units) == 0 then
@@ -757,6 +806,10 @@ function RunPressureCycle(aiBrain, now)
         maxUnits = math.max(6, math.floor(maxUnits * 0.55))
     end
 
+    local earlyAcuCrisisActive = now < (runtime.ACUCrisisUntil or -999)
+    local earlyAcuDangerRecent = (runtime.LastAcuDamageTime or -999) >= (now - 24)
+    local earlyAcuProtectActive = earlyAcuCrisisActive or earlyAcuDangerRecent or now < (runtime.ACUProtectUntil or -999)
+
     local frontReady = ResolveTaskUnits(frontTask, groups.MainLine or {}, maxUnits)
     local remainingSlots = math.max(0, maxUnits - table.getn(frontReady))
     local artilleryReady = ResolveTaskUnits(artilleryTask, groups.Artillery or {}, remainingSlots)
@@ -771,7 +824,8 @@ function RunPressureCycle(aiBrain, now)
     local escortReady = ResolveTaskUnits(escortTask, groups.ACUEscort or {}, math.max(0, baseGuardLimit - table.getn(guardReady)))
     local baseGuardUnits = MergeUnitTables(guardReady, escortReady, {})
     local baseGuardCount = table.getn(baseGuardUnits)
-    local acuEmergencyUnits = ResolvePersistentTaskUnits(acuEmergencyTask, groups.ACUEmergency or {}, math.max(8, math.floor(maxUnits * 0.52)))
+    local acuEmergencyLimit = earlyAcuProtectActive and math.max(14, math.floor(maxUnits * 0.84)) or math.max(8, math.floor(maxUnits * 0.52))
+    local acuEmergencyUnits = ResolvePersistentTaskUnits(acuEmergencyTask, groups.ACUEmergency or {}, acuEmergencyLimit)
     local acuEmergencyCount = table.getn(acuEmergencyUnits)
     local raidUnits = ResolveTaskUnits(raidTask, groups.Raiders or {}, math.max(2, math.floor(maxUnits * 0.24)))
     local raidCount = table.getn(raidUnits)
@@ -790,7 +844,7 @@ function RunPressureCycle(aiBrain, now)
     local acuEnemyPos = (acuEmergencyTask and acuEmergencyTask.TargetPos)
         or (acuEnemyUnits and table.getn(acuEnemyUnits) > 0 and acuEnemyUnits[1] and acuEnemyUnits[1]:GetPosition())
         or GetStrongestNearbyEnemyPosition(aiBrain, ownPos)
-    local acuCrisisActive = now < (runtime.ACUCrisisUntil or -999)
+    local acuCrisisActive = earlyAcuCrisisActive
     local acuCrisisPos = runtime.ACUCrisisEnemyPos or acuEnemyPos
     local raidTarget = (raidTask and raidTask.TargetPos) or intel.BestRaidPos or (runtime.ZoneModel and runtime.ZoneModel.BestRaidPos) or primaryEnemyPos
     local outerTarget = (outerTask and outerTask.TargetPos) or (runtime.StrategicPlanner and (runtime.StrategicPlanner.ReclaimFieldPos or runtime.StrategicPlanner.OuterContestPos)) or intel.BestExpansionPos or raidTarget
@@ -810,10 +864,10 @@ function RunPressureCycle(aiBrain, now)
     if acuCrisisActive and acuCrisisPos then
         acuEnemyPos = acuCrisisPos
     end
-    local acuEmergencyActive = acuEnemyPos and (acuEmergencyCount > 0 or acuCrisisActive)
-    local acuDangerRecent = (runtime.LastAcuDamageTime or -999) >= (now - 24)
+    local acuEmergencyActive = acuEnemyPos and (acuEmergencyCount > 0 or acuCrisisActive or now < (runtime.ACUProtectUntil or -999))
+    local acuDangerRecent = earlyAcuDangerRecent
     if acuEmergencyActive and acuEmergencyCount <= 0 then
-        local fallbackEmergency = SelectIdlePressureUnits(aiBrain, math.max(12, math.min(28, maxUnits)), ownPos, acuEnemyPos)
+        local fallbackEmergency = SelectIdlePressureUnits(aiBrain, math.max(14, math.min(42, maxUnits)), ownPos, acuEnemyPos)
         if table.getn(fallbackEmergency) > 0 then
             acuEmergencyUnits = fallbackEmergency
             acuEmergencyCount = table.getn(acuEmergencyUnits)
@@ -821,7 +875,7 @@ function RunPressureCycle(aiBrain, now)
     end
     if pressureCount <= 0 then
         if acuEmergencyActive and IssueCohesiveLandOrders then
-            IssueCohesiveLandOrders(aiBrain, ownPos, acuEnemyPos, acuEmergencyUnits, true)
+            IssueACUProtectOrders(aiBrain, acuPos, acuEnemyPos, acuEmergencyUnits, acuCrisisActive or acuDangerRecent or now < (runtime.ACUProtectUntil or -999))
             SetTaskExecution(acuEmergencyTask, now, 'intercepting', 'cohesive-defend', acuEnemyPos, acuPos, acuEmergencyCount)
         end
         if baseGuardCount > 0 and frontPos and IssueMove then
@@ -930,11 +984,11 @@ function RunPressureCycle(aiBrain, now)
     local stagingPos = (frontTask and frontTask.StagingPos) or LerpPos(ownPos, graphAdvance or selectedTarget, 0.36)
     local cohortPosture, cohortAnchor = EvaluateLandCohortPosture(aiBrain, ownPos, selectedTarget, pressureUnits, comp, false, mechanic)
     if acuEmergencyActive then
-        IssueCohesiveLandOrders(aiBrain, ownPos, acuEnemyPos, acuEmergencyUnits, true)
+        IssueACUProtectOrders(aiBrain, acuPos, acuEnemyPos, acuEmergencyUnits, acuCrisisActive or acuDangerRecent or now < (runtime.ACUProtectUntil or -999))
         SetTaskExecution(acuEmergencyTask, now, 'intercepting', 'cohesive-defend', acuEnemyPos, acuPos, acuEmergencyCount)
         local frontCollapseThreshold = acuCrisisActive and 1 or (acuDangerRecent and 1 or 2)
         if pressureCount >= frontCollapseThreshold then
-            IssueCohesiveLandOrders(aiBrain, ownPos, acuEnemyPos, pressureUnits, true)
+            IssueACUProtectOrders(aiBrain, acuPos, acuEnemyPos, pressureUnits, acuCrisisActive or acuDangerRecent or now < (runtime.ACUProtectUntil or -999))
             SetTaskExecution(frontTask, now, 'intercepting', 'cohesive-defend', acuEnemyPos, acuPos, pressureCount)
             SetTaskExecution(artilleryTask, now, 'screening', 'cohesive-defend', acuEnemyPos, acuPos, table.getn(artilleryReady))
         end
@@ -956,23 +1010,23 @@ function RunPressureCycle(aiBrain, now)
         end
         local emergencyThreshold = acuCrisisActive and 1 or (acuDangerRecent and 2 or 4)
         if table.getn(emergencyReinforce) >= emergencyThreshold then
-            IssueCohesiveLandOrders(aiBrain, ownPos, acuEnemyPos, emergencyReinforce, true)
+            IssueACUProtectOrders(aiBrain, acuPos, acuEnemyPos, emergencyReinforce, acuCrisisActive or acuDangerRecent or now < (runtime.ACUProtectUntil or -999))
             SetTaskExecution(frontTask, now, 'intercepting', 'cohesive-defend', acuEnemyPos, acuPos, table.getn(emergencyReinforce))
             SetTaskExecution(artilleryTask, now, 'screening', 'cohesive-defend', acuEnemyPos, acuPos, table.getn(artilleryReady))
         elseif baseGuardCount > 0 then
-            IssueCohesiveLandOrders(aiBrain, ownPos, acuEnemyPos, baseGuardUnits, true)
+            IssueACUProtectOrders(aiBrain, acuPos, acuEnemyPos, baseGuardUnits, acuCrisisActive or acuDangerRecent or now < (runtime.ACUProtectUntil or -999))
             SetTaskExecution(baseTask, now, 'defending', 'cohesive-defend', acuEnemyPos, rearGuardPos, baseGuardCount)
         end
         if raidCount > 0 and IssueCohesiveLandOrders then
-            IssueCohesiveLandOrders(aiBrain, ownPos, acuEnemyPos, raidUnits, true)
+            IssueACUProtectOrders(aiBrain, acuPos, acuEnemyPos, raidUnits, true)
             SetTaskExecution(raidTask, now, 'recalling', 'cohesive-defend', acuEnemyPos, acuPos, raidCount)
         end
         if outerCount > 0 and IssueCohesiveLandOrders then
-            IssueCohesiveLandOrders(aiBrain, ownPos, acuEnemyPos, outerUnits, true)
+            IssueACUProtectOrders(aiBrain, acuPos, acuEnemyPos, outerUnits, true)
             SetTaskExecution(outerTask, now, 'recalling', 'cohesive-defend', acuEnemyPos, acuPos, outerCount)
         end
         if interceptCount > 0 then
-            IssueCohesiveLandOrders(aiBrain, ownPos, acuEnemyPos, interceptUnits, true)
+            IssueACUProtectOrders(aiBrain, acuPos, acuEnemyPos, interceptUnits, true)
             SetTaskExecution(interceptTask, now, 'intercepting', 'cohesive-defend', acuEnemyPos, acuPos, interceptCount)
         end
         runtime.LastPressureOrder = acuCrisisActive and 'ACUCrisisCollapse' or 'ACUEmergencyIntercept'

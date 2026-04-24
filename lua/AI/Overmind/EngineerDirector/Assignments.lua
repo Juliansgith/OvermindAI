@@ -533,7 +533,8 @@ local function GetPriorityACURepairTarget(aiBrain, runtime, mainPos, engPos, now
     local healthRatio = acuHealth / acuMaxHealth
     local crisisActive = now < (runtime.ACUCrisisUntil or -999)
         or now < (runtime.ACUCrisisEscalatedUntil or -999)
-    local recentDamage = (runtime.LastAcuDamageTime or -999) >= (now - 18)
+        or now < (runtime.ACUProtectUntil or -999)
+    local recentDamage = (runtime.LastAcuDamageTime or -999) >= (now - 28)
     local emergencyTask = (((runtime.ForceDirector or {}).Tasks or {}).acu_emergency_intercept) or false
     local emergencyWanted = emergencyTask and (((emergencyTask.DesiredUnits or 0) > 0) or ((emergencyTask.CurrentUnits or 0) > 0))
     local priorityBias = math.max(-0.12, math.min(0.18, (mechanic.EngineerACURepairPriorityBias or 0) / 1000))
@@ -542,6 +543,15 @@ local function GetPriorityACURepairTarget(aiBrain, runtime, mainPos, engPos, now
     local engineerDistanceCap = 340 + (mechanic.EngineerACURepairDistanceBias or 0)
     local targetThreat = aiBrain:GetThreatAtPosition(acuPos, 1, true, 'AntiSurface') or 0
     local threatCap = 2.3 + (mechanic.EngineerACURepairThreatBias or 0) + (crisisActive and 0.4 or 0)
+    if crisisActive or recentDamage or healthRatio < 0.82 then
+        mainDistanceCap = 380 + (mechanic.EngineerACURepairDistanceBias or 0)
+        engineerDistanceCap = 560 + (mechanic.EngineerACURepairDistanceBias or 0)
+        threatCap = 4.2 + (mechanic.EngineerACURepairThreatBias or 0)
+    elseif emergencyWanted then
+        mainDistanceCap = 300 + (mechanic.EngineerACURepairDistanceBias or 0)
+        engineerDistanceCap = 460 + (mechanic.EngineerACURepairDistanceBias or 0)
+        threatCap = 3.2 + (mechanic.EngineerACURepairThreatBias or 0)
+    end
 
     if not crisisActive and not recentDamage and not emergencyWanted and healthRatio >= healthThreshold then
         return false
@@ -552,7 +562,7 @@ local function GetPriorityACURepairTarget(aiBrain, runtime, mainPos, engPos, now
     if engPos and Common.Distance2D(acuPos, engPos) > engineerDistanceCap then
         return false
     end
-    if targetThreat > threatCap and not crisisActive then
+    if targetThreat > threatCap and not (crisisActive and healthRatio < 0.70) then
         return false
     end
 
@@ -625,9 +635,21 @@ local function TryAssignAssistOrRepair(aiBrain, runtime, eng, target, isUpgrade,
             targetThreatCap = targetThreatCap + 0.7 + (mechanic.EngineerACURepairThreatBias or 0)
             localThreatCap = localThreatCap + 0.55 + (mechanic.EngineerACURepairThreatBias or 0)
             routeRiskCap = routeRiskCap + 0.7 + (mechanic.EngineerRepairRouteRiskBias or 0)
+            local acuCrisisRepair = now
+                and (
+                    now < (runtime.ACUCrisisUntil or -999)
+                    or now < (runtime.ACUCrisisEscalatedUntil or -999)
+                    or now < (runtime.ACUProtectUntil or -999)
+                    or (runtime.LastAcuDamageTime or -999) >= (now - 28)
+                )
+            if acuCrisisRepair then
+                targetThreatCap = targetThreatCap + 1.4
+                localThreatCap = localThreatCap + 1.0
+                routeRiskCap = routeRiskCap + 1.8
+            end
         end
         if (targetEnemyCombat and not nearMain and not isACUTarget)
-            or routeEnemyCombat
+            or (routeEnemyCombat and not isACUTarget)
             or targetThreat > targetThreatCap
             or localThreat > localThreatCap
             or routeRisk > routeRiskCap then
@@ -761,24 +783,21 @@ local function ProcessEngineer(aiBrain, runtime, eng, now, ctx)
         and (
             now < (runtime.ACUCrisisUntil or -999)
             or now < (runtime.ACUCrisisEscalatedUntil or -999)
-            or ((runtime.LastAcuDamageTime or -999) >= (now - 18))
+            or now < (runtime.ACUProtectUntil or -999)
+            or ((runtime.LastAcuDamageTime or -999) >= (now - 28))
         )
-    if Common.IsReadyBuilder(eng)
-        and EntityCategoryContains(categories.ENGINEER * categories.MOBILE * (categories.TECH2 + categories.TECH3), eng)
-        and Recovery.TryOpenFirstT2PowerBuild(aiBrain, runtime, eng, ctx.mainPos, now) then
-        if claimedByFactoryTask and ctx.factoryTask.BuilderIds and entityId then
-            ctx.factoryTask.BuilderIds[entityId] = nil
-            ctx.factoryTask.AssignedBuilders = math.max(0, (ctx.factoryTask.AssignedBuilders or 1) - 1)
-        end
-        ctx.powerRecoveryCount = ctx.powerRecoveryCount + 1
-        return
+    local acuRepairHealthRatio = 1
+    if acuRepairTarget and acuRepairTarget.GetHealth and acuRepairTarget.GetMaxHealth then
+        local maxHealth = math.max(1, acuRepairTarget:GetMaxHealth() or 1)
+        acuRepairHealthRatio = math.max(0, math.min(1, (acuRepairTarget:GetHealth() or maxHealth) / maxHealth))
     end
+    local acuRepairHard = acuRepairTarget and (acuRepairUrgent or acuRepairHealthRatio < 0.84)
 
-    if acuRepairUrgent
+    if acuRepairHard
         and not constructing
-        and (isIdle or Common.GetCommandQueueLength(eng) <= 2)
-        and localThreat < 2.9
-        and dist <= 420
+        and (isIdle or Common.GetCommandQueueLength(eng) <= (acuRepairHealthRatio < 0.72 and 5 or 3))
+        and localThreat < ((acuRepairHealthRatio < 0.72 or acuRepairUrgent) and 4.2 or 3.2)
+        and dist <= ((acuRepairHealthRatio < 0.72 or acuRepairUrgent) and 560 or 460)
         and TryAssignAssistOrRepair(aiBrain, runtime, eng, acuRepairTarget, false, now) then
         if claimedByFactoryTask and ctx.factoryTask.BuilderIds and entityId then
             ctx.factoryTask.BuilderIds[entityId] = nil
@@ -798,6 +817,17 @@ local function ProcessEngineer(aiBrain, runtime, eng, now, ctx)
         end
         runtime.LastEngineerACURepairTime = now
         ctx.acuRepairCount = (ctx.acuRepairCount or 0) + 1
+        return
+    end
+
+    if Common.IsReadyBuilder(eng)
+        and EntityCategoryContains(categories.ENGINEER * categories.MOBILE * (categories.TECH2 + categories.TECH3), eng)
+        and Recovery.TryOpenFirstT2PowerBuild(aiBrain, runtime, eng, ctx.mainPos, now) then
+        if claimedByFactoryTask and ctx.factoryTask.BuilderIds and entityId then
+            ctx.factoryTask.BuilderIds[entityId] = nil
+            ctx.factoryTask.AssignedBuilders = math.max(0, (ctx.factoryTask.AssignedBuilders or 1) - 1)
+        end
+        ctx.powerRecoveryCount = ctx.powerRecoveryCount + 1
         return
     end
 
@@ -1118,7 +1148,7 @@ local function ProcessEngineer(aiBrain, runtime, eng, now, ctx)
     end
 
     if (not acted) and isIdle and not constructing then
-        if acuRepairTarget and localThreat < 2.8 and dist <= 420 and TryAssignAssistOrRepair(aiBrain, runtime, eng, acuRepairTarget, false, now) then
+        if acuRepairTarget and localThreat < 3.3 and dist <= 500 and TryAssignAssistOrRepair(aiBrain, runtime, eng, acuRepairTarget, false, now) then
             runtime.LastEngineerACURepairTime = now
             ctx.acuRepairCount = (ctx.acuRepairCount or 0) + 1
             acted = true
