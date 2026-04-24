@@ -812,6 +812,13 @@ function RunPressureCycle(aiBrain, now)
     end
     local acuEmergencyActive = acuEnemyPos and (acuEmergencyCount > 0 or acuCrisisActive)
     local acuDangerRecent = (runtime.LastAcuDamageTime or -999) >= (now - 24)
+    if acuEmergencyActive and acuEmergencyCount <= 0 then
+        local fallbackEmergency = SelectIdlePressureUnits(aiBrain, math.max(12, math.min(28, maxUnits)), ownPos, acuEnemyPos)
+        if table.getn(fallbackEmergency) > 0 then
+            acuEmergencyUnits = fallbackEmergency
+            acuEmergencyCount = table.getn(acuEmergencyUnits)
+        end
+    end
     if pressureCount <= 0 then
         if acuEmergencyActive and IssueCohesiveLandOrders then
             IssueCohesiveLandOrders(aiBrain, ownPos, acuEnemyPos, acuEmergencyUnits, true)

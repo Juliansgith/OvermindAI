@@ -49,6 +49,10 @@ autotune/action-priors/
 autotune/launches/
 autotune/codex-patches/
 autotune/codex-worktrees/
+autotune/external-ai-research/
+autotune/nightly-watch/
+autotune/validation_generated/
+autotune/validation_logs/
 
 # Local database and env files
 .env.autotune-db

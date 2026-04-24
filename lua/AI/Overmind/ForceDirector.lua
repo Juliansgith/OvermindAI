@@ -400,6 +400,15 @@ function Module.Update(aiBrain, now)
     local homeThreat = (runtime.ZoneModel and runtime.ZoneModel.HomeThreat) or 0
     local localAcuThreat = aiBrain:GetThreatAtPosition(acuPos, 2, true, 'AntiSurface') or 0
     local localAcuEnemyCount = aiBrain:GetNumUnitsAroundPoint(LandPressureCategory, acuPos, 52, 'Enemy') or 0
+    local enemyCommanderNearAcuUnits = aiBrain:GetUnitsAroundPoint(categories.COMMAND, acuPos, 72, 'Enemy') or {}
+    local enemyCommanderDive = table.getn(enemyCommanderNearAcuUnits) > 0
+    local enemyCommanderDivePos = false
+    if enemyCommanderDive then
+        local enemyCommander = enemyCommanderNearAcuUnits[1]
+        enemyCommanderDivePos = enemyCommander and enemyCommander.GetPosition and enemyCommander:GetPosition() or false
+        localAcuEnemyCount = localAcuEnemyCount + (table.getn(enemyCommanderNearAcuUnits) * 4)
+        localAcuThreat = math.max(localAcuThreat, homeThreat + 6)
+    end
 
     local direct = aiBrain:GetListOfUnits(LandDirectCategory, false, true) or {}
     local aa = aiBrain:GetListOfUnits(LandAACategory, false, true) or {}
@@ -575,12 +584,12 @@ function Module.Update(aiBrain, now)
     local previousAcuEmergencyCount = previousAcuEmergencyTask and (previousAcuEmergencyTask.CurrentUnits or 0) or 0
     state.ACUEmergencyHoldUntil = state.ACUEmergencyHoldUntil or -999
     if acu and not acu.Dead then
-        acuEmergencyPos = acuCrisisEnemyPos or raid.LastThreatPos
-        if not acuCrisisEnemyPos and raid.LastThreatLabel ~= 'acu' then
+        acuEmergencyPos = enemyCommanderDivePos or acuCrisisEnemyPos or raid.LastThreatPos
+        if not enemyCommanderDivePos and not acuCrisisEnemyPos and raid.LastThreatLabel ~= 'acu' then
             acuEmergencyPos = false
         end
         if not acuEmergencyPos then
-            acuEmergencyPos = acuCrisisEnemyPos or approachCluster.StagePos or approachCluster.Pos or acuPos
+            acuEmergencyPos = enemyCommanderDivePos or acuCrisisEnemyPos or approachCluster.StagePos or approachCluster.Pos or acuPos
         end
         acuEmergencyThreat = math.max(localAcuThreat, raid.LastThreatAmount or 0)
         local acuDamageRecent = (runtime.LastAcuDamageTime or -999) >= (now - 24)
@@ -592,6 +601,7 @@ function Module.Update(aiBrain, now)
             or (acuDist > 18 and localAcuEnemyCount >= 1)
             or (localAcuEnemyCount >= 1 and (raid.UnderLandHarass or localAcuThreat >= math.max(1.5, homeThreat - 0.5) or acuDist > 10))
             or approachTowardHome
+            or enemyCommanderDive
             or acuCrisisActive
             or acuDamageRecent
             or (acuEmergencySticky and (localAcuEnemyCount >= 1 or localAcuThreat > math.max(1.2, homeThreat - 1.4)))
@@ -599,6 +609,9 @@ function Module.Update(aiBrain, now)
             state.ACUEmergencyHoldUntil = now + math.max(10, ((acuDamageRecent or acuCrisisEscalated) and 36 or (acuCrisisActive and 30 or 22)) + emergencyHoldBias)
             acuEmergencyDirectNeed = Clamp(10 + emergencyBaseNeedBias + math.floor(math.max(0, acuEmergencyThreat) * emergencyThreatScale) + math.min(10, localAcuEnemyCount * 2) + (acuDamageRecent and 6 or 0) + ((previousAcuEmergencyCount > 0) and 3 or 0), 10, 34)
             acuEmergencyAANeed = Clamp(((approachAir > 0) and 1 or 0) + ((raid.UnderAirHarass and 1) or 0) + ((acuDamageRecent and approachAir > 0) and 1 or 0), 0, 4)
+            if enemyCommanderDive then
+                acuEmergencyDirectNeed = Clamp(math.max(acuEmergencyDirectNeed, math.floor(landCombatTotal * 0.82) + 6), 12, 44)
+            end
             if acuCrisisActive then
                 local crisisShare = Clamp((acuCrisisEscalated and 0.72 or 0.58) + emergencyCrisisShareBias, 0.45, 0.9)
                 acuEmergencyDirectNeed = Clamp(math.max(acuEmergencyDirectNeed, math.floor(landCombatTotal * crisisShare) + 4 + math.max(0, emergencyBaseNeedBias)), 12, 40)
@@ -946,13 +959,17 @@ function Module.Update(aiBrain, now)
         raiderNeed = 0
         local need = acuEmergencyDirectNeed
         if need > 0 then
-            need = need - ShiftNamedUnits(mainline, acuEmergency, math.max(4, minimumMainlineCommit - 8), need)
+            local emergencyMainlineKeep = (acuCrisisActive or enemyCommanderDive) and 0 or math.max(4, minimumMainlineCommit - 8)
+            need = need - ShiftNamedUnits(mainline, acuEmergency, emergencyMainlineKeep, need)
         end
         if need > 0 then
             need = need - ShiftNamedUnits(baseGuardDirect, acuEmergency, 1, need)
         end
         if need > 0 then
             need = need - ShiftNamedUnits(raiders, acuEmergency, 0, need)
+        end
+        if need > 0 then
+            need = need - ShiftNamedUnits(outerContest, acuEmergency, 0, need)
         end
         if need > 0 then
             need = need - ShiftNamedUnits(interceptUnits, acuEmergency, 0, need)

@@ -1007,6 +1007,48 @@ function ShouldAllowDefenseStructureLocation(aiBrain, locationType)
     return true
 end
 
+local function HasCoreT2DefenseAnchor(aiBrain, director, key, homeCrisis, now)
+    if not director then
+        return false
+    end
+
+    local current = director.Current or {}
+    local factories = current.Factories or {}
+    local eco = current.Eco or {}
+    local land = factories.Land or {}
+    local air = factories.Air or {}
+    local sea = factories.Sea or {}
+    local mex = eco.Mex or {}
+    local power = eco.Power or {}
+    local readyFactories = (land.Ready or 0) + (air.Ready or 0) + (sea.Ready or 0)
+    local mexReady = mex.Ready or 0
+    local powerReady = power.Ready or 0
+    local t2PowerReady = GetCompletedUnitCount(aiBrain, categories.ENERGYPRODUCTION * categories.STRUCTURE * (categories.TECH2 + categories.TECH3))
+    local t2LandReady = GetCompletedUnitCount(aiBrain, categories.FACTORY * categories.LAND * categories.STRUCTURE * (categories.TECH2 + categories.TECH3))
+    local t2EngineerReady = GetCompletedUnitCount(aiBrain, categories.ENGINEER * categories.MOBILE * (categories.TECH2 + categories.TECH3))
+    local hasTechAnchor = t2PowerReady > 0 or t2LandReady > 0 or t2EngineerReady > 0
+
+    if homeCrisis then
+        return readyFactories >= 1 and mexReady >= 4 and powerReady >= 3
+    end
+
+    if key == 'shield' then
+        return (now or 0) >= 720
+            and readyFactories >= 3
+            and mexReady >= 7
+            and powerReady >= 5
+            and hasTechAnchor
+    elseif key == 'tmd' then
+        return (now or 0) >= 840
+            and readyFactories >= 3
+            and mexReady >= 8
+            and powerReady >= 5
+            and hasTechAnchor
+    end
+
+    return false
+end
+
 function HasNoUnfinishedFactoriesAtLocation(aiBrain, locationType, radius, maxAllowed)
     if not IsOvermindBrain(aiBrain) then
         return true
@@ -3963,6 +4005,10 @@ function ShouldBuildT2StructureRole(aiBrain, role, locationType)
         return false
     end
     if not homeCrisis and (econ.MassTrend or 0) <= -0.24 and (econ.MassStorageRatio or 0) <= 0.18 then
+        return false
+    end
+    if not HasCoreT2DefenseAnchor(aiBrain, director, key, homeCrisis, now) then
+        RecordHomeDefenseVeto(aiBrain, key, locationType, 'no_core_anchor', now)
         return false
     end
 

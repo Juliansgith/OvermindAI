@@ -254,7 +254,8 @@ local function TryReclaimFieldZone(aiBrain, runtime, eng, targetPos, now)
         segment.LastMassEstimate = reclaimMass
     end
 
-    local requiredMass = math.max(12, ((quotaForced and 30 or (planner.ReclaimFirst and 42 or 58)) * (1 - (nearbyBias * 0.22))) - massBias)
+    local baseRequiredMass = quotaForced and 22 or (planner.ReclaimFirst and (outerBacked and 26 or 34) or (outerBacked and 40 or 50))
+    local requiredMass = math.max(10, (baseRequiredMass * (1 - (nearbyBias * 0.22))) - massBias)
     if table.getn(reclaimTargets) <= 0 or reclaimMass < requiredMass then
         return false
     end
@@ -270,7 +271,7 @@ local function TryReclaimFieldZone(aiBrain, runtime, eng, targetPos, now)
     if enemySupport > math.max(1, supported) then
         return false
     end
-    if supported < minSupport and distMain > (outerBacked and 180 or 120) then
+    if supported < minSupport and distMain > (outerBacked and 220 or 150) and reclaimMass < (requiredMass * 1.65) then
         return false
     end
     if Threat.HasEnemyCombatNear(aiBrain, targetPos, planner.ReclaimFirst and 20 or 24) and supported < (outerBacked and minSupport or (minSupport + 1)) then

@@ -498,29 +498,59 @@ function Get-DbHistoricalCandidates {
         return @()
     }
 
+    $specialistPool = [math]::Max(4, [int][math]::Ceiling($PoolSize / 3))
     $query = @"
+with ranked as (
+    select
+        cr.session_id,
+        cr.candidate_id,
+        cr.score,
+        cr.avg_mass_ratio,
+        cr.avg_game_time,
+        cr.primary_failure_class,
+        cr.promoted,
+        sr.map_name,
+        sr.opponent_key,
+        cr.config_json,
+        row_number() over (order by case when sr.map_name = $(ConvertTo-AutotuneSqlLiteral $MapValue) then 0 else 1 end, cr.score desc nulls last) as score_rank,
+        row_number() over (order by case when sr.map_name = $(ConvertTo-AutotuneSqlLiteral $MapValue) then 0 else 1 end, cr.avg_mass_ratio desc nulls last, cr.score desc nulls last) as mass_rank,
+        row_number() over (order by case when sr.map_name = $(ConvertTo-AutotuneSqlLiteral $MapValue) then 0 else 1 end, cr.avg_game_time desc nulls last, cr.score desc nulls last) as survival_rank
+    from autotune.candidate_results cr
+    join autotune.session_runs sr on sr.session_id = cr.session_id
+    where cr.runtime_clean = true
+      and cr.config_json is not null
+      and cr.candidate_id not in ('baseline', 'retest-baseline')
+)
 select json_build_object(
-    'SessionId', cr.session_id,
-    'CandidateId', cr.candidate_id,
-    'Score', cr.score,
-    'AvgMassRatio', cr.avg_mass_ratio,
-    'AvgGameTime', cr.avg_game_time,
-    'PrimaryFailureClass', cr.primary_failure_class,
-    'Promoted', cr.promoted,
-    'MapName', sr.map_name,
-    'OpponentKey', sr.opponent_key,
-    'Config', cr.config_json
+    'SessionId', session_id,
+    'CandidateId', candidate_id,
+    'Score', score,
+    'AvgMassRatio', avg_mass_ratio,
+    'AvgGameTime', avg_game_time,
+    'PrimaryFailureClass', primary_failure_class,
+    'Promoted', promoted,
+    'MapName', map_name,
+    'OpponentKey', opponent_key,
+    'ArchiveRole',
+        case
+            when promoted then 'champion'
+            when mass_rank <= $specialistPool then 'mass'
+            when survival_rank <= $specialistPool then 'survival'
+            else 'score'
+        end,
+    'Config', config_json
 )::text as row_json
-from autotune.candidate_results cr
-join autotune.session_runs sr on sr.session_id = cr.session_id
-where cr.runtime_clean = true
-  and cr.config_json is not null
-  and cr.candidate_id not in ('baseline', 'retest-baseline')
+from ranked
+where promoted = true
+   or score_rank <= $PoolSize
+   or mass_rank <= $specialistPool
+   or survival_rank <= $specialistPool
 order by
-  case when sr.map_name = $(ConvertTo-AutotuneSqlLiteral $MapValue) then 0 else 1 end,
-  case when cr.promoted then 0 else 1 end,
-  coalesce(cr.avg_mass_ratio, 0) desc,
-  cr.score desc
+  case when map_name = $(ConvertTo-AutotuneSqlLiteral $MapValue) then 0 else 1 end,
+  case when promoted then 0 else 1 end,
+  least(score_rank, mass_rank, survival_rank),
+  coalesce(avg_mass_ratio, 0) desc,
+  score desc
 limit $PoolSize;
 "@
 
@@ -538,7 +568,8 @@ limit $PoolSize;
             MapName = [string]$row.MapName
             OpponentKey = [string]$row.OpponentKey
             Config = ConvertTo-TuneConfigHashtable -InputObject $row.Config
-            Source = if ($row.Promoted) { 'db-champion' } else { 'db-history' }
+            ArchiveRole = [string](Get-ObjectPropertyValue -Object $row -Name 'ArchiveRole' -Default 'score')
+            Source = if ($row.Promoted) { 'db-champion' } elseif ([string](Get-ObjectPropertyValue -Object $row -Name 'ArchiveRole' -Default 'score') -ne 'score') { 'db-pareto-' + [string]$row.ArchiveRole } else { 'db-history' }
         }
     }
     return $rows
@@ -869,10 +900,18 @@ function Select-MutationParent {
         [System.Random]$Random
     )
 
-    $localPool = @($Results |
-        Where-Object { $_.RuntimeClean -and $null -ne $_.Config } |
-        Sort-Object -Property Score -Descending |
-        Select-Object -First 3)
+    $localEligible = @($Results | Where-Object { $_.RuntimeClean -and $null -ne $_.Config -and $_.CandidateId -ne 'baseline' -and $_.CandidateId -ne 'retest-baseline' })
+    $localPoolMap = @{}
+    foreach ($item in @($localEligible | Sort-Object -Property Score -Descending | Select-Object -First 3)) {
+        $localPoolMap[[string]$item.CandidateId] = $item
+    }
+    foreach ($item in @($localEligible | Sort-Object -Property AvgMassRatio -Descending | Select-Object -First 2)) {
+        $localPoolMap[[string]$item.CandidateId] = $item
+    }
+    foreach ($item in @($localEligible | Sort-Object -Property AvgGameTime -Descending | Select-Object -First 2)) {
+        $localPoolMap[[string]$item.CandidateId] = $item
+    }
+    $localPool = @($localPoolMap.Values | Sort-Object -Property Score -Descending)
     $dbPool = @($DbCandidates | Select-Object -First ([math]::Max(0, $DbHistoryPool)))
 
     if ($CandidateIndex -eq 1) {
@@ -1570,6 +1609,136 @@ function Save-Champion {
     $manifest | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $ChampionDir ("{0}-{1}.json" -f $sessionTag, $safeId)) -Encoding UTF8
 }
 
+function Test-ParetoDominated {
+    param(
+        $Candidate,
+        [array]$Candidates
+    )
+
+    foreach ($other in $Candidates) {
+        if ($other.CandidateId -eq $Candidate.CandidateId) {
+            continue
+        }
+        $scoreBetter = (To-Double $other.Score) -ge (To-Double $Candidate.Score)
+        $massBetter = (To-Double $other.AvgMassRatio) -ge (To-Double $Candidate.AvgMassRatio)
+        $timeBetter = (To-Double $other.AvgGameTime) -ge (To-Double $Candidate.AvgGameTime)
+        $strictBetter = ((To-Double $other.Score) -gt (To-Double $Candidate.Score)) `
+            -or ((To-Double $other.AvgMassRatio) -gt (To-Double $Candidate.AvgMassRatio)) `
+            -or ((To-Double $other.AvgGameTime) -gt (To-Double $Candidate.AvgGameTime))
+        if ($scoreBetter -and $massBetter -and $timeBetter -and $strictBetter) {
+            return $true
+        }
+    }
+
+    return $false
+}
+
+function Add-ParetoArchiveEntry {
+    param(
+        [hashtable]$Seen,
+        [System.Collections.ArrayList]$Entries,
+        $Candidate,
+        [string]$Role
+    )
+
+    if ($null -eq $Candidate -or $null -eq $Candidate.Config) {
+        return
+    }
+
+    $key = [string]$Candidate.CandidateId
+    if ([string]::IsNullOrWhiteSpace($key) -or $Seen.ContainsKey($key)) {
+        return
+    }
+
+    $Seen[$key] = $true
+    [void]$Entries.Add([pscustomobject]@{
+        Role = $Role
+        Candidate = $Candidate
+    })
+}
+
+function Save-ParetoArchive {
+    param(
+        [array]$Results,
+        [string]$SessionDir
+    )
+
+    $eligible = @($Results |
+        Where-Object {
+            $_.RuntimeClean `
+                -and $null -ne $_.Config `
+                -and $_.CandidateId -ne 'baseline' `
+                -and $_.CandidateId -ne 'retest-baseline'
+        })
+    if ($eligible.Count -le 0) {
+        return @()
+    }
+
+    $entries = [System.Collections.ArrayList]::new()
+    $seen = @{}
+    foreach ($candidate in $eligible) {
+        if (-not (Test-ParetoDominated -Candidate $candidate -Candidates $eligible)) {
+            Add-ParetoArchiveEntry -Seen $seen -Entries $entries -Candidate $candidate -Role 'pareto'
+        }
+    }
+    Add-ParetoArchiveEntry -Seen $seen -Entries $entries -Candidate ($eligible | Sort-Object -Property Score -Descending | Select-Object -First 1) -Role 'top_score'
+    Add-ParetoArchiveEntry -Seen $seen -Entries $entries -Candidate ($eligible | Sort-Object -Property AvgMassRatio -Descending | Select-Object -First 1) -Role 'top_mass_ratio'
+    Add-ParetoArchiveEntry -Seen $seen -Entries $entries -Candidate ($eligible | Sort-Object -Property AvgGameTime -Descending | Select-Object -First 1) -Role 'top_survival'
+    Add-ParetoArchiveEntry -Seen $seen -Entries $entries -Candidate ($eligible |
+        Sort-Object @{ Expression = { (To-Double $_.Score) + ((To-Double $_.AvgMassRatio) * 1200) + ((To-Double $_.AvgGameTime) * 0.55) }; Descending = $true } |
+        Select-Object -First 1) -Role 'balanced'
+
+    if ($DryRun) {
+        Write-Host ("[DRYRUN] would archive Pareto configs: {0}" -f $entries.Count)
+        return @($entries | ForEach-Object {
+            [pscustomobject]@{
+                Role = $_.Role
+                CandidateId = $_.Candidate.CandidateId
+                Score = $_.Candidate.Score
+                AvgMassRatio = $_.Candidate.AvgMassRatio
+                AvgGameTime = $_.Candidate.AvgGameTime
+                ConfigPath = ''
+            }
+        })
+    }
+
+    $paretoDir = Join-Path $ChampionDir 'pareto'
+    Ensure-Directory $ChampionDir
+    Ensure-Directory $paretoDir
+    $manifestEntries = @()
+    foreach ($entry in $entries) {
+        $candidate = $entry.Candidate
+        $safeRole = Get-SafeName -Value ([string]$entry.Role)
+        $safeId = Get-SafeName -Value ([string]$candidate.CandidateId)
+        $configPath = Join-Path $paretoDir ("{0}-{1}-{2}.lua" -f $sessionTag, $safeRole, $safeId)
+        Write-TuneConfig -Config $candidate.Config -Path $configPath
+        $manifestEntries += [pscustomobject]@{
+            Session = $sessionTag
+            SessionDir = $SessionDir
+            Role = $entry.Role
+            CandidateId = $candidate.CandidateId
+            Score = $candidate.Score
+            AvgMassRatio = $candidate.AvgMassRatio
+            AvgGameTime = $candidate.AvgGameTime
+            PrimaryFailureClass = $candidate.PrimaryFailureClass
+            ParentCandidateId = $candidate.ParentCandidateId
+            ParentSource = $candidate.ParentSource
+            ConfigPath = $configPath
+        }
+    }
+
+    $manifest = [pscustomobject]@{
+        Session = $sessionTag
+        SessionDir = $SessionDir
+        CreatedAt = (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')
+        Entries = $manifestEntries
+    }
+    $manifestPath = Join-Path $paretoDir ("{0}-pareto.json" -f $sessionTag)
+    $manifest | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $manifestPath -Encoding UTF8
+    $manifest | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $paretoDir 'latest.json') -Encoding UTF8
+    return $manifestEntries
+}
+
 function New-AggregatedResult {
     param(
         [string]$CandidateId,
@@ -1621,6 +1790,16 @@ function Write-SessionReport {
         $lines += ''
         foreach ($reason in $Summary.PromotionBlockedReasons) {
             $lines += "- $reason"
+        }
+        $lines += ''
+    }
+    if ($Summary.ParetoArchive -and $Summary.ParetoArchive.Count -gt 0) {
+        $lines += '## Pareto Archive'
+        $lines += ''
+        $lines += '| Role | Candidate | Score | Avg Time | Mass Ratio | Failure |'
+        $lines += '| --- | --- | ---: | ---: | ---: | --- |'
+        foreach ($row in @($Summary.ParetoArchive)) {
+            $lines += "| $($row.Role) | $($row.CandidateId) | $($row.Score) | $($row.AvgGameTime) | $($row.AvgMassRatio) | $($row.PrimaryFailureClass) |"
         }
         $lines += ''
     }
@@ -1836,6 +2015,7 @@ if (-not $NoPromote -and $promotionDecision.Allowed) {
 }
 
 $Script:RestoreConfigPath = ''
+$paretoArchive = Save-ParetoArchive -Results $results -SessionDir $sessionDir
 
 $summary = [pscustomobject]@{
     Session = $sessionTag
@@ -1877,6 +2057,7 @@ $summary = [pscustomobject]@{
     Margin = [math]::Round($margin, 5)
     PromotionAllowed = [bool]$promotionDecision.Allowed
     PromotionBlockedReasons = $promotionDecision.Reasons
+    ParetoArchive = $paretoArchive | Select-Object Role, CandidateId, Score, AvgMassRatio, AvgGameTime, PrimaryFailureClass, ConfigPath
     Results = $results | Select-Object CandidateId, ParentCandidateId, ParentSource, ParentSessionId, ParentFailureClass, Score, Games, WinRate, AvgGameTime, AvgMassRatio, PrimaryFailureClass, RuntimeClean
 }
 $summary | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $sessionDir 'session-summary.json') -Encoding UTF8

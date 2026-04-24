@@ -488,6 +488,11 @@ function Update(aiBrain, now)
     local mexExpansionUrgent = now < 1500
         and mexReady < math.max(12, (constraints.StarterMexFloor or 5) + 5)
         and not severeFactoryStarve
+    local starterMexFloor = constraints.StarterMexFloor or 5
+    local coreEcoCritical = mexRebuildUrgent
+        or mexReady < starterMexFloor
+        or (now < 600 and mexReady < math.max(6, starterMexFloor + 1))
+        or mexExpansionUrgent
     if mexRebuildUrgent then
         safeExpandDistance = math.max(safeExpandDistance, 920)
     elseif mexExpansionUrgent then
@@ -898,11 +903,18 @@ function Update(aiBrain, now)
         engState.ReclaimFieldStickyQuota = 0
         fieldStickyActive = false
     end
+    local allowTechBuilderReclaim = fieldTaskQuota > 0
+        and not coreEcoCritical
+        and not transitionLock
+        and not (macroPhase == 'first_land_hq' or macroPhase == 'first_t2_engineer' or macroPhase == 'first_t2_power')
+        and baseEngineers >= math.max(baseFloor + 1, 4)
+        and (planner.ReclaimFirst == true or planner.OuterRetentionActive == true)
 
     local ctx = {
         bomberPanic = bomberPanic,
         constraints = constraints,
         contestFieldMode = (contestFieldMode or desiredReclaimQuota > 0) and true or false,
+        coreEcoCritical = coreEcoCritical,
         dispatchedExpand = 0,
         ecoStructureTargetObject = ecoStructureTargetObject,
         ecoStructureTask = ecoStructureTask,
@@ -945,8 +957,10 @@ function Update(aiBrain, now)
         threatenedCount = 0,
         transitionLock = transitionLock,
         fieldTaskQuota = fieldTaskQuota,
+        allowTechBuilderReclaim = allowTechBuilderReclaim,
         mexReady = mexReady,
         mexRebuildUrgent = mexRebuildUrgent,
+        starterMexFloor = starterMexFloor,
     }
     local factoryTaskCovered = (not factoryTask.Active)
         or (

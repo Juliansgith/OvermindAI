@@ -31,6 +31,8 @@ param(
     [string]$DbProjectName = 'overmind-autotune',
     [int]$DbHistoryPool = 24,
     [int]$DbDirectionPool = 16,
+    [switch]$DisableWatchReports,
+    [int]$WatchTailLines = 80,
     [switch]$DryRun
 )
 
@@ -43,6 +45,7 @@ $AutotuneScript = Join-Path $PSScriptRoot 'run_economy_autotune.ps1'
 $ReleaseChecks = Join-Path $RepoRoot 'tools\release_checks.ps1'
 $DbHelperPath = Join-Path $RepoRoot 'tools\lib\AutotuneDb.ps1'
 $DbIngestScript = Join-Path $RepoRoot 'tools\db_ingest_autotune.ps1'
+$WatchScript = Join-Path $RepoRoot 'tools\watch_autotune_nightly.ps1'
 
 if (Test-Path -LiteralPath $DbHelperPath) {
     . $DbHelperPath
@@ -102,6 +105,31 @@ function Write-OvernightReport {
     }
     $lines += ''
     Set-Content -LiteralPath $Path -Value ($lines -join [Environment]::NewLine) -Encoding UTF8
+}
+
+function Invoke-WatchReport {
+    if ($DryRun -or $DisableWatchReports -or -not (Test-Path -LiteralPath $WatchScript)) {
+        return
+    }
+
+    try {
+        $watchArgs = @(
+            '-ExecutionPolicy', 'Bypass',
+            '-File', $WatchScript,
+            '-Once',
+            '-TailLines', $WatchTailLines
+        )
+        if (-not [string]::IsNullOrWhiteSpace($DbComposeFile)) { $watchArgs += @('-ComposeFile', $DbComposeFile) }
+        if (-not [string]::IsNullOrWhiteSpace($DbEnvFile)) { $watchArgs += @('-EnvFile', $DbEnvFile) }
+        if (-not [string]::IsNullOrWhiteSpace($DbProjectName)) { $watchArgs += @('-ProjectName', $DbProjectName) }
+        $watchOutput = & powershell @watchArgs
+        $watchOutput | ForEach-Object { Write-Host $_ }
+        if ($LASTEXITCODE -ne 0) {
+            Write-Warning 'Nightly watch report failed.'
+        }
+    } catch {
+        Write-Warning ("Nightly watch report failed: {0}" -f $_.Exception.Message)
+    }
 }
 
 Ensure-Directory $RunRoot
@@ -203,6 +231,8 @@ for ($campaign = 1; $campaign -le $Campaigns; $campaign++) {
     } else {
         Write-Warning "No session summary found for campaign $campaign."
     }
+
+    Invoke-WatchReport
 }
 
 $overnightSummary = [pscustomobject]@{
@@ -253,6 +283,8 @@ if ($UseDatabase -and -not $DryRun -and (Test-Path -LiteralPath $DbIngestScript)
         Write-Warning ("Autotune DB overnight ingestion failed: {0}" -f $_)
     }
 }
+
+Invoke-WatchReport
 
 Write-Host "Overnight summary: $overnightSummaryPath"
 Write-Host "Overnight report: $(Join-Path $overnightDir 'overnight-report.md')"

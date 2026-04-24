@@ -337,28 +337,40 @@ function EnforceCommanderSafety(aiBrain, now)
         or macroObjective == 'starter_mex_claim'
         or macroObjective == 'land_factory_floor'
 
+    local enemyCommandNearACU = aiBrain:GetUnitsAroundPoint(categories.COMMAND, acuPos, 64, 'Enemy') or {}
+    local enemyCommandNearHome = aiBrain:GetUnitsAroundPoint(categories.COMMAND, homePos, 78, 'Enemy') or {}
+    local enemyCommanderDive = table.getn(enemyCommandNearACU) > 0 or table.getn(enemyCommandNearHome) > 0
+    if enemyCommanderDive then
+        local enemyCommander = enemyCommandNearACU[1] or enemyCommandNearHome[1]
+        if enemyCommander and not enemyCommander.Dead and enemyCommander.GetPosition then
+            crisisEnemyPos = enemyCommander:GetPosition() or crisisEnemyPos
+        end
+    end
+
     local approachTowardHome = approachConfirmed and approachDistance < 150 and approachThreat >= 5.0
     local acuZoneAttack = (raidLabel == 'acu' or raidLabel == 'main') and raidLandCount >= 2
     local confirmedLocalContact = enemyRaiders >= 1
         or (raid.UnderLandHarass and raidLandCount >= 1)
         or approachTowardHome
         or recentDamage
+        or enemyCommanderDive
     local startupCrisisGuard = now < 150
         and earlyTransitionPhase
         and not confirmedLocalContact
-    local preemptiveCrisis = acuZoneAttack
+    local preemptiveCrisis = enemyCommanderDive
+        or acuZoneAttack
         or (raid.UnderLandHarass and raidLandCount >= 3 and distance > 8)
         or (approachTowardHome and distance > 10)
         or ((not startupCrisisGuard) and localThreat > math.max(homeThreat + 2.6, 7.0) and enemyRaiders >= 1 and distance > 8)
         or (recentDamage and localThreat > math.max(homeThreat + 1.4, 4.0))
     if preemptiveCrisis then
         runtime.ACUCrisisEnemyPos = crisisEnemyPos
-        runtime.ACUCrisisRearPos = RetreatFromEnemy(homePos, crisisEnemyPos, recentDamage and 0.62 or 0.48)
-        runtime.ACUCrisisUntil = math.max(runtime.ACUCrisisUntil, now + (recentDamage and 42 or 28))
-        if recentDamage or localThreat > math.max(homeThreat + 4.0, 10.0) or raidLandCount >= 5 then
-            runtime.ACUCrisisEscalatedUntil = math.max(runtime.ACUCrisisEscalatedUntil, now + 34)
+        runtime.ACUCrisisRearPos = RetreatFromEnemy(homePos, crisisEnemyPos, (recentDamage or enemyCommanderDive) and 0.62 or 0.48)
+        runtime.ACUCrisisUntil = math.max(runtime.ACUCrisisUntil, now + ((recentDamage or enemyCommanderDive) and 42 or 28))
+        if enemyCommanderDive or recentDamage or localThreat > math.max(homeThreat + 4.0, 10.0) or raidLandCount >= 5 then
+            runtime.ACUCrisisEscalatedUntil = math.max(runtime.ACUCrisisEscalatedUntil, now + (enemyCommanderDive and 44 or 34))
         end
-        runtime.ACUStrictLeashUntil = math.max(runtime.ACUStrictLeashUntil or -999, now + (recentDamage and 80 or 48))
+        runtime.ACUStrictLeashUntil = math.max(runtime.ACUStrictLeashUntil or -999, now + ((recentDamage or enemyCommanderDive) and 80 or 48))
         runtime.ACUSafetyLockUntil = math.max(runtime.ACUSafetyLockUntil or -999, now + 10)
     elseif runtime.ACUCrisisUntil <= now
         and healthRatio >= 0.96
