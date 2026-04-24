@@ -52,6 +52,16 @@ local function IsSafeExpansionTarget(aiBrain, runtime, pos, mainPos, enemyPos, m
     if localThreat > threatCap then
         return false
     end
+    local policy = runtime and runtime.EcoPolicy or {}
+    if policy.ContainmentCrisis == true then
+        local nearbySupport = aiBrain:GetNumUnitsAroundPoint(LandCombatCategory, pos, 48, 'Ally') or 0
+        if distMain > 175 and nearbySupport < 2 then
+            return false
+        end
+        if localThreat > 0.35 and nearbySupport < 3 then
+            return false
+        end
+    end
     local expansionRisk = OvermindMemory.GetExpansionRisk(aiBrain, pos, 56)
     local expansionRiskCap = (lossPressure >= 0.75 or mapControl < 0.36) and 1.55 or 3.2
     if expansionRisk > expansionRiskCap then

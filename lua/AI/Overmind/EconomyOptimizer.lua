@@ -279,6 +279,7 @@ function UpdatePolicy(aiBrain, now)
     policy.ReclaimRateShort = velocity.ReclaimRateShort or 0
     policy.EcoStagnationTime = velocity.EcoStagnationTime or 0
     policy.ReclaimStagnationTime = velocity.ReclaimStagnationTime or 0
+    policy.ContainmentCrisis = false
     policy.OuterMexShare = structure.OuterMexShare or 0
     policy.StartZoneMexShare = structure.StartZoneMexShare or 0
     policy.OuterHoldShare = structure.OuterHoldShare or 0
@@ -413,6 +414,16 @@ function UpdatePolicy(aiBrain, now)
     local reclaimWorkerReady = (macroCounts.Engineers or 0) >= 8
     local reclaimConversionDebt = (velocity.ReclaimStagnationTime or 0) >= 45
         or ((velocity.ReclaimRateShort or 0) <= 0.15 and reclaimFieldScore >= 90)
+    local containmentCrisis = now >= 360
+        and phase ~= 'bootstrap'
+        and mapControl < 0.44
+        and (macroCounts.Mex or 0) <= 6
+        and (
+            enemyPressure
+            or (opp.RelativePower or 1) < 0.55
+            or (opp.RelativeLand or 1) < 0.55
+            or (pressure.HomePressure or 0) >= 6.0
+        )
     policy.EngineerReclaimQuota = 0
     if reclaimQuotaAllowed
         and reclaimQuotaMexReady
@@ -460,6 +471,20 @@ function UpdatePolicy(aiBrain, now)
     policy.EngineerExpansionQuota = (contestMapMode or focusOnT1Spam or lowMexExpansionNeed) and 2 or 1
     if lowMexExpansionNeed and (macroCounts.Mex or 0) < 8 then
         policy.EngineerExpansionQuota = 3
+    end
+    if containmentCrisis then
+        policy.ContainmentCrisis = true
+        if (macroCounts.Mex or 0) <= 3 then
+            policy.EngineerExpansionQuota = math.min(policy.EngineerExpansionQuota, 1)
+        else
+            policy.EngineerExpansionQuota = 0
+        end
+        if (macroCounts.Engineers or 0) >= 4 and pressure.SurvivalCrisis ~= true then
+            policy.EngineerReclaimQuota = math.max(policy.EngineerReclaimQuota, 1)
+        end
+        if (macroCounts.Engineers or 0) >= 7 and (velocity.ReclaimStagnationTime or 0) >= 45 then
+            policy.EngineerReclaimQuota = math.max(policy.EngineerReclaimQuota, 2)
+        end
     end
     policy.EngineerReclaimQuota = policy.EngineerReclaimQuota + math.floor(tune.ReclaimQuotaBias or 0)
     policy.EngineerExpansionQuota = policy.EngineerExpansionQuota + math.floor(tune.ExpansionQuotaBias or 0)
@@ -751,6 +776,14 @@ function UpdatePolicy(aiBrain, now)
         policy.EngineerReserveMin = math.max(policy.EngineerReserveMin, 5)
         policy.BaseEngineerFloor = math.max(policy.BaseEngineerFloor, 4)
         policy.EngineerFactoryRatio = math.max(policy.EngineerFactoryRatio, 1.02)
+    end
+    if containmentCrisis then
+        policy.SafeExpandDistance = math.min(policy.SafeExpandDistance, (macroCounts.Mex or 0) <= 3 and 360 or 300)
+        policy.SafeExpandThreatCap = math.min(policy.SafeExpandThreatCap, 0.55)
+        policy.SafeExpandEnemyBuffer = math.max(policy.SafeExpandEnemyBuffer, 120)
+        policy.SafeExpandHotspotCap = math.min(policy.SafeExpandHotspotCap, 4.5)
+        policy.EngineerReserveMin = math.max(policy.EngineerReserveMin, 5)
+        policy.BaseEngineerFloor = math.max(policy.BaseEngineerFloor, 4)
     end
 
     policy.ProductionTempoBias = policy.ProductionTempoBias + (tune.FactoryTempoBias or 0)
